@@ -1,0 +1,51 @@
+name: c2_liq_meanrev_wide_atr_v1
+hypothesis:
+  text: Coinone 5m bollinger_z_revert(96, 2.5) with/without trend_regime_1h(24), held
+    120-240 min with wide ATR exits (SL 6, TP 6 ATR) that approximate the event study's
+    time exit, passes G0-G5 on Dev.
+  rationale: 'int-000003: camp-000005 TP 3 / SL 5 ATR may truncate the 120-240 min
+    reversion drift measured by screen camp-000004; this tests a time-dominated exit
+    on the strongest screened configs (z 2.5). New campaign in the same family (2
+    signal configs x 2 exit variants = 4 specs). [derived-from drv-000002 ← fact-000005;
+    family liq_meanrev]'
+  success_criteria: At least one spec passes G0-G6 and the Dev robustness suite; refuted
+    if Dev Sharpe < 1 and G4 rolling fraction < 0.6.
+timeframe: 5m
+data:
+  exchange: coinone
+  symbol: BTC-KRW
+  timeframe: 1m
+  aux: []
+from_screen: camp-000004
+power:
+  target_sharpe: 2.0
+entry:
+  block: bollinger_z_revert
+  grid:
+    window:
+    - 96
+    z:
+    - 2.5
+filters:
+- []
+- - block: trend_regime_1h
+    grid:
+      span:
+      - 24
+exits:
+  mode: atr
+  sl_atr:
+  - 6.0
+  tp_atr:
+  - 6.0
+  max_hold_min:
+  - 120
+  - 240
+  atr_bars: 14
+costs:
+  primary: coinone_conservative
+  grade: upbit_conservative
+  stress: coinone_stress
+  grade_stress: upbit_stress
+budget: 4
+family: liq_meanrev

@@ -3,7 +3,7 @@
 > `btc_quant.research.lessons.render_markdown()` 생성물. **직접 편집 금지** (원본: `research/lessons/*.jsonl`).
 > 사실(Facts)은 파이프라인 결과에서 자동 추출되어 불변이다. 해석(Interpretations)은 AI 작성이며
 > 후속 캠페인으로 verified/refuted 되기 전까지 **unverified** 이다. Val/잠금은 결과 코드만.
-> 생성: 2026-11-09T16:20:37+00:00 · 사실 7 · 해석 4 · 사후분석 5 · 파생 3
+> 생성: 2026-11-09T22:51:38+00:00 · 사실 8 · 해석 5 · 사후분석 5 · 파생 3
 
 ## 실패 유형 (자동 분류)
 
@@ -26,7 +26,7 @@
 
 | family | 캠페인 | 누적 시도 | 결과 | 주 실패 유형 |
 |---|---|---|---|---|
-| `liq_meanrev` | 2 | 26 | passed 1, failed 1 | `PARAM_SPIKE`×1 |
+| `liq_meanrev` | 3 | 30 | passed 1, failed 2 | `PARAM_SPIKE`×1, `UNSTABLE`×1 |
 | `vol_breakout` | 2 | 17 | passed 1, failed 1 | `PARAM_SPIKE`×1 |
 | `xvenue_upbit_lead` | 3 | 16 | failed 2, passed 1 | `COST_EATEN`×1, `LOW_SAMPLE`×1 |
 
@@ -122,9 +122,10 @@
 
 **해석 (AI, 검증 상태 표시)**
 
-- [UNVERIFIED] int-000003 (신뢰도 low): Mean reversion after 96-bar Bollinger lows carries information (both cluster representatives beat the trade-count-matched null, G2 p 0.001) but the converted strategy is weak and time-concentrated: Dev Sharpe 0.5-0.9, 6-month rolling positive fraction 0.43-0.55, recent-12m Sharpe 1.6-1.7, heavy tails (kurtosis 20-43). The ATR exits (TP 3 / SL 5 ATR) likely truncate the 120-240 min drift the event study measured, and the cluster picked z 3.0 rather than the screen's strongest config (z 2.5 + trend, net 12.6 bp at 120 min).
+- [REFUTED] int-000003 (신뢰도 low): Mean reversion after 96-bar Bollinger lows carries information (both cluster representatives beat the trade-count-matched null, G2 p 0.001) but the converted strategy is weak and time-concentrated: Dev Sharpe 0.5-0.9, 6-month rolling positive fraction 0.43-0.55, recent-12m Sharpe 1.6-1.7, heavy tails (kurtosis 20-43). The ATR exits (TP 3 / SL 5 ATR) likely truncate the 120-240 min drift the event study measured, and the cluster picked z 3.0 rather than the screen's strongest config (z 2.5 + trend, net 12.6 bp at 120 min).
   - 근거: fact-000005 candidates: sharpe_w 0.886 / 0.485, G4 rolling_frac_positive 0.547 / 0.434, G3 neighbor_median 0.708 / 0.165, G5 dsr 0.764 / 0.61, pbo 0.448; fact-000004 (screen camp-000004): bollinger_z_revert(96,2.5)&trend_regime_1h(24) net 12.6 bp at 120 min, n=678; unfiltered (96,2.5) info horizon rising to 240
   - 검증 방법: Derived campaign in family liq_meanrev: entry fixed to the screened window-96 configs, time-dominated exits (SL 6 ATR, TP 6 ATR, hold 120/240); refuted if Dev Sharpe stays < 1 and G4 rolling fraction < 0.6.
+  - refuted by camp-000008 (2026-11-09T22:51:33+00:00): camp-000008 tested the exit-truncation claim directly: same entries (bollinger 96/2.5 with and without trend_regime_1h 24), SL 6 / TP 6 ATR, hold 120/240. Trend-filtered: sharpe_w 0.56-0.57, about the same as the best camp-000005 z2.5+trend spec under SL5/TP3 (0.61). Plain Sharpe was 1.055 vs 1.054, so widening the exits did not help. Unfiltered: sharpe_w rose from -0.32..0.13 to 0.55-0.59 but stayed below 1, with rolling fraction 0.45-0.57 (below 0.6). The pre-stated refutation rule (Sharpe < 1 AND rolling < 0.6) is fully met for the unfiltered specs. The trend specs have Sharpe_w < 1 but rolling 0.64. Exits are not what binds; the strategy stays below the DSR bar (best DSR 0.87, n_trials 15). The first half of int-000003 (information real but weak and time-concentrated) is still consistent with the data (G2 p ≤ 0.007).
 
 ### fact-000006 · campaign `camp-000006` · family `vol_breakout`
 
@@ -163,6 +164,27 @@
 - [UNVERIFIED] int-000002 (신뢰도 medium): The 5m Upbit-impulse (40 bp) signal on Coinone is a fading, mostly early-Dev phenomenon: the strategy had 572 Dev trades but only 33 in the last 12 months (G1 recent-sample fail) and 6-month rolling positive fraction 0.47, consistent with the Coinone-Upbit gap tails shrinking from 2021 to 2025. The mechanism (Coinone lag) may persist but large lags are now too rare to trade.
   - 근거: fact-000007 candidates[0].gates_dev.G1 recent_n_trades 33, G4 rolling_frac_positive 0.472, G2 p 0.002 (signal beats trade-count-matched null); research/reports/data_audit_20261109.md (lockbox none, Val none): share of minutes with |Coinone-Upbit gap|>20bp 29% (2021) -> 0.4% (2025)
   - 검증 방법: Event study of the same config split by year (side calculation, no ledger) followed, if 2024-25 still shows positive net excess, by a 5m screen with thr_bp 20 restricted by a new period filter; refuted if 2024-25 net excess is >= 2021-22 net excess.
+
+### fact-000008 · campaign `camp-000008` · family `liq_meanrev`
+
+**사실 (자동, 불변)**
+
+- 가설 hyp-000008: Coinone 5m bollinger_z_revert(96, 2.5) with/without trend_regime_1h(24), held 120-240 min with wide ATR exits (SL 6, TP 6 ATR) that approximate the event study's time exit, passes G0-G5 on Dev.
+- 결과: **failed** · 주 실패 유형: `UNSTABLE` · 분포: `UNSTABLE`×1, `SELECTION_BIAS`×1
+- 파생: drv-000002 (계열 점검: ok)
+- 깔때기(전체 4 스펙): G1 4 · SR_w>0 4 · G4 2 | 상위 5: G0 2 · G1 2 · G2 2 · G3 2 · G4 1 · G5 0 · Dev 생존 0
+- 선택편향 입력: n_campaign_specs=4, k_eff_clusters=2, n_family_trials=30, n_global_trials=63, n_trials_dsr=15.000, pbo=0.322, cluster_threshold=0.500
+- Val(G6): 평가 0 · 통과 0 (결과 코드만) · 잠금: not_accessed
+  - #1 `c2_liq_meanrev_wide_atr_v1_728b01519b` SR_w=0.594 trades=2652 first_failed=G4 → `UNSTABLE` ['UNSTABLE', 'SELECTION_BIAS'] · val=not_run
+  - #2 `c2_liq_meanrev_wide_atr_v1_7cf92d03f9` SR_w=0.571 trades=653 first_failed=G5 → `SELECTION_BIAS` ['SELECTION_BIAS'] · val=not_run
+- 범위: coinone BTC-KRW 1m · dev 2021-01-01T00:00:00+00:00~2025-11-01T00:00:00+00:00 · 블록 bollinger_z_revert / [[], ['trend_regime_1h']] · 재검토 기한 2027-05-08
+- 재검토 조건: Dev data period or segment boundaries change (new data, lockbox rolled into Dev/Val); venue or cost model changes (e.g. Coinone 0% fee promotion ends, Upbit fee changes); timeframe / decision interval changes (5m ↔ 1m); a block used here is re-implemented (new block version) or an engine bug is fixed; review date 2027-05-08 passes
+
+**해석 (AI, 검증 상태 표시)**
+
+- [UNVERIFIED] int-000005 (신뢰도 medium): The trend-filtered 96-bar Bollinger reversion (z 2.5 + trend_regime_1h 24) does not look like steady liquidity-provision income. It behaves like bull-regime dip buying. Its Dev PnL is concentrated in 2021 and in up-trend 30d regimes, sideways regimes lose money, and the alpha vs BTC is not significant. Because the edge lives in a few regime-specific periods, Dev Sharpe stays near 1 (weighted about 0.57) whatever the exits, and DSR stays below 0.95.
+  - 근거: fact-000008 candidates: trend spec 7cf92d03f9 sharpe 1.055 / sharpe_w 0.571, G4 rolling 0.64, G5 dsr 0.872 (n_trials 15), skew 2.41, kurtosis 44.5; unfiltered 728b01519b sharpe_w 0.594, rolling 0.45; ad-hoc Dev robustness_for_spec(c2_liq_meanrev_wide_atr_v1_7cf92d03f9), no ledger trial: regime FAIL, trend 'up' days carry 0.78 of PnL (Sharpe 2.44), 'sideways' days Sharpe -0.62; alpha FAIL (alpha_t 1.93, beta_t 5.3); leave-year-out: 2021 Sharpe 2.60, rest 0.40, 2025 0.03; top 1% of trades = 0.47 of PnL; latency / cost x1.5 / cross-venue (Upbit ratio 0.93) passed; camp-000005 runs (same entries, SL 3-5 / TP 3 ATR): z2.5+trend sharpe_w 0.18-0.61, so exits change little
+  - 검증 방법: Side calculation (signal_study.study_signal, no ledger) of bollinger_z_revert(96,2.5)&trend_regime_1h(24), split by calendar year on Dev. Refuted if 2022-2025 each show positive excess at 120 min with z > 2. Alternatively, a pre-registered screen in family liq_meanrev that pairs the entry with a vol/trend-strength filter, testing whether the edge is conditional on regime rather than on the dislocation.
 
 ## 파생 가설 (계열 상속)
 
