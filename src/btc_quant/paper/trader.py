@@ -255,7 +255,8 @@ class PaperTrader:
         # 5) 다음 봉 시가 근처 호가 = 지금 호가
         self.book_open = book
         for e in self.risk.drain_events():
-            rec = {"type": "risk_event", "ts": t_close, **e}
+            rec = {**{k: v for k, v in e.items() if k != "type"}, "type": "risk_event",
+                   "event": e.get("type"), "ts": t_close}
             self._log("risk", rec)
             events.append(rec)
         if self.persist:
