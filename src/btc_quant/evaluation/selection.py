@@ -209,7 +209,7 @@ def pbo_cscv(M, n_splits: int = 16, max_combinations: int | None = None,
 
     tot_s, tot_q, tot_n = bsum.sum(0), bsq.sum(0), bn.sum()
     out_w = []
-    chunk = max(1, int(2e7 // max(N, 1)))
+    chunk = max(1, int(2e6 // max(N, 1)))  # 메모리 ~수십 MB 단위로 분할
     for i in range(0, len(mask), chunk):
         mk = mask[i:i + chunk]
         is_s, is_q, is_n = mk @ bsum, mk @ bsq, mk @ bn

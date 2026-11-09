@@ -202,7 +202,10 @@ def run_reference_signals(m1: pd.DataFrame, entry_ok: pd.Series, exit_sig: pd.Se
             break
     if not eng.done and len(m1):
         eng.finish(m1.index[-1], float(m1["close"].iloc[-1]))
-    trades = eng.trades_frame()
+    trades = eng.trades_frame().astype(
+        {"entry_time": m1.index.dtype, "exit_time": m1.index.dtype, "entry_price": float,
+         "exit_price": float, "exit_reason": object, "gross_ret": float, "net_ret": float,
+         "hold_min": "int64"})
     return BacktestResult(spec_id, logic_hash, cost, s, e, trades, daily_returns(trades, s, e))
 
 
