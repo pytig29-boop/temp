@@ -10,15 +10,22 @@
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable, NamedTuple
+from typing import NamedTuple
 
 import numpy as np
 import pandas as pd
 from numba import njit
 
-from btc_quant.backtest.signals import (build_signals, day_index, filled_mask, minutes,
-                                        period_bounds, to_decisions)
+from btc_quant.backtest.signals import (
+    build_signals,
+    day_index,
+    filled_mask,
+    minutes,
+    period_bounds,
+    to_decisions,
+)
 from btc_quant.backtest.types import TRADE_COLUMNS, BacktestResult, CostModel
 from btc_quant.strategy.blocks.base import REGISTRY, Context, Registry
 from btc_quant.strategy.spec import StrategySpec

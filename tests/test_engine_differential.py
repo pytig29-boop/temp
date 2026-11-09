@@ -140,7 +140,7 @@ def test_low_level_simulate_and_sweep_match_run_fast():
     tr = simulate(m1.open, m1.high, m1.low, m1.close, minutes(m1.index), entry_dec, p.exit_dec,
                   *combos[1], cost.side_cost, cost.fee_rate, cost.tick, si, ei)
     np.testing.assert_array_equal(tr.net_ret, many[1].net_ret)
-    days, mat = fast.daily_returns_matrix(p, many, start, end)
+    _days, mat = fast.daily_returns_matrix(p, many, start, end)
     np.testing.assert_allclose(mat[1], rf.daily_returns.to_numpy(), rtol=1e-12, atol=1e-15)
     # 각 조합은 기준 엔진과도 일치
     from btc_quant.backtest.reference import run_reference_signals

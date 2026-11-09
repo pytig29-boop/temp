@@ -133,9 +133,7 @@ class ReferenceEngine:
             return False
         if self.start is not None and ts < self.start:
             return False
-        if self.cooldown_until is not None and ts < self.cooldown_until:
-            return False
-        return True
+        return self.cooldown_until is None or ts >= self.cooldown_until
 
     def _open(self, ts: pd.Timestamp, o: float) -> FillEvent:
         ref = o
