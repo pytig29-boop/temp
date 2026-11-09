@@ -4,14 +4,13 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import pytest
+from test_research_pipeline import _spy_reads
+from test_research_synth import make_root
 
 from btc_quant.registry.splits import overlaps_lockbox
 from btc_quant.research import forward as F
 from btc_quant.research.campaign import ResearchEnv
 from btc_quant.strategy.spec import BlockRef, ExitSpec, StrategySpec
-
-from test_research_pipeline import _spy_reads
-from test_research_synth import make_root
 
 FWD_START = pd.Timestamp("2024-04-01", tz="UTC")
 NOW = pd.Timestamp("2024-05-01 05:00", tz="UTC")

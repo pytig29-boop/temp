@@ -7,15 +7,14 @@ from types import SimpleNamespace
 import numpy as np
 import pandas as pd
 import pytest
+from test_research_pipeline import _spy_reads
+from test_research_synth import make_root, template_dict
 
 from btc_quant.evaluation import gates as G
 from btc_quant.registry.ledger import Ledger
 from btc_quant.registry.splits import overlaps_lockbox
 from btc_quant.research.campaign import CampaignTemplate, ResearchEnv, run_campaign
 from btc_quant.research.pipeline import Pipeline, run_pipeline, val_holm_decision
-
-from test_research_pipeline import _spy_reads
-from test_research_synth import make_root, template_dict
 
 VB = {"alpha": 0.10, "holm_mode": "cumulative", "cap": 4, "n_boot": 500, "seed": 0}
 
@@ -87,7 +86,7 @@ def test_cluster_best_selection_picks_distinct_clusters():
     assert [x["cluster_size"] for x in info["selected"]] == [5, 3, 2]
     assert len({x["cluster"] for x in info["selected"]}) == 3
 
-    top_all, info_all = _fake_pipeline(R, sharpe, 10, "cluster_best").select_candidates()
+    top_all, _ = _fake_pipeline(R, sharpe, 10, "cluster_best").select_candidates()
     assert top_all == ["A0", "B0", "C0", "Z"]                 # 군집 수보다 많이 요청해도 군집당 1개
 
     old, _ = _fake_pipeline(R, sharpe, 3, "top_sharpe").select_candidates()
@@ -145,7 +144,7 @@ def test_pipeline_val_budget_reuse_and_cap(planted_env):
     p3 = Pipeline(cr3, env, gate_cfg=cfg, register=False)
     m1v, vs, ve = p3.load_val()
     new_lh = next(lh for lh in cr3.specs if env.ledger.val_prior(vb["val_id"], lh) is None)
-    g, res, met, mc = p3.g6(cr3.specs[new_lh], m1v, vs, ve, cr3.template.costs["primary"],
+    g, res, _met, _mc = p3.g6(cr3.specs[new_lh], m1v, vs, ve, cr3.template.costs["primary"],
                             cr3.template.costs["stress"])
     assert not g["passed"] and g["val_budget"]["exhausted"] and res is None
     assert len(env.ledger.val_history(vb["val_id"])) == 1

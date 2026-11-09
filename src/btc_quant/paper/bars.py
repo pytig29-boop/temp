@@ -9,8 +9,8 @@
   실제 봉은 `quality.clean_wicks` 를 직전 15개 실제 봉과 함께 적용(그 함수의 창 길이 = 15 → 전체
   이력에 적용한 결과와 동일), 빈 분은 직전 종가 평탄 봉(`quality.regularize` 와 동일).
 - `required_lookback_bars(spec)`: 블록 파라미터로부터 "후행 창 평가 = 전체 이력 평가"가 성립하는 데
-  필요한 5분봉 수. 유한 창(rolling/shift) 블록은 정확히, EMA 계열은 초기값 영향이 EMA_TOL 이하가
-  되는 길이로 계산한다.
+  필요한 결정 주기 봉 수(스펙 timeframe: 5분/1분). 유한 창(rolling/shift) 블록은 정확히, EMA 계열은 초기값
+  영향이 EMA_TOL 이하가 되는 길이로 계산한다. 블록이 `lookback_bars` 를 제공하면 그것을 쓴다.
 """
 from __future__ import annotations
 
@@ -53,13 +53,21 @@ def _span(span: float) -> int:
     return _ema_bars(2.0 / (float(span) + 1.0))
 
 
-def _block_lookback(ref: BlockRef, registry: Registry) -> int | None:
-    """블록 하나에 필요한 5분봉 수 (모르는 블록이면 None)."""
+def _bars_per_day(tf_min: int) -> int:
+    return 1440 // int(tf_min)
+
+
+def _block_lookback(ref: BlockRef, registry: Registry, tf_min: int = 5) -> int | None:
+    """블록 하나에 필요한 결정 주기 봉 수 (모르는 블록이면 None).
+    블록이 `lookback_bars(params)` 를 제공하면 그 값을 쓴다(실험 블록 등)."""
     d = registry.get(ref.block)
-    p = {k: v for k, v in _defaults(d.fn).items()}
+    p = dict(_defaults(d.fn))
     p.update(ref.params)
+    if d.lookback_bars is not None:
+        return int(d.lookback_bars(p)) + 1
+    day = _bars_per_day(tf_min)
     n = ref.block
-    if n == "random_entry" or n == "session_kst":
+    if n in ("random_entry", "session_kst"):
         return 1
     if n == "ema_slope":
         return _span(p["span"]) + int(p["span"]) + 2
@@ -72,18 +80,18 @@ def _block_lookback(ref: BlockRef, registry: Registry) -> int | None:
     if n == "atr_channel_breakout":
         return _span(p["span"]) + int(p["span"]) + 2
     if n == "range_compression_break":
-        return int(p["lookback"]) + BARS_PER_DAY_5M + 2
+        return int(p["lookback"]) + day + 2
     if n == "bollinger_z_revert":
         return int(p["window"]) + 2
     if n == "rsi_oversold_bounce":
         return _ema_bars(1.0 / float(p["period"])) + 3 * int(p["period"]) + 2
     if n == "vol_regime":
-        return int(p["window"]) + 7 * BARS_PER_DAY_5M + 2
+        return int(p["window"]) + 7 * day + 2
     if n == "volume_z":
         return int(p["window"]) + 2
     if n == "trend_regime_1h":
         hours = _span(p["span"]) + int(p["span"]) + 3
-        return hours * 12
+        return hours * (60 // int(tf_min))
     return None
 
 
@@ -100,10 +108,25 @@ def spec_blocks(spec: StrategySpec) -> list[BlockRef]:
     return refs
 
 
-def check_live_ready(spec: StrategySpec, registry: Registry = REGISTRY) -> None:
+LIVE_AUX = ("upbit",)    # 실시간으로 만들 수 있는 보조 데이터 (업비트 체결 스트림)
+
+
+def spec_aux(spec: StrategySpec, registry: Registry = REGISTRY) -> tuple[str, ...]:
+    """스펙이 요구하는 ctx.aux 키."""
+    keys: list[str] = []
+    for ref in spec_blocks(spec):
+        for k in registry.get(ref.block).requires:
+            if k not in keys:
+                keys.append(k)
+    return tuple(keys)
+
+
+def check_live_ready(spec: StrategySpec, registry: Registry = REGISTRY,
+                     available_aux: tuple[str, ...] = LIVE_AUX) -> None:
     for ref in spec_blocks(spec):
         d = registry.get(ref.block)
-        if not d.live_ready or d.requires:
+        missing = [k for k in d.requires if k not in available_aux]
+        if not d.live_ready or missing:
             raise ValueError(f"{spec.id}: block {ref.block} is not live-ready "
                              f"(requires {list(d.requires)}) — cannot paper trade")
 
@@ -111,25 +134,29 @@ def check_live_ready(spec: StrategySpec, registry: Registry = REGISTRY) -> None:
 def required_lookback_bars(spec: StrategySpec, registry: Registry = REGISTRY,
                            default_days: float = DEFAULT_WARMUP_DAYS,
                            max_days: float = MAX_WARMUP_DAYS) -> int:
-    """후행 창 평가에 필요한 5분봉 수 = max(기본 일수, 블록별 요구치), max_days 로 상한."""
-    need = int(default_days * BARS_PER_DAY_5M)
+    """후행 창 평가에 필요한 결정 주기 봉 수 = max(기본 일수, 블록별 요구치, ATR 창), max_days 로 상한."""
+    tf = spec.tf_min
+    day = _bars_per_day(tf)
+    need = int(default_days * day)
     for ref in spec_blocks(spec):
-        n = _block_lookback(ref, registry)
+        n = _block_lookback(ref, registry, tf)
         if n is None:
             log.warning("unknown block %s: lookback falls back to %.1f days", ref.block, default_days)
             continue
         need = max(need, n)
-    cap = int(max_days * BARS_PER_DAY_5M)
+    if spec.exit.is_atr:
+        need = max(need, int(spec.exit.atr_bars) + 2)
+    cap = int(max_days * day)
     if need > cap:
-        log.warning("%s needs %d 5m bars (%.1f days) > cap %.1f days; EMA-type signals become "
-                    "approximate", spec.id, need, need / BARS_PER_DAY_5M, max_days)
+        log.warning("%s needs %d bars (%.1f days) > cap %.1f days; EMA-type signals become "
+                    "approximate", spec.id, need, need / day, max_days)
         need = cap
     return need
 
 
-def window_minutes(lookback_5m: int) -> int:
-    """5분봉 lookback → 1분봉 창 길이(시각 정렬 여유 1시간 포함)."""
-    return int(lookback_5m) * 5 + 60
+def window_minutes(lookback_bars: int, tf_min: int = 5) -> int:
+    """결정 주기 봉 lookback → 1분봉 창 길이(시각 정렬 여유 1시간 포함)."""
+    return int(lookback_bars) * int(tf_min) + 60
 
 
 # --------------------------------------------------------------------------------------------
@@ -371,11 +398,21 @@ class M1History:
 # --------------------------------------------------------------------------------------------
 
 def fetch_warmup(end: pd.Timestamp, minutes: int, market: str = "KRW-BTC",
-                 fetch: Callable | None = None) -> pd.DataFrame:
-    """[end − minutes, end) 의 코인원 1분 캔들 원본 (실제 봉만). end 는 분 경계(미포함)."""
+                 fetch: Callable | None = None, exchange: str = "coinone") -> pd.DataFrame:
+    """[end − minutes, end) 의 1분 캔들 원본 (실제 봉만). end 는 분 경계(미포함).
+    fetch(market, unit, start, end, progress=False) 를 주면 그것을 쓴다(테스트용)."""
     if fetch is None:
-        from btc_quant.data import coinone
-        fetch = coinone.fetch_candles
+        if exchange == "coinone":
+            from btc_quant.data import coinone
+            fetch = coinone.fetch_candles
+        elif exchange == "upbit":
+            from btc_quant.data import upbit
+
+            def fetch(market, unit, start, end, progress=False):
+                return upbit.fetch_candles("upbit", market, unit, start.to_pydatetime(),
+                                           end.to_pydatetime(), progress=progress)
+        else:
+            raise ValueError(f"no REST candle source for {exchange}")
     end = pd.Timestamp(end).floor("min")
     start = end - pd.Timedelta(minutes=int(minutes))
     df = fetch(market, 1, start, end, progress=False)

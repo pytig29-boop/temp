@@ -1,10 +1,21 @@
 ---
 name: block-authoring
-description: Propose a new strategy block (entry / filter / exit_signal) following the block Registry contract, with causality tests and a docs/BLOCKS.md entry. The result is a proposal that a human must review and merge. Use only when existing blocks cannot express a pre-registered hypothesis.
+description: Write a new strategy block (entry / filter / exit_signal) as an EXPERIMENTAL block (PLAN D11) following the block Registry contract — automatic acceptance check, causality tests, docs/BLOCKS.md entry, rationale tied to a mechanism. Experimental blocks are usable in campaigns once the acceptance check passes; candidates using them need human review before any lockbox request, and promotion to official is a human code change. Use only when existing blocks cannot express a pre-registered hypothesis.
 argument-hint: "<block_name> <kind>"
 ---
 
-# Block authoring (PLAN §3.3: AI proposes, human merges)
+# Block authoring (PLAN §3.3 + D11: experimental blocks)
+
+> v4 / D11 update: AI-written blocks are registered as **experimental** in
+> `src/btc_quant/strategy/blocks/experimental/*.py` with `REGISTRY.register_experimental(kind, grid, description,
+> author=…, created=…, rationale=…)`. If `btc_quant.strategy.blocks.acceptance.acceptance_check(name)` passes
+> (metadata, signature, purity, future-perturbation/truncation causality at 5m and 1m, non-degenerate, docs row
+> marked `experimental`), the block may be used in campaigns immediately. A candidate that uses an experimental
+> block (`spec_uses_experimental`) needs **human review before a lockbox request**; promotion to official is a
+> human code change (`Registry.promote` explains the steps). The `rationale` must name the mechanism and
+> counterparty (`research/knowledge/mechanisms.md`) and the lockbox/Val exposure of the evidence that motivated
+> it. Tests: `uv run pytest -q tests/test_blocks.py tests/test_blocks_experimental.py`. The older text below
+> ("proposal … human merge before use") applies to *official* blocks.
 
 A new block is a **proposal**. It may not be used in a campaign whose results count until a human has
 reviewed and merged it. Writing under `src/btc_quant/strategy/blocks/` and `tests/` is allowed in

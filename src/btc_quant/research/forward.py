@@ -32,9 +32,9 @@ from __future__ import annotations
 import argparse
 import math
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
 import duckdb
 import pandas as pd
@@ -45,8 +45,15 @@ from btc_quant.evaluation import gates as G
 from btc_quant.evaluation import metrics as M
 from btc_quant.registry.strategies import key_of
 
-from .campaign import (DEFAULT_COSTS, HALF_LIFE_DAYS, CampaignError, ResearchEnv, get_cost, git_commit,
-                       prepare_m1)
+from .campaign import (
+    DEFAULT_COSTS,
+    HALF_LIFE_DAYS,
+    CampaignError,
+    ResearchEnv,
+    get_cost,
+    git_commit,
+    prepare_m1,
+)
 
 DEFAULT_STATES = ("validated", "challenger")
 DEFAULT_EXCHANGES = ("coinone", "upbit")
@@ -81,7 +88,7 @@ def _stored_last(env: ResearchEnv, exchange: str, start, end) -> tuple[pd.Timest
         return None, 0
     if df.empty:
         return None, 0
-    return pd.Timestamp(df.index.max()), int(len(df))
+    return pd.Timestamp(df.index.max()), len(df)
 
 
 def fetch_forward(env: ResearchEnv, exchanges, fwd_start: pd.Timestamp, window_end: pd.Timestamp,
@@ -112,7 +119,7 @@ def fetch_forward(env: ResearchEnv, exchanges, fwd_start: pd.Timestamp, window_e
         df = df[(df.index >= max(start, fwd_start)) & (df.index < window_end)]   # 이중 안전장치
         if not df.empty:
             write_ohlcv(df, ex, SYMBOL, TIMEFRAME, root=env.data.data_root)
-        out[ex] = {"fetched": int(len(df)), "start": start.isoformat(), "end": window_end.isoformat()}
+        out[ex] = {"fetched": len(df), "start": start.isoformat(), "end": window_end.isoformat()}
         log(f"fetch {ex}: {len(df)} rows [{start}, {window_end})")
     return out
 
@@ -190,7 +197,7 @@ def evaluate(env: ResearchEnv, fs: ForwardStrategy, fwd_start: pd.Timestamp, win
                        "warmup_days": warmup_days}}
     if window_end <= eval_start:
         return {**base, "status": "warming_up",
-                "days_until_eval": int(math.ceil((eval_start - window_end) / pd.Timedelta(days=1)))}
+                "days_until_eval": math.ceil((eval_start - window_end) / pd.Timedelta(days=1))}
     try:
         raw = env.data.read_range(fwd_start, window_end, fs.exchange, SYMBOL, TIMEFRAME)
         m1 = prepare_m1(raw)
@@ -203,7 +210,7 @@ def evaluate(env: ResearchEnv, fs: ForwardStrategy, fwd_start: pd.Timestamp, win
     out = {**base, "status": "ok", "n_days": met["n_days"], "n_trades": met["n_trades"],
            "net_return": met["total_return"], "sharpe": met["sharpe"], "mean_daily": met["mean_daily"],
            "max_dd": met["max_dd"], "expectancy": met["expectancy"], "win_rate": met["win_rate"],
-           "data_rows": int(len(raw)), "data_last_ts": pd.Timestamp(raw.index.max()).isoformat()}
+           "data_rows": len(raw), "data_last_ts": pd.Timestamp(raw.index.max()).isoformat()}
     exp = expectation_band(env, fs.logic_hash, fs.cost, met["n_days"], band)
     out["expected"] = exp
     out["within_band"] = (None if exp is None

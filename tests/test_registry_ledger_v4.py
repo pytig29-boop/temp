@@ -2,16 +2,20 @@
 import json
 
 import pytest
-
-from btc_quant.registry.ledger import BudgetExceededError, Ledger, LedgerError, ValBudgetExhaustedError
-
 from test_registry_ledger import setup_campaign, spec
+
+from btc_quant.registry.ledger import (
+    BudgetExceededError,
+    Ledger,
+    LedgerError,
+    ValBudgetExhaustedError,
+)
 
 
 def test_record_runs_matches_record_run_format(tmp_path):
     led = Ledger(tmp_path)
     _, c = setup_campaign(led, budget=3)
-    rid = led.record_run(c, spec(24), "upbit_base", ("2021-01-01", "2025-11-01"), "snap", "abc", {"a": 1.0})
+    led.record_run(c, spec(24), "upbit_base", ("2021-01-01", "2025-11-01"), "snap", "abc", {"a": 1.0})
     ids = led.record_runs(c, [(spec(48), "upbit_base", {"a": float("nan")}),
                               (spec(48).to_dict(), "coinone_conservative", {"a": 2}),
                               (spec(96), "upbit_base", None)],
