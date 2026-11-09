@@ -9,7 +9,8 @@
 - G0: spec.validate(REGISTRY), 모든 블록 live_ready, aux 요구 없음, 그리고 이 데이터에서의 인과성
   점검(5분봉을 3개 지점에서 절단해 재계산 → 절단 전 구간 신호 불변). 정식 미래참조 테스트는
   tests/test_blocks.py.
-- G2 귀무: `nulls.py` — 같은 필터·청산 + random_entry, p = 필터 통과 봉 중 진입 신호 비율, seed 1,000개.
+- G2 귀무: `nulls.py` — 같은 필터·청산 + random_entry, seed 1,000개. p 는 필터 통과 봉 중 진입 신호
+  비율에서 출발해 귀무 거래 수 중앙값이 후보 거래 수와 같아지도록 조정(기본, 사유는 nulls.py).
   통계량 = primary 비용 가중 Sharpe. n_null < config G2.null_runs 이면 G2 실패(검정력 부족)로 처리.
 - G3 인접: 같은 필터 세트 안에서 **파라미터 하나만 격자 한 칸(±1 인덱스) 이동**한 스펙들
   (진입·필터·청산 파라미터 모두 대상, 격자 끝은 한쪽만). 값 = 캠페인 결과표의 primary 가중 Sharpe.
@@ -175,13 +176,14 @@ def paired_bootstrap_diff(a: np.ndarray, b: np.ndarray, days: pd.DatetimeIndex,
 class Pipeline:
     def __init__(self, cr: CampaignResult, env: ResearchEnv, top_k: int = 5, n_null: int | None = None,
                  null_seed0: int = 0, gate_cfg: dict | None = None, register: bool = True,
-                 reference_check: bool = True, progress: Callable[[str], None] | None = None):
+                 reference_check: bool = True, null_calibration: str = "trade_count", progress: Callable[[str], None] | None = None):
         self.cr, self.env, self.top_k = cr, env, int(top_k)
         self.cfg = gate_cfg or G.load_gate_config()
         self.n_null = int(n_null if n_null is not None else self.cfg["G2"]["null_runs"])
         self.null_seed0 = null_seed0
         self.register = register
         self.reference_check = reference_check
+        self.null_calibration = null_calibration
         self.log = progress or (lambda s: None)
         tpl = cr.template
         self.costs = tpl.costs
@@ -246,10 +248,12 @@ class Pipeline:
         ex = spec.exit
         nd = null_distribution(self.cache.m1, c.bars.index, c.block(spec.entry), c.filter_ok(spec.filters),
                                ex.stop_loss_pct, ex.take_profit_pct, ex.max_hold_min, get_cost(cost_name),
-                               self.start, self.end, self.n_null, self.null_seed0, HALF_LIFE_DAYS)
+                               self.start, self.end, self.n_null, self.null_seed0, HALF_LIFE_DAYS,
+                               calibration=self.null_calibration, target_trades=int(observed["n_trades"]))
         ok, d = G.check_g2(observed, nd["sharpe_w"], self.cfg)
         enough = self.n_null >= self.cfg["G2"]["null_runs"]
-        d.update({k: nd[k] for k in ("p", "n_entry_bars", "n_filter_bars", "n_seeds", "seed0",
+        d.update({k: nd.get(k) for k in ("p", "p_signal_rate", "calibration", "calibration_probe_trades",
+                                         "n_entry_bars", "n_filter_bars", "n_seeds", "seed0",
                                      "n_trades_median", "sharpe_w_p95", "sharpe_w_median")},
                  candidate_n_trades=int(observed["n_trades"]), ok_null_runs=enough, cost=cost_name)
         return _gate(ok and enough, **d)

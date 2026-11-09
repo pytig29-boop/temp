@@ -2,11 +2,15 @@
 
 정의
 - 후보 스펙 S = (진입 E, 필터 F, 청산 X). 귀무 스펙 S0(seed) = (random_entry(p, seed), F, X).
-- **p 보정**: 평가 구간 [start, end) 의 5분봉 중 `F & complete` 인 봉에서 E 가 True 인 비율
-      p = #(E & F & complete) / #(F & complete)
-  → 무작위 진입이 후보와 **같은 기회 집합(필터 통과 봉)에서 같은 빈도로** 신호를 낸다.
-  상태형 진입(연속 True)은 쿨다운 때문에 실제 거래 수가 귀무와 다를 수 있으므로 거래 수 분포를
-  함께 보고한다(`n_trades_*`).
+- **p 보정** (2단계):
+  1) 신호 비율: 평가 구간 [start, end) 의 5분봉 중 `F & complete` 인 봉에서 E 가 True 인 비율
+         p_signal = #(E & F & complete) / #(F & complete)
+     → 무작위 진입이 후보와 **같은 기회 집합(필터 통과 봉)에서 같은 빈도로** 신호를 낸다.
+  2) 거래 수 맞춤(기본): p_signal 에서 출발해, 탐색용 seed 16개의 귀무 거래 수 중앙값이 후보 거래 수와
+     (±3%) 같아지도록 로그 공간 이분법으로 p 조정. 이유: 상태형·군집형 진입(연속 True)은 쿨다운 때문에
+     신호 비율이 같아도 귀무가 훨씬 자주 거래 → 비용을 더 내서, 후보가 '덜 거래한다'는 이유만으로
+     귀무를 이긴다(무작위 보행 합성 시장에서 p≈0.004 로 확인). `calibration="signal_rate"` 로 1)만 쓸 수 있다.
+  두 p 와 귀무 거래 수 분포를 모두 보고한다.
 - seed = seed0 .. seed0+n-1 (기본 1,000개, config G2.null_runs).
 
 구현 (빠른 경로, `random_entry` 블록과 비트 단위 동일)
@@ -85,27 +89,96 @@ class RandomEntryNull:
         return fast.simulate_prepared(pr, sl, tp, hold, cost, si, ei)
 
 
+def calibrate_p_to_trades(gen: RandomEntryNull, p0: float, target_trades: int, sl: float, tp: float,
+                          hold: int, cost: CostModel, si: int, ei: int, n_probe: int = 16,
+                          seed0: int = 1_000_000, max_iter: int = 14, tol: float = 0.03) -> dict:
+    """p 를 조정해 귀무의 거래 수 중앙값(n_probe 개 seed)이 후보 거래 수에 맞도록 (로그 공간 이분법).
+
+    시작점 p0 = 신호 비율. 탐색용 seed 는 귀무 seed 와 겹치지 않게 seed0 부터.
+    """
+    def med(p):
+        if p <= 0:
+            return 0.0
+        return float(np.median([len(gen.simulate(p, seed0 + k, sl, tp, hold, cost, si, ei).net_ret)
+                                for k in range(n_probe)]))
+
+    if target_trades <= 0 or p0 <= 0:
+        return {"p": 0.0, "probe_trades": 0.0, "iterations": 0}
+    lo = hi = p0
+    m0 = med(p0)
+    it = 0
+    if abs(m0 - target_trades) <= tol * target_trades:
+        return {"p": p0, "probe_trades": m0, "iterations": 0}
+    if m0 < target_trades:               # 거래가 부족 → p 증가 방향으로 구간 확보
+        while it < max_iter and hi < 1.0:
+            lo, hi = hi, min(1.0, hi * 2)
+            it += 1
+            if med(hi) >= target_trades:
+                break
+    else:
+        while it < max_iter:
+            hi, lo = lo, lo / 2
+            it += 1
+            if med(lo) <= target_trades:
+                break
+    best, best_m = p0, m0
+    for _ in range(max_iter):
+        mid = float(np.sqrt(lo * hi))
+        m = med(mid)
+        it += 1
+        if abs(m - target_trades) < abs(best_m - target_trades):
+            best, best_m = mid, m
+        if abs(m - target_trades) <= tol * target_trades:
+            break
+        if m < target_trades:
+            lo = mid
+        else:
+            hi = mid
+    return {"p": best, "probe_trades": best_m, "iterations": it}
+
+
 def null_distribution(m1: pd.DataFrame, bars_index: pd.DatetimeIndex, entry: np.ndarray,
                       filter_ok: np.ndarray, sl: float, tp: float, hold: int, cost: CostModel,
                       start, end, n_seeds: int = 1000, seed0: int = 0,
-                      half_life_days: float = 365) -> dict:
-    """귀무 가중 Sharpe 분포. 반환: sharpe_w(np.ndarray), n_trades(np.ndarray), p, seeds 등."""
+                      half_life_days: float = 365, calibration: str = "trade_count",
+                      target_trades: int | None = None) -> dict:
+    """귀무 가중 Sharpe 분포. 반환: sharpe_w(np.ndarray), n_trades(np.ndarray), p, seeds 등.
+
+    calibration="signal_rate": p = 필터 통과 봉 중 진입 신호 비율 (calibrated_rate).
+    calibration="trade_count" (기본): 신호 비율에서 출발해 귀무 거래 수 중앙값이 후보 거래 수
+      (target_trades)와 같아지도록 p 를 조정. 상태형·군집형 진입은 쿨다운 때문에 신호 비율이
+      같아도 귀무가 훨씬 많이 거래해 비용을 더 내므로, 신호 비율 보정만으로는 '거래를 덜 하는'
+      것만으로 귀무를 이기는 편향이 생긴다(무작위 보행 합성 데이터에서 확인).
+    """
     cal = calibrated_rate(entry, filter_ok, bars_index, start, end)
     gen = RandomEntryNull(m1, bars_index, filter_ok)
     pr = gen.prepared
     _, _, si, ei = pr.bounds(start, end)
+    info = {"p_signal_rate": cal["p"], "calibration": calibration}
+    p = cal["p"]
+    if calibration == "trade_count":
+        if target_trades is None:
+            raise ValueError("trade_count calibration needs target_trades")
+        c2 = calibrate_p_to_trades(gen, cal["p"], int(target_trades), sl, tp, hold, cost, si, ei)
+        p = c2["p"]
+        info.update(calibration_probe_trades=c2["probe_trades"], calibration_iterations=c2["iterations"],
+                    target_trades=int(target_trades))
+    elif calibration != "signal_rate":
+        raise ValueError("calibration must be 'signal_rate' or 'trade_count'")
     srs, ntr = np.empty(n_seeds), np.empty(n_seeds, dtype=np.int64)
     chunk = 100
     for c0 in range(0, n_seeds, chunk):
         seeds = range(seed0 + c0, seed0 + min(n_seeds, c0 + chunk))
-        trs = [gen.simulate(cal["p"], sd, sl, tp, hold, cost, si, ei) for sd in seeds]
+        trs = [gen.simulate(p, sd, sl, tp, hold, cost, si, ei) for sd in seeds]
         days, mat = fast.daily_returns_matrix(pr, trs, start, end)
         srs[c0:c0 + len(trs)] = weighted_sharpe_rows(mat, days, half_life_days)
         ntr[c0:c0 + len(trs)] = [len(t.net_ret) for t in trs]
-    return {"sharpe_w": srs, "n_trades": ntr, **cal, "n_seeds": int(n_seeds), "seed0": int(seed0),
+    return {"sharpe_w": srs, "n_trades": ntr, **cal, **info, "p": p, "n_seeds": int(n_seeds),
+            "seed0": int(seed0),
             "n_trades_median": float(np.median(ntr)) if n_seeds else 0.0,
             "sharpe_w_p95": float(np.percentile(srs, 95)) if n_seeds else float("nan"),
             "sharpe_w_median": float(np.median(srs)) if n_seeds else float("nan")}
 
 
-__all__ = ["weighted_sharpe_rows", "calibrated_rate", "RandomEntryNull", "null_distribution"]
+__all__ = ["weighted_sharpe_rows", "calibrated_rate", "RandomEntryNull", "calibrate_p_to_trades",
+           "null_distribution"]

@@ -238,7 +238,8 @@ class PaperTrader:
         # 3) 리스크 갱신 (봉 마감 시각 기준)
         if not bar.filled:
             self.risk.on_market_data(_dt(t_close), price=bar.close)
-        self.risk.on_equity(_dt(t_close), self.mark_equity(bar.close))
+        if self.engine.position is not None:      # 무포지션이면 자산 불변 (청산 시 on_trade_closed 가 갱신)
+            self.risk.on_equity(_dt(t_close), self.mark_equity(bar.close))
         self.last_ts = ts
 
         flat, why = self.risk.should_flatten(_dt(t_close))
@@ -284,7 +285,9 @@ class PaperTrader:
     def _on_fill(self, ev: FillEvent, bar: Bar, book_now: dict | None, live: bool) -> list[dict]:
         now = self.clock()
         if ev.side == "buy":
-            pos = self.engine.position
+            ex = self.spec.exit          # 같은 봉에서 청산까지 되면 engine.position 은 이미 None
+            sl, tp = ev.ref_price * (1 - ex.stop_loss_pct / 100), ev.ref_price * (1 + ex.take_profit_pct / 100)
+            expiry = ev.ts + pd.Timedelta(minutes=int(ex.max_hold_min))
             notional = self.equity
             bf = walk_book(self.book_open, "buy", notional=notional, now=now) if self.book_open else None
             cmp = compare_to_model(bf, ev.fill_price, ev.ref_price, self.cost, self.conservative)
@@ -294,10 +297,10 @@ class PaperTrader:
             self.risk.on_fill(_dt(ev.ts), "buy", self.qty, ev.fill_price, fee=None)
             rec = {"type": "fill", "side": "buy", "ts": ev.ts, "reason": ev.reason,
                    "ref_price": ev.ref_price, "fill_price": ev.fill_price, "qty": self.qty,
-                   "notional": notional, "sl": pos.sl, "tp": pos.tp, "expiry": pos.expiry,
+                   "notional": notional, "sl": sl, "tp": tp, "expiry": expiry,
                    "live": live, **cmp}
             self._log("fills", rec)
-            return [{"type": "entry", "ts": ev.ts, "price": ev.fill_price, "sl": pos.sl, "tp": pos.tp,
+            return [{"type": "entry", "ts": ev.ts, "price": ev.fill_price, "sl": sl, "tp": tp,
                      "book_cost_bps": cmp.get("book_cost_bps"), "live": live}]
 
         # sell

@@ -47,7 +47,7 @@ def _gate_line(name: str, g: dict) -> str:
         "G0": ["validate", "n_filters", "n_params", "not_live_ready", "requires_aux", "causality_cuts",
                "causality_violations"],
         "G1": ["n_trades", "recent_n_trades"],
-        "G2": ["sharpe_w", "p_value", "percentile", "n_null", "p", "n_trades_median", "candidate_n_trades",
+        "G2": ["sharpe_w", "p_value", "percentile", "n_null", "calibration", "p_signal_rate", "p", "n_trades_median", "candidate_n_trades",
                "sharpe_w_median", "sharpe_w_p95", "cost"],
         "G3": ["selected", "neighbor_median", "required", "n_neighbors"],
         "G4": ["rolling_frac_positive", "rolling_n_windows", "recent_sharpe"],
