@@ -56,6 +56,14 @@ def test_g6_sign_agnostic():
     assert not g.check_g6({"sharpe": 0.0}, 0.1, 0.1)[0]
 
 
+def test_g6_rule_b():
+    # stress 낙폭이 커도 stress Sharpe > 0 이고 primary 낙폭이 기준 이내면 통과
+    ok, d = g.check_g6({"sharpe": 2.0, "max_dd": 0.12}, {"sharpe": 0.3, "max_dd": 0.75}, 0.15)
+    assert ok and d["rule"] == "b"
+    assert not g.check_g6({"sharpe": 2.0, "max_dd": 0.25}, {"sharpe": 0.3, "max_dd": 0.3}, 0.15)[0]
+    assert not g.check_g6({"sharpe": 2.0, "max_dd": 0.12}, {"sharpe": -0.1, "max_dd": 0.3}, 0.15)[0]
+
+
 def test_g7_cumulative_holm():
     # 첫 개봉: m=1 → 문턱 0.10
     assert g.check_g7(0.08)[0]

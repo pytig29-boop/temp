@@ -62,7 +62,7 @@ def test_candidate_outcome_labels():
     assert C.candidate_outcome({"dev_passed": False, "first_failed": "G2"}) == "G2"
     c = {"dev_passed": True, "status": "failed G6", "gates": {"G6": {"ok_sharpe": True, "ok_stress_mdd": False,
                                                                        "ok_mc_mdd": True, "val_holm_passed": False}}}
-    assert C.candidate_outcome(c) == "G6(mdd+holm)"
+    assert C.candidate_outcome(c) == "G6(stress_mdd+holm)"
 
 
 def test_quick_mode_runs(tmp_path):

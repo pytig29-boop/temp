@@ -30,7 +30,7 @@
   리포트하고 후속 캠페인에서 검증한다. 캠페인 격자에 없던 S_-i 는 별도 'ablation' 캠페인으로
   원장에 사전등록 후 실행·기록(시도 수 +1씩).
 - G6: Val 은 DataAccess.read_range(val_start − 14일 워밍업, val_end) 로만 읽는다(잠금 구간 미포함).
-  Sharpe(primary) > 0, stress 비용 MDD, worst_case_mdd95(거래 순수익). 기준 엔진으로 재실행해 거래
+  Sharpe(primary) > 0, primary 비용 MDD ≤ 20%, stress 비용 Sharpe > 0 (결정 b), worst_case_mdd95(거래 순수익). 기준 엔진으로 재실행해 거래
   목록 일치 확인(불일치 = G6 실패).
 - G6 Val 예산 (PLAN §10b-4, §5.3 과 같은 구조): Val 을 평가하기 **전에** 원장 val_evaluations 에
   사용(k번째)을 기록한다. 통계량 = primary 비용 Val 일간 수익 평균 > 0 의 정상 블록 부트스트랩 단측 p.
@@ -485,7 +485,7 @@ class Pipeline:
         met, smet = M.summarize(res, HALF_LIFE_DAYS), M.summarize(st, HALF_LIFE_DAYS)
         mc = montecarlo.worst_case_mdd95(res.trades["net_ret"].to_numpy(float),
                                          n_sims=self.cfg["G6"]["mc_sims"])
-        ok, d = G.check_g6(met, smet["max_dd"], mc, self.cfg)
+        ok, d = G.check_g6(met, smet, mc, self.cfg)
         d.update(cost=cost_name, stress_cost=stress_name, n_trades=met["n_trades"],
                  total_return=met["total_return"], max_dd=met["max_dd"], n_days=met["n_days"],
                  sharpe_w=met["sharpe_w"])

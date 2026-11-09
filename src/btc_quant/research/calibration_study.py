@@ -302,7 +302,7 @@ def candidate_outcome(c: dict) -> str:
     if not c.get("dev_passed"):
         return str(c.get("first_failed"))
     g = c.get("gates", {}).get("G6") or {}
-    why = [n for k, n in (("ok_sharpe", "sharpe"), ("ok_stress_mdd", "mdd"), ("ok_mc_mdd", "mc"))
+    why = [n for k, n in (("ok_sharpe", "sharpe"), ("ok_mdd", "mdd"), ("ok_stress_sharpe", "stress_sr"), ("ok_stress_mdd", "stress_mdd"), ("ok_mc_mdd", "mc"))
            if g.get(k) is False]
     if g.get("val_holm_passed") is False:
         why.append("holm")

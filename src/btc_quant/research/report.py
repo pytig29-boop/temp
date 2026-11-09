@@ -54,7 +54,7 @@ def _gate_line(name: str, g: dict) -> str:
         "G3": ["selected", "neighbor_median", "required", "n_neighbors"],
         "G4": ["rolling_frac_positive", "rolling_n_windows", "recent_sharpe"],
         "G5": ["dsr", "pbo", "sr", "sr0", "n_trials", "var_trial_sr"],
-        "G6": ["sharpe", "stress_mdd", "mc_mdd95", "n_trades", "total_return", "max_dd", "cost",
+        "G6": ["sharpe", "max_dd", "stress_sharpe", "stress_mdd", "mc_mdd95", "n_trades", "total_return", "max_dd", "cost",
                "stress_cost", "reference_engine_match"],
     }.get(name, [])
     parts = [f"{k}={_f(g.get(k), 4)}" for k in keys if k in g]

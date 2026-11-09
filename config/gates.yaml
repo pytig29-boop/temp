@@ -31,7 +31,9 @@ G5:
   cluster_threshold: 0.5       # 상관거리 sqrt((1-rho)/2) 절단 높이 (평균 rho >= 0.5 → 1 시도)
 G6:
   min_sharpe: 0.0              # 초과(>), Val, conservative
-  max_stress_mdd: 0.20         # 이하(<=), stress 비용
+  max_mdd: 0.20                # 이하(<=), primary(conservative) 비용 Val 최대낙폭 — 사용자 결정 2026-11-09 (b)
+  min_stress_sharpe: 0.0       # 초과(>), stress 비용 Val Sharpe (stress 에서는 낙폭 크기 판정 안 함)
+  max_stress_mdd: 0.20         # 구 규칙(legacy, float 입력 시에만 사용)
   max_mc_mdd95: 0.20           # 이하(<=), 거래당 몬테카를로 MDD 95백분위
   mc_sims: 10000
   # Val 사용 원장 + 누적 Holm (PLAN §10b-4, §5.3 잠금 규칙과 같은 구조). 후보마다 Val 평가 *전에*

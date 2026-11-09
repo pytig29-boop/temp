@@ -85,17 +85,31 @@ def check_g5(dsr: float, pbo: float, cfg: dict | None = None) -> tuple[bool, dic
     return d["ok_dsr"] and d["ok_pbo"], d
 
 
-def check_g6(val_metrics: dict, stress_mdd: float, mc_mdd95: float,
+def check_g6(val_metrics: dict, stress, mc_mdd95: float,
              cfg: dict | None = None) -> tuple[bool, dict]:
-    """G6 검증(Val): Sharpe(conservative) > 0, stress 비용 MDD ≤ 20%, 거래당 MC MDD95 ≤ 20%.
-    stress_mdd / mc_mdd95 는 크기(부호 무관, abs 사용)."""
+    """G6 검증(Val) — 2026-11-09 사용자 결정 (b):
+    - Sharpe(primary=conservative 비용) > min_sharpe
+    - 최대낙폭은 **primary 비용** 기준: val_metrics["max_dd"] ≤ max_mdd
+    - stress 비용에서는 Sharpe > min_stress_sharpe 만 요구 (낙폭 크기는 판정하지 않음)
+    - 거래당 MC MDD95 ≤ max_mc_mdd95
+    `stress` 는 stress 비용 summarize dict(권장). 하위 호환: float 이면 구 규칙(stress MDD ≤ max_stress_mdd)으로 판정.
+    낙폭 값은 크기(부호 무관, abs)."""
     c = _cfg(cfg, "G6")
     sr = float(val_metrics["sharpe"])
-    smdd, mc = abs(float(stress_mdd)), abs(float(mc_mdd95))
-    d = {"sharpe": sr, "stress_mdd": smdd, "mc_mdd95": mc,
-         "ok_sharpe": sr > c["min_sharpe"], "ok_stress_mdd": smdd <= c["max_stress_mdd"],
+    mc = abs(float(mc_mdd95))
+    d = {"sharpe": sr, "mc_mdd95": mc, "ok_sharpe": sr > c["min_sharpe"],
          "ok_mc_mdd": mc <= c["max_mc_mdd95"]}
-    return d["ok_sharpe"] and d["ok_stress_mdd"] and d["ok_mc_mdd"], d
+    if isinstance(stress, dict):
+        mdd = abs(float(val_metrics.get("max_dd", float("nan"))))
+        ssr = float(stress["sharpe"])
+        d.update(max_dd=mdd, stress_sharpe=ssr, stress_mdd=abs(float(stress.get("max_dd", float("nan")))),
+                 ok_mdd=mdd <= c["max_mdd"], ok_stress_sharpe=ssr > c["min_stress_sharpe"], rule="b")
+        ok = d["ok_sharpe"] and d["ok_mdd"] and d["ok_stress_sharpe"] and d["ok_mc_mdd"]
+    else:
+        smdd = abs(float(stress))
+        d.update(stress_mdd=smdd, ok_stress_mdd=smdd <= c.get("max_stress_mdd", c["max_mdd"]), rule="legacy")
+        ok = d["ok_sharpe"] and d["ok_stress_mdd"] and d["ok_mc_mdd"]
+    return ok, d
 
 
 def check_g7(p_value: float, prior_p_values=(), cfg: dict | None = None) -> tuple[bool, dict]:
