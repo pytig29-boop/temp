@@ -1,0 +1,20 @@
+# Cycle 1 (2026-11-09) strategy campaign for H3 (M4) — screen camp-000004 passed configs only.
+name: c1_liq_meanrev_atr_v1
+family: liq_meanrev
+hypothesis:
+  text: "Coinone BTC-KRW 5m: bollinger_z_revert(window 96, z 2.5/3.0), with or without trend_regime_1h(24), held 120-240 min with ATR-multiple exits, earns positive coinone_conservative net returns that survive G0-G6 and the robustness suite."
+  rationale: "M4 mean reversion after forced/panic selling (counterparty: liquidated levered longs, panic-selling retail). Entry/filters fixed to the 4 window-96 configs that all passed screen camp-000004 (BH q=0.10, net>0): info horizons 30-240 min (unfiltered z2.5 rising to 240; trend-filtered z2.5 peaked at 120). Exits from screen ATR suggestions (TP ~2-3.4 ATR = MFE median, SL ~2.7-6 ATR = |MAE| p75): SL {3,5} ATR x TP {3} ATR x max hold {120,240} min = 4 exit variants (low turnover, <1 trade/day). Window 24 configs not used (screen neighbours at different lookback; keep grid small). Expected annual Sharpe estimate from screen net mean x frequency: ~1.2 (unfiltered) to ~2.5 (trend-filtered). Upbit-cost grade expected to fail (screen upbit_conservative net < 0) -> at best grade B. No lockbox/Val-exposed evidence."
+  success_criteria: "At least one spec passes G0-G6 and the Dev robustness suite (outliers / leave-year-out / latency / cost x1.5 / regime / alpha)."
+timeframe: 5m
+data: {exchange: coinone, symbol: BTC-KRW, timeframe: 1m, aux: []}
+from_screen: camp-000004
+power: {target_sharpe: 2.0}
+entry:
+  block: bollinger_z_revert
+  grid: {window: [96], z: [2.5, 3.0]}
+filters:
+  - []
+  - [{block: trend_regime_1h, grid: {span: [24]}}]
+exits: {mode: atr, sl_atr: [3.0, 5.0], tp_atr: [3.0], max_hold_min: [120, 240], atr_bars: 14}
+costs: {primary: coinone_conservative, grade: upbit_conservative, stress: coinone_stress, grade_stress: upbit_stress}
+budget: 16

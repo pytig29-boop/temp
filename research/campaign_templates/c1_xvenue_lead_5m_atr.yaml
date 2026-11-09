@@ -1,0 +1,19 @@
+# Cycle 1 (2026-11-09) strategy campaign for H4 (M1, 5m) — screen camp-000002 passed config only.
+name: c1_xvenue_lead_5m_atr_v1
+family: xvenue_upbit_lead
+hypothesis:
+  text: "Coinone BTC-KRW 5m: upbit_lead_impulse(k 1, thr 40bp) during non-quiet KST hours with ATR-multiple exits and 30-120 min max hold earns positive coinone_conservative net returns that survive G0-G6 and the robustness suite."
+  rationale: "M1 cross-venue lag (counterparty: stale Coinone limit orders / lagging makers). Only config that passed screen camp-000002 (n=488 events, BH over 12 family configs incl. the failed 1m screen). Info horizon 5 min (decaying) but net mean positive through 120 min. Exits: screen ATR suggestion at 5 min TP ~0.5 / SL ~0.8 ATR; scaled to 30-120 min -> SL {1.0, 2.0} ATR x TP {1.5} ATR x hold {30, 120} = 4 exit variants. Expected annual Sharpe ~1.5-1.8 at ~0.3 trades/day; sample is small (G1 risk). upbit_conservative net < 0 -> grade B at best. Uses experimental block upbit_lead_impulse (human block review before any lockbox request). K-P0-5 (lockbox+Val exposed) motivation only."
+  success_criteria: "At least one spec passes G0-G6 and the Dev robustness suite (latency check essential)."
+timeframe: 5m
+data: {exchange: coinone, symbol: BTC-KRW, timeframe: 1m, aux: [upbit]}
+from_screen: camp-000002
+power: {target_sharpe: 1.5}
+entry:
+  block: upbit_lead_impulse
+  grid: {k: [1], thr_bp: [40]}
+filters:
+  - [{block: session_kst, grid: {session: [all_but_quiet]}}]
+exits: {mode: atr, sl_atr: [1.0, 2.0], tp_atr: [1.5], max_hold_min: [30, 120], atr_bars: 14}
+costs: {primary: coinone_conservative, grade: upbit_conservative, stress: coinone_stress, grade_stress: upbit_stress}
+budget: 4

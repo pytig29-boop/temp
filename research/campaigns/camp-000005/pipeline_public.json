@@ -1,0 +1,579 @@
+{
+  "campaign_id": "camp-000005",
+  "hypothesis_id": "hyp-000005",
+  "top_k": 5,
+  "selection": {
+    "method": "cluster_best",
+    "cluster_threshold": 0.5,
+    "n_specs": 16,
+    "n_clusters": 2,
+    "cluster_sizes": [
+      8,
+      8
+    ],
+    "selected": [
+      {
+        "logic_hash": "ff60d1a7c3c5c055",
+        "cluster": 1,
+        "cluster_size": 8,
+        "sharpe_w": 0.8856803682742279
+      },
+      {
+        "logic_hash": "0b89e1f4047261c3",
+        "cluster": 2,
+        "cluster_size": 8,
+        "sharpe_w": 0.48540899637809726
+      }
+    ]
+  },
+  "timeframe": "5m",
+  "exits": {
+    "mode": "atr",
+    "atr_bars": 14
+  },
+  "aux": [],
+  "power": {
+    "n_grid": 16,
+    "family": "liq_meanrev",
+    "n_family_prior": 10,
+    "ratio": 0.05,
+    "ratio_source": "default 0.05 (history 0 < 3)",
+    "k_eff_est": 1.0,
+    "n_trials_dsr": 1.3,
+    "n_days": 1765,
+    "var_trial_sr": 0.0005665722379603399,
+    "var_source": "1/n_days (null minimum)",
+    "min_dsr": 0.95,
+    "required_sharpe_ann": 0.7576090492366035,
+    "required_sharpe_ann_single_trial": 0.7484985921568781,
+    "target_sharpe_ann": 2.0,
+    "max_trials_for_target": 189.694745257855,
+    "max_grid_for_target": 3783.8949051571,
+    "markdown": "- 계획 격자 16 스펙, 계열 `liq_meanrev` 기존 시도 10, 압축비 0.05 (default 0.05 (history 0 < 3)) → 실질 시도 ≈ 1.3\n- Dev 1765일, V=0.000567 (1/n_days (null minimum)), 왜도 0, 첨도 3, DSR ≥ 0.95\n- **G5 통과 최소 연 Sharpe ≈ 0.76** (시도 1회였다면 0.75)\n- 목표 연 Sharpe 2 로 감당 가능한 실질 시도 ≈ 190 (격자 ≈ 3784 스펙)",
+    "warning": null,
+    "strict": true,
+    "ok": true
+  },
+  "screen": {
+    "from_screen": "camp-000004",
+    "requires_screen_pass": false,
+    "n_configs": 4,
+    "matches": [
+      {
+        "config": "bollinger_z_revert{'window': 96, 'z': 2.5}",
+        "screen_id": "camp-000004",
+        "run_id": "run-000026",
+        "p_signal": 0.0010981899801715276,
+        "n_events": 2999,
+        "info_horizon": 240,
+        "exchange": "coinone",
+        "aux": []
+      },
+      {
+        "config": "bollinger_z_revert{'window': 96, 'z': 2.5} & trend_regime_1h{'span': 24}",
+        "screen_id": "camp-000004",
+        "run_id": "run-000027",
+        "p_signal": 4.2988973635055225e-05,
+        "n_events": 678,
+        "info_horizon": 120,
+        "exchange": "coinone",
+        "aux": []
+      },
+      {
+        "config": "bollinger_z_revert{'window': 96, 'z': 3.0}",
+        "screen_id": "camp-000004",
+        "run_id": "run-000028",
+        "p_signal": 0.001153577000986531,
+        "n_events": 1657,
+        "info_horizon": 60,
+        "exchange": "coinone",
+        "aux": []
+      },
+      {
+        "config": "bollinger_z_revert{'window': 96, 'z': 3.0} & trend_regime_1h{'span': 24}",
+        "screen_id": "camp-000004",
+        "run_id": "run-000029",
+        "p_signal": 9.495426484799473e-05,
+        "n_events": 396,
+        "info_horizon": 30,
+        "exchange": "coinone",
+        "aux": []
+      }
+    ],
+    "rule": "every (entry params × filter params × timeframe × exchange) config passed a recorded screen"
+  },
+  "n_null": 1000,
+  "funnel_all": {
+    "n_specs": 16,
+    "g1_pass": 16,
+    "sharpe_w_positive": 12,
+    "g4_pass": 2,
+    "g1_g4_positive": 2
+  },
+  "campaign_stats": {
+    "n_campaign_specs": 16,
+    "k_eff_clusters": 2,
+    "entropy_trials": 4.297203477000368,
+    "n_family_trials": 26,
+    "n_global_trials": 47,
+    "n_trials_dsr": 3.25,
+    "var_trial_sr": 0.000851429836427203,
+    "var_source": "cluster representatives",
+    "cluster_threshold": 0.5,
+    "pbo": 0.4484848484848485,
+    "n_combinations": 12870,
+    "logit_median": 0.11778303565638346
+  },
+  "gate_config_version": 1,
+  "candidates": [
+    {
+      "rank": 1,
+      "logic_hash": "ff60d1a7c3c5c055",
+      "spec_id": "c1_liq_meanrev_atr_v1_ff60d1a7c3",
+      "spec": {
+        "id": "c1_liq_meanrev_atr_v1_ff60d1a7c3",
+        "entry": {
+          "block": "bollinger_z_revert",
+          "params": {
+            "window": 96,
+            "z": 3.0
+          }
+        },
+        "exit": {
+          "max_hold_min": 120,
+          "signal_exit": null,
+          "stop_loss_atr": 5.0,
+          "take_profit_atr": 3.0
+        },
+        "filters": [
+          {
+            "block": "trend_regime_1h",
+            "params": {
+              "span": 24
+            }
+          }
+        ],
+        "version": 1
+      },
+      "cluster": 1,
+      "cluster_size": 8,
+      "metrics": {
+        "spec_id": "c1_liq_meanrev_atr_v1_ff60d1a7c3",
+        "filter_set": 1,
+        "filters": "trend_regime_1h",
+        "entry.window": 96,
+        "entry.z": 3.0,
+        "sl_atr": 5.0,
+        "tp_atr": 3.0,
+        "max_hold_min": 120,
+        "atr_bars": 14,
+        "cost": "coinone_conservative",
+        "n_days": 1765,
+        "sharpe": 0.8373367860974043,
+        "sharpe_w": 0.8856803682742279,
+        "mean_w": 0.000148112424703735,
+        "std_w": 0.003194926750262132,
+        "n_eff": 981.8967427034494,
+        "mean_daily": 0.0001645401437947203,
+        "std_daily": 0.003754206294918315,
+        "skew": -0.039321910228102205,
+        "kurtosis": 20.450923297132192,
+        "total_return": 0.3204328202938205,
+        "cagr": 0.059165914812097764,
+        "max_dd": 0.09456195213520724,
+        "max_dd_days": 1343,
+        "n_trades": 410,
+        "expectancy": 0.0007074608925428078,
+        "win_rate": 0.6121951219512195,
+        "profit_factor": 1.2724773625827088,
+        "avg_hold_min": 71.6609756097561,
+        "trades_per_day": 0.23229461756373937,
+        "recent_sharpe": 1.7351825329324417,
+        "recent_n_trades": 77,
+        "rolling_frac_positive": 0.5471698113207547,
+        "rolling_n_windows": 53,
+        "sharpe_year_2021": 1.7273018383232976,
+        "sharpe_year_2022": 0.06270537555857264,
+        "sharpe_year_2023": 0.6832394633803027,
+        "sharpe_year_2024": 0.2515452740984211,
+        "sharpe_year_2025": 1.7308183836078976,
+        "trend_regime_1h.span": 24.0
+      },
+      "gates": {
+        "G0": {
+          "passed": true,
+          "validate": "ok",
+          "n_filters": 1,
+          "n_params": 6,
+          "not_live_ready": [],
+          "requires_aux": [],
+          "disallowed_aux": [],
+          "timeframe": "5m",
+          "exit_mode": "atr",
+          "uses_experimental": [],
+          "causality_cuts": 3,
+          "causality_violations": []
+        },
+        "G1": {
+          "passed": true,
+          "n_trades": 410,
+          "recent_n_trades": 77,
+          "ok_trades": true,
+          "ok_recent": true
+        },
+        "G2": {
+          "passed": true,
+          "sharpe_w": 0.8856803682742279,
+          "percentile": 1.0,
+          "p_value": 0.000999000999000999,
+          "n_null": 1000,
+          "ok_positive": true,
+          "ok_null": true,
+          "null_runs_expected": 1000,
+          "p": 0.0021353736368719244,
+          "p_signal_rate": 0.0050788030443146585,
+          "calibration": "trade_count",
+          "calibration_probe_trades": 411.5,
+          "n_entry_bars": 1027,
+          "n_filter_bars": 202213,
+          "n_seeds": 1000,
+          "seed0": 0,
+          "tf_min": 5,
+          "atr_bars": 14,
+          "n_trades_median": 409.0,
+          "sharpe_w_p95": 0.009898729524035416,
+          "sharpe_w_median": -0.8903542504311966,
+          "candidate_n_trades": 410,
+          "ok_null_runs": true,
+          "cost": "coinone_conservative"
+        },
+        "G3": {
+          "passed": true,
+          "selected": 0.8856803682742279,
+          "neighbor_median": 0.7080878678065822,
+          "required": 0.44284018413711396,
+          "n_neighbors": 3,
+          "neighbors": [
+            {
+              "change": "entry.z=2.5",
+              "logic_hash": "7f0af526d71a2b41",
+              "sharpe_w": 0.6068133209715638
+            },
+            {
+              "change": "sl_atr=3.0",
+              "logic_hash": "324240ca4c973b70",
+              "sharpe_w": 0.7080878678065822
+            },
+            {
+              "change": "max_hold_min=240",
+              "logic_hash": "d9c74bf65ede41c6",
+              "sharpe_w": 0.8631961807230787
+            }
+          ],
+          "missing": []
+        },
+        "G4": {
+          "passed": false,
+          "rolling_frac_positive": 0.5471698113207547,
+          "rolling_n_windows": 53,
+          "recent_sharpe": 1.7351825329324417,
+          "ok_rolling": false,
+          "ok_recent": true
+        },
+        "G5": {
+          "passed": false,
+          "dsr": 0.764467958717906,
+          "pbo": 0.4484848484848485,
+          "ok_dsr": false,
+          "ok_pbo": false,
+          "sr": 0.04382821051081861,
+          "sr0": 0.026572850604030182,
+          "skew": -0.039321910228102205,
+          "kurtosis": 20.450923297132192,
+          "n_obs": 1765,
+          "n_trials": 3.25,
+          "var_trial_sr": 0.000851429836427203
+        }
+      },
+      "uses_experimental": [],
+      "yearly": [
+        {
+          "year": 2021,
+          "n_days": 365,
+          "total_return": 0.1610386055428319,
+          "sharpe": 1.7273018383232976,
+          "max_dd": 0.09378917901397865,
+          "n_trades": 81
+        },
+        {
+          "year": 2022,
+          "n_days": 365,
+          "total_return": 0.0018781353744796725,
+          "sharpe": 0.06270537555857264,
+          "max_dd": 0.06753979501836538,
+          "n_trades": 86
+        },
+        {
+          "year": 2023,
+          "n_days": 365,
+          "total_return": 0.03840378113234921,
+          "sharpe": 0.6832394633803027,
+          "max_dd": 0.05592820379234531,
+          "n_trades": 84
+        },
+        {
+          "year": 2024,
+          "n_days": 366,
+          "total_return": 0.016182695404704184,
+          "sharpe": 0.2515452740984211,
+          "max_dd": 0.05347357149836429,
+          "n_trades": 99
+        },
+        {
+          "year": 2025,
+          "n_days": 304,
+          "total_return": 0.07576322824240878,
+          "sharpe": 1.7308183836078976,
+          "max_dd": 0.027754978674645603,
+          "n_trades": 60
+        }
+      ],
+      "dev_passed": false,
+      "first_failed": "G4",
+      "ablation": null,
+      "grade": null,
+      "status": "failed G4 (ledger only)"
+    },
+    {
+      "rank": 2,
+      "logic_hash": "0b89e1f4047261c3",
+      "spec_id": "c1_liq_meanrev_atr_v1_0b89e1f404",
+      "spec": {
+        "id": "c1_liq_meanrev_atr_v1_0b89e1f404",
+        "entry": {
+          "block": "bollinger_z_revert",
+          "params": {
+            "window": 96,
+            "z": 3.0
+          }
+        },
+        "exit": {
+          "max_hold_min": 120,
+          "signal_exit": null,
+          "stop_loss_atr": 5.0,
+          "take_profit_atr": 3.0
+        },
+        "filters": [],
+        "version": 1
+      },
+      "cluster": 2,
+      "cluster_size": 8,
+      "metrics": {
+        "spec_id": "c1_liq_meanrev_atr_v1_0b89e1f404",
+        "filter_set": 0,
+        "filters": "-",
+        "entry.window": 96,
+        "entry.z": 3.0,
+        "sl_atr": 5.0,
+        "tp_atr": 3.0,
+        "max_hold_min": 120,
+        "atr_bars": 14,
+        "cost": "coinone_conservative",
+        "n_days": 1765,
+        "sharpe": 0.631702731303246,
+        "sharpe_w": 0.48540899637809726,
+        "mean_w": 0.00019091892129643494,
+        "std_w": 0.00751428361875664,
+        "n_eff": 981.8967427034494,
+        "mean_daily": 0.00027552876683366377,
+        "std_daily": 0.00833298549827713,
+        "skew": 1.967224942266156,
+        "kurtosis": 42.63027184084896,
+        "total_return": 0.5305310990433547,
+        "cagr": 0.09200631262051995,
+        "max_dd": 0.36909621421854444,
+        "max_dd_days": 1633,
+        "n_trades": 1728,
+        "expectancy": 0.00029303241632778413,
+        "win_rate": 0.5642361111111112,
+        "profit_factor": 1.092812813018464,
+        "avg_hold_min": 71.625,
+        "trades_per_day": 0.9790368271954675,
+        "recent_sharpe": 1.6204382261916679,
+        "recent_n_trades": 325,
+        "rolling_frac_positive": 0.4339622641509434,
+        "rolling_n_windows": 53,
+        "sharpe_year_2021": 2.220510975683485,
+        "sharpe_year_2022": -0.35977419274256967,
+        "sharpe_year_2023": -0.6741775334916897,
+        "sharpe_year_2024": 0.5081076292066614,
+        "sharpe_year_2025": 0.7408843043145094,
+        "trend_regime_1h.span": null
+      },
+      "gates": {
+        "G0": {
+          "passed": true,
+          "validate": "ok",
+          "n_filters": 0,
+          "n_params": 5,
+          "not_live_ready": [],
+          "requires_aux": [],
+          "disallowed_aux": [],
+          "timeframe": "5m",
+          "exit_mode": "atr",
+          "uses_experimental": [],
+          "causality_cuts": 3,
+          "causality_violations": []
+        },
+        "G1": {
+          "passed": true,
+          "n_trades": 1728,
+          "recent_n_trades": 325,
+          "ok_trades": true,
+          "ok_recent": true
+        },
+        "G2": {
+          "passed": true,
+          "sharpe_w": 0.48540899637809726,
+          "percentile": 1.0,
+          "p_value": 0.000999000999000999,
+          "n_null": 1000,
+          "ok_positive": true,
+          "ok_null": true,
+          "null_runs_expected": 1000,
+          "p": 0.00470595732548995,
+          "p_signal_rate": 0.01582889058136583,
+          "calibration": "trade_count",
+          "calibration_probe_trades": 1695.5,
+          "n_entry_bars": 6235,
+          "n_filter_bars": 393900,
+          "n_seeds": 1000,
+          "seed0": 0,
+          "tf_min": 5,
+          "atr_bars": 14,
+          "n_trades_median": 1689.0,
+          "sharpe_w_p95": -0.6461805281622431,
+          "sharpe_w_median": -1.4948088512774351,
+          "candidate_n_trades": 1728,
+          "ok_null_runs": true,
+          "cost": "coinone_conservative"
+        },
+        "G3": {
+          "passed": false,
+          "selected": 0.48540899637809726,
+          "neighbor_median": 0.16475657031692445,
+          "required": 0.24270449818904863,
+          "n_neighbors": 3,
+          "neighbors": [
+            {
+              "change": "entry.z=2.5",
+              "logic_hash": "facb63d88d7e31b2",
+              "sharpe_w": 0.12592051884658748
+            },
+            {
+              "change": "sl_atr=3.0",
+              "logic_hash": "fef614b99b113e76",
+              "sharpe_w": 0.16475657031692445
+            },
+            {
+              "change": "max_hold_min=240",
+              "logic_hash": "21b44ca03b5fa04b",
+              "sharpe_w": 0.35447363735779835
+            }
+          ],
+          "missing": []
+        },
+        "G4": {
+          "passed": false,
+          "rolling_frac_positive": 0.4339622641509434,
+          "rolling_n_windows": 53,
+          "recent_sharpe": 1.6204382261916679,
+          "ok_rolling": false,
+          "ok_recent": true
+        },
+        "G5": {
+          "passed": false,
+          "dsr": 0.6103717699860052,
+          "pbo": 0.4484848484848485,
+          "ok_dsr": false,
+          "ok_pbo": false,
+          "sr": 0.03306483215296968,
+          "sr0": 0.026572850604030182,
+          "skew": 1.967224942266156,
+          "kurtosis": 42.63027184084896,
+          "n_obs": 1765,
+          "n_trials": 3.25,
+          "var_trial_sr": 0.000851429836427203
+        }
+      },
+      "uses_experimental": [],
+      "yearly": [
+        {
+          "year": 2021,
+          "n_days": 365,
+          "total_return": 0.5486517103317052,
+          "sharpe": 2.220510975683485,
+          "max_dd": 0.19505258432045314,
+          "n_trades": 354
+        },
+        {
+          "year": 2022,
+          "n_days": 365,
+          "total_return": -0.0660049474715827,
+          "sharpe": -0.35977419274256967,
+          "max_dd": 0.15292601765897262,
+          "n_trades": 391
+        },
+        {
+          "year": 2023,
+          "n_days": 365,
+          "total_return": -0.07816192718031567,
+          "sharpe": -0.6741775334916897,
+          "max_dd": 0.17199718726350355,
+          "n_trades": 353
+        },
+        {
+          "year": 2024,
+          "n_days": 366,
+          "total_return": 0.0800451172137484,
+          "sharpe": 0.5081076292066614,
+          "max_dd": 0.17001541585081292,
+          "n_trades": 374
+        },
+        {
+          "year": 2025,
+          "n_days": 304,
+          "total_return": 0.06278957928734119,
+          "sharpe": 0.7408843043145094,
+          "max_dd": 0.05480869016898071,
+          "n_trades": 256
+        }
+      ],
+      "dev_passed": false,
+      "first_failed": "G3",
+      "ablation": null,
+      "grade": null,
+      "status": "failed G3 (ledger only)"
+    }
+  ],
+  "params_version": "a008ed2348e4",
+  "cost_versions": {
+    "coinone_base": 2,
+    "coinone_conservative": 2,
+    "coinone_stress": 2,
+    "upbit_base": 1,
+    "upbit_conservative": 1,
+    "upbit_stress": 1
+  },
+  "code_commit": "e2d2ff63ce9ab272162441125b6d784cb3e30a73+dirty",
+  "n_dev_survivors": 0,
+  "n_validated": 0,
+  "n_robustness_fail": 0,
+  "n_registry_validated": 0,
+  "uses_experimental": [],
+  "verdict": "no candidate passed",
+  "runtime_sec": 10.3,
+  "lockbox": "not accessed (G7 requires human approval: admin_cli approve-lockbox)",
+  "lessons_fact": "fact-000005",
+  "redacted": "agent-safe copy of pipeline.json: Val (G6) / lockbox as outcome codes only; full file is human-only"
+}

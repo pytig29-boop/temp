@@ -1,0 +1,53 @@
+name: c2_vol_breakout_hivol_screen
+hypothesis:
+  text: Coinone 5m donchian_breakout(288) carries materially more net information
+    when 5m realised vol is in the top 20% of its trailing 7-day range (vol_regime
+    min_pct 0.8).
+  rationale: 'int-000004: breakout info is thin (net 2-3.5 bp) and grew with the 0.67
+    vol filter (1.95 -> 3.52 bp at 30 min); if the M3 cascade story is right it should
+    concentrate further in the top-vol regime. K-P0-4 (lockbox+Val exposed) is motivation
+    only; 0.8 is a block-grid value. [derived-from drv-000003 ← fact-000006; family
+    vol_breakout]'
+  success_criteria: BH q=0.10 over family screen configs, n_events >= 300, net mean
+    > 0 and at 60-120 min >= 2x the 0.67-filter net mean.
+data:
+  exchange: coinone
+  symbol: BTC-KRW
+  timeframe: 1m
+  aux: []
+bar_minutes: 5
+signals:
+- entry:
+    block: donchian_breakout
+    params:
+      lookback: 288
+  filters:
+  - - block: vol_regime
+      params:
+        window: 24
+        min_pct: 0.8
+study:
+  horizons:
+  - 5
+  - 15
+  - 30
+  - 60
+  - 120
+  - 240
+  primary_horizons:
+  - 30
+  - 60
+  - 120
+  min_gap_min: 60
+  n_null: 1000
+  seed: 0
+  min_events: 300
+  stratify: hour_vol
+costs:
+  primary: coinone_conservative
+  grade: upbit_conservative
+correction:
+  method: bh
+  alpha: 0.1
+budget: 1
+family: vol_breakout

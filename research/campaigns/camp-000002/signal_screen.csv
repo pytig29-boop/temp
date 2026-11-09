@@ -1,0 +1,5 @@
+label,family,entry,filters,n_events,p_signal,best_h,excess_bp,z,net_bp[coinone_conservative],net_bp[upbit_conservative],info_h,profile,significant,passed,fail_reason
+"upbit_lead_impulse(k=1,thr_bp=20) & session_kst(session=all_but_quiet)",xvenue_upbit_lead,upbit_lead_impulse,session_kst,3905,0.00377755,30,3.61675,3.02113,-0.614141,-14.6035,15,peaked,True,False,net mean ≤ 0 under coinone_conservative
+"upbit_lead_impulse(k=1,thr_bp=40) & session_kst(session=all_but_quiet)",xvenue_upbit_lead,upbit_lead_impulse,session_kst,488,0.0123647,30,15.0584,2.64195,10.5818,-3.42318,5,decaying (z maximal at the shortest horizon),True,True,
+"upbit_lead_impulse(k=2,thr_bp=20) & session_kst(session=all_but_quiet)",xvenue_upbit_lead,upbit_lead_impulse,session_kst,4945,0.0580027,30,1.87903,2.0677,-2.33223,-16.3192,5,decaying (z maximal at the shortest horizon),True,False,net mean ≤ 0 under coinone_conservative
+"upbit_lead_impulse(k=2,thr_bp=40) & session_kst(session=all_but_quiet)",xvenue_upbit_lead,upbit_lead_impulse,session_kst,718,0.398863,30,3.95957,1.11253,-0.255985,-14.2458,15,peaked,False,False,not significant after correction

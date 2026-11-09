@@ -1,0 +1,59 @@
+name: c1_vol_breakout_atr_v1
+family: vol_breakout
+hypothesis:
+  text: 'Coinone BTC-KRW 5m: donchian_breakout(lookback 288 = 1 day high), with or
+    without vol_regime(24, 0.67), with ATR-multiple exits and 30-120 min max hold,
+    earns positive coinone_conservative net returns that survive G0-G6 and the robustness
+    suite.'
+  rationale: 'M3 volatility breakout continuation (counterparty: stops / liquidated
+    shorts above the 1-day high, late chasers). Entry/filters fixed to the 2 configs
+    that passed screen camp-000003 (all shorter lookbacks failed on net cost). Info
+    horizon 15 min (peaked) but the vol-filtered excess keeps growing to 240 min,
+    so hold {30,120} (low-turnover variant included per pipeline calibration). Exits
+    centred on screen ATR suggestions (TP ~1.0-1.1 ATR at 15 min scaling to ~3 ATR
+    at 120 min; SL ~1.6-1.7 ATR): SL {2.0} ATR x TP {1.5, 3.0} ATR x hold {30,120}
+    = 4 exit variants. Expected annual Sharpe estimate ~1.0-1.5 (net 2-3.5 bp/trade,
+    ~250-450 trades/yr) - below the ~2 the pipeline reliably detects at <=1 trade/day;
+    run anyway because the grid is tiny (8 specs) and the result is informative. vol_regime
+    filter motivated by K-P0-4 (lockbox+Val exposed), value = default block-grid point,
+    not tuned.'
+  success_criteria: At least one spec passes G0-G6 and the Dev robustness suite.
+timeframe: 5m
+data:
+  exchange: coinone
+  symbol: BTC-KRW
+  timeframe: 1m
+  aux: []
+from_screen: camp-000003
+power:
+  target_sharpe: 1.5
+entry:
+  block: donchian_breakout
+  grid:
+    lookback:
+    - 288
+filters:
+- []
+- - block: vol_regime
+    grid:
+      window:
+      - 24
+      min_pct:
+      - 0.67
+exits:
+  mode: atr
+  sl_atr:
+  - 2.0
+  tp_atr:
+  - 1.5
+  - 3.0
+  max_hold_min:
+  - 30
+  - 120
+  atr_bars: 14
+costs:
+  primary: coinone_conservative
+  grade: upbit_conservative
+  stress: coinone_stress
+  grade_stress: upbit_stress
+budget: 8

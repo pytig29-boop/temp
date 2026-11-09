@@ -1,0 +1,19 @@
+# Cycle 1 (2026-11-09) H3 — M4 mean reversion after forced selling, Coinone 5m.
+name: c1_liq_meanrev_5m_screen
+family: liq_meanrev
+hypothesis:
+  text: "On Coinone BTC-KRW at 5m decisions, sharp downside dislocations (close far below its rolling mean: bollinger_z_revert; RSI crossing back up from oversold: rsi_oversold_bounce) are followed by 30-120 min returns above a matched (KST hour x volatility) null, at least when the 1h trend is up (trend_regime_1h)."
+  rationale: "Mechanism M4 (mechanisms.md): derivative liquidations and panic selling create price-insensitive spot selling pressure; once it ends, liquidity providers are paid by a partial rebound. Counterparty: force-liquidated levered longs and panic-selling retail. Persistence: they sell regardless of price; liquidity provision during cascades carries inventory risk most participants avoid. Kills it: information-driven drops (no rebound), second-wave cascades (falling knife), bear regimes - the trend_regime_1h filter tests the 'dip in an uptrend' version. Volume confirmation is NOT used because Coinone volume is contaminated/thin (pitfalls P-D1, data audit) and no Upbit-volume block exists. OUTLIER_DEPENDENT risk high (few crash days, e.g. 2024-12-03 martial-law dislocation) - must be checked by robustness if anything passes. No lockbox/Val-exposed evidence used; block-grid values only."
+  success_criteria: "Per config: BH q=0.10 over the family's screen configs, n_events >= 300, coinone_conservative net mean > 0 at the best primary horizon (30/60/120 min)."
+data: {exchange: coinone, symbol: BTC-KRW, timeframe: 1m, aux: []}
+bar_minutes: 5
+signals:
+  - entry: {block: bollinger_z_revert, grid: {window: [24, 96], z: [2.5, 3.0]}}
+    filters: [[], [{block: trend_regime_1h, params: {span: 24}}]]
+  - entry: {block: rsi_oversold_bounce, grid: {period: [14], level: [20, 25]}}
+    filters: [[]]
+study: {horizons: [5, 15, 30, 60, 120, 240], primary_horizons: [30, 60, 120], min_gap_min: 60, n_null: 1000,
+        seed: 0, min_events: 300, stratify: hour_vol}
+costs: {primary: coinone_conservative, grade: upbit_conservative}
+correction: {method: bh, alpha: 0.10}
+budget: 10

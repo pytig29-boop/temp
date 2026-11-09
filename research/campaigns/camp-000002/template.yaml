@@ -1,0 +1,65 @@
+name: c1_xvenue_lag_5m_screen
+family: xvenue_upbit_lead
+hypothesis:
+  text: On Coinone BTC-KRW at 5m decisions, after Upbit rises by thr_bp over k 5m
+    bars while Coinone lags by at least half of it (upbit_lead_impulse), Coinone forward
+    returns over 30-120 min exceed a matched (KST hour x volatility) null, net of
+    coinone_conservative cost.
+  rationale: 'Same mechanism M1 as the 1m screen (Upbit leads KRW price discovery,
+    Coinone lags); this variant tests whether the information survives a 5m decision
+    interval, which is robust to our own latency and to stale 1m Coinone prints and
+    has a longer horizon that matches the pipeline''s lower-turnover detection range
+    (research/reports/pipeline_calibration.md). Counterparty: slow Coinone limit orders
+    / lagging makers. Kills it: lag shorter than 5 min (information already absorbed
+    at the decision), Coinone bots arbitraging. Evidence: Dev data audit 5m Coinone/Upbit
+    return corr 0.82-0.93 (lockbox none, Val none) leaves room for a lag residual;
+    K-P0-5 (lockbox+Val exposed) motivation only. Filter session_kst all_but_quiet
+    (thin KST 03-08 removed). Block-grid values only.'
+  success_criteria: 'Per config: BH q=0.10 over family screen configs (incl. the 1m
+    screen), n_events >= 300, coinone_conservative net mean > 0 at the best primary
+    horizon (30/60/120 min).'
+data:
+  exchange: coinone
+  symbol: BTC-KRW
+  timeframe: 1m
+  aux:
+  - upbit
+bar_minutes: 5
+signals:
+- entry:
+    block: upbit_lead_impulse
+    grid:
+      k:
+      - 1
+      - 2
+      thr_bp:
+      - 20
+      - 40
+  filters:
+  - - block: session_kst
+      params:
+        session: all_but_quiet
+study:
+  horizons:
+  - 5
+  - 15
+  - 30
+  - 60
+  - 120
+  - 240
+  primary_horizons:
+  - 30
+  - 60
+  - 120
+  min_gap_min: 60
+  n_null: 1000
+  seed: 0
+  min_events: 300
+  stratify: hour_vol
+costs:
+  primary: coinone_conservative
+  grade: upbit_conservative
+correction:
+  method: bh
+  alpha: 0.1
+budget: 4

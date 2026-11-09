@@ -1,0 +1,11 @@
+label,family,entry,filters,n_events,p_signal,best_h,excess_bp,z,net_bp[coinone_conservative],net_bp[upbit_conservative],info_h,profile,significant,passed,fail_reason
+"bollinger_z_revert(window=24,z=2.5)",liq_meanrev,bollinger_z_revert,-,4647,0.00399348,120,4.17896,3.00425,1.13533,-12.8565,120,peaked,True,True,
+"bollinger_z_revert(window=24,z=2.5) & trend_regime_1h(span=24)",liq_meanrev,bollinger_z_revert,trend_regime_1h,2118,0.014611,120,4.62673,2.5849,2.0239,-11.9691,120,peaked,True,True,
+"bollinger_z_revert(window=24,z=3.0)",liq_meanrev,bollinger_z_revert,-,1826,0.461126,120,2.33892,1.02066,-0.640492,-14.6298,240,rising (z still increasing at the longest horizon — information may persist longer),False,False,not significant after correction
+"bollinger_z_revert(window=24,z=3.0) & trend_regime_1h(span=24)",liq_meanrev,bollinger_z_revert,trend_regime_1h,809,0.0315569,30,4.3792,2.3073,0.302722,-13.6879,5,decaying (z maximal at the shortest horizon),True,True,
+"bollinger_z_revert(window=96,z=2.5)",liq_meanrev,bollinger_z_revert,-,2999,0.00109819,60,5.26865,3.37726,1.38903,-12.6031,240,rising (z still increasing at the longest horizon — information may persist longer),True,True,
+"bollinger_z_revert(window=96,z=2.5) & trend_regime_1h(span=24)",liq_meanrev,bollinger_z_revert,trend_regime_1h,678,4.2989e-05,120,16.0079,4.18387,12.6338,-1.3741,120,peaked,True,True,
+"bollinger_z_revert(window=96,z=3.0)",liq_meanrev,bollinger_z_revert,-,1657,0.00115358,60,7.2875,3.3637,3.44779,-10.5472,60,peaked,True,True,
+"bollinger_z_revert(window=96,z=3.0) & trend_regime_1h(span=24)",liq_meanrev,bollinger_z_revert,trend_regime_1h,396,9.49543e-05,30,11.1759,4.00015,6.74279,-7.25685,30,peaked,True,True,
+"rsi_oversold_bounce(period=14,level=20)",liq_meanrev,rsi_oversold_bounce,-,901,0.0223909,60,6.73051,2.43414,2.76727,-11.2268,60,peaked,True,True,
+"rsi_oversold_bounce(period=14,level=25)",liq_meanrev,rsi_oversold_bounce,-,2142,0.0585606,60,3.36025,2.06376,-0.438374,-14.428,15,peaked,True,False,net mean ≤ 0 under coinone_conservative

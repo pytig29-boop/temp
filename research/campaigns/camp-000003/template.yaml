@@ -1,0 +1,85 @@
+name: c1_vol_breakout_5m_screen
+family: vol_breakout
+hypothesis:
+  text: On Coinone BTC-KRW at 5m decisions, upside channel breakouts (donchian_breakout,
+    atr_channel_breakout) are followed by 30-120 min returns above a matched (KST
+    hour x volatility) null, and more so when short-term realised volatility is in
+    the upper part of its trailing 7-day range (vol_regime) or in the KST night session.
+  rationale: 'Mechanism M3 (mechanisms.md): volatility clustering + stop-loss / short-liquidation
+    cascades + late trend followers make large moves persist briefly (ultra-short
+    time-series momentum). Counterparty: stop orders and liquidated shorts resting
+    above the channel (price-insensitive buyers we front-run), late retail chasers
+    we sell to, counter-trend limit sellers. Persistence: forced liquidations in levered
+    markets execute regardless of price. Kills it: false breakouts in low-vol regimes,
+    costs, 2022-style bear market (long only). Evidence: K-P0-3/K-P0-4 (session, vol
+    tercile) are lockbox+Val exposed: they motivate the filters only; filter values
+    are default block-grid points (vol_regime min_pct 0.67 window 24, session night),
+    not tuned. The matched null stratifies on hour x volatility so filter effects
+    themselves are not counted as signal. Vol computed on Coinone 5m returns (audit:
+    >=5m features acceptable).'
+  success_criteria: 'Per config: BH q=0.10 over the family''s screen configs, n_events
+    >= 300, coinone_conservative net mean > 0 at the best primary horizon (30/60/120
+    min).'
+data:
+  exchange: coinone
+  symbol: BTC-KRW
+  timeframe: 1m
+  aux: []
+bar_minutes: 5
+signals:
+- entry:
+    block: donchian_breakout
+    grid:
+      lookback:
+      - 48
+      - 96
+      - 288
+  filters:
+  - []
+  - - block: vol_regime
+      params:
+        window: 24
+        min_pct: 0.67
+- entry:
+    block: atr_channel_breakout
+    params:
+      span: 24
+      mult: 3
+  filters:
+  - []
+  - - block: vol_regime
+      params:
+        window: 24
+        min_pct: 0.67
+- entry:
+    block: donchian_breakout
+    params:
+      lookback: 96
+  filters:
+  - - block: session_kst
+      params:
+        session: night
+study:
+  horizons:
+  - 5
+  - 15
+  - 30
+  - 60
+  - 120
+  - 240
+  primary_horizons:
+  - 30
+  - 60
+  - 120
+  min_gap_min: 60
+  n_null: 1000
+  seed: 0
+  min_events: 300
+  stratify: hour_vol
+costs:
+  primary: coinone_conservative
+  grade: upbit_conservative
+correction:
+  method: bh
+  alpha: 0.1
+budget: 9
