@@ -1,0 +1,119 @@
+{
+  "campaign_id": "camp-000014",
+  "hypothesis_id": "hyp-000014",
+  "template": "c2b_vol_breakout_donch_1h_atr",
+  "family": "vol_breakout",
+  "created": "2026-11-09T23:32:42+00:00",
+  "data": {
+    "exchange": "coinone",
+    "symbol": "BTC-KRW",
+    "timeframe": "1m",
+    "rows_1m": 2541600,
+    "filled_frac": 0.07562873780295877,
+    "aux": [],
+    "aux_rows_1m": {}
+  },
+  "timeframe": "1h",
+  "exits": {
+    "mode": "atr",
+    "atr_bars": 14,
+    "n_variants": 4
+  },
+  "period": {
+    "segment": "dev",
+    "start": "2021-01-01T00:00:00+00:00",
+    "end": "2025-11-01T00:00:00+00:00"
+  },
+  "data_snapshot": "snap-93b066dd27ee41f0a0ec",
+  "code_commit": "9db1f9fffc3963e77f36b158e2845d55910f6aec",
+  "n_specs": 8,
+  "n_runs": 16,
+  "costs": {
+    "primary": "coinone_conservative",
+    "grade": "upbit_conservative",
+    "stress": "coinone_stress",
+    "grade_stress": "upbit_stress"
+  },
+  "evaluated_costs": [
+    "coinone_conservative",
+    "upbit_conservative"
+  ],
+  "runtime_sec": 2.17,
+  "half_life_days": 365,
+  "power": {
+    "n_grid": 8,
+    "family": "vol_breakout",
+    "n_family_prior": 37,
+    "ratio": 0.25,
+    "ratio_source": "history median of 5 campaigns",
+    "k_eff_est": 2.0,
+    "n_trials_dsr": 11.25,
+    "n_days": 1765,
+    "var_trial_sr": 0.0002962719799426046,
+    "var_source": "history median",
+    "min_dsr": 0.95,
+    "required_sharpe_ann": 1.2861557372171548,
+    "required_sharpe_ann_single_trial": 0.7484985921568781,
+    "target_sharpe_ann": 2.0,
+    "max_trials_for_target": 7828.811917693164,
+    "max_grid_for_target": 31278.247670772656,
+    "markdown": "- 계획 격자 8 스펙, 계열 `vol_breakout` 기존 시도 37, 압축비 0.25 (history median of 5 campaigns) → 실질 시도 ≈ 11.2\n- Dev 1765일, V=0.000296 (history median), 왜도 0, 첨도 3, DSR ≥ 0.95\n- **G5 통과 최소 연 Sharpe ≈ 1.29** (시도 1회였다면 0.75)\n- 목표 연 Sharpe 2 로 감당 가능한 실질 시도 ≈ 7829 (격자 ≈ 31278 스펙)",
+    "warning": null,
+    "strict": true,
+    "ok": true
+  },
+  "screen": {
+    "from_screen": "camp-000009",
+    "requires_screen_pass": false,
+    "n_configs": 2,
+    "matches": [
+      {
+        "config": "donchian_breakout{'lookback': 48}",
+        "screen_id": "camp-000009",
+        "run_id": "run-000098",
+        "p_signal": 0.010189759419050022,
+        "n_events": 952,
+        "info_horizon": 1440,
+        "exchange": "coinone",
+        "aux": []
+      },
+      {
+        "config": "donchian_breakout{'lookback': 144}",
+        "screen_id": "camp-000009",
+        "run_id": "run-000100",
+        "p_signal": 0.00020745061559300927,
+        "n_events": 583,
+        "info_horizon": 1440,
+        "exchange": "coinone",
+        "aux": []
+      }
+    ],
+    "rule": "every (entry params × filter params × timeframe × exchange) config passed a recorded screen"
+  },
+  "params": {
+    "params_version": "a008ed2348e4",
+    "cost_versions": {
+      "coinone_base": 2,
+      "coinone_conservative": 2,
+      "coinone_stress": 2,
+      "upbit_base": 1,
+      "upbit_conservative": 1,
+      "upbit_stress": 1
+    },
+    "registry_version": 1,
+    "n_params": {
+      "1": 24,
+      "2": 61,
+      "3": 12
+    }
+  },
+  "params_version": "a008ed2348e4",
+  "cost_versions": {
+    "coinone_base": 2,
+    "coinone_conservative": 2,
+    "coinone_stress": 2,
+    "upbit_base": 1,
+    "upbit_conservative": 1,
+    "upbit_stress": 1
+  }
+}

@@ -1,0 +1,57 @@
+name: c2b_vol_breakout_donch_1h_atr
+data:
+  exchange: coinone
+  symbol: BTC-KRW
+  timeframe: 1m
+  aux: []
+timeframe: 1h
+entry:
+  block: donchian_breakout
+  grid:
+    lookback:
+    - 48
+    - 144
+filters:
+- []
+exits:
+  mode: atr
+  sl_atr:
+  - 2.5
+  - 3.5
+  tp_atr:
+  - 2.5
+  - 5.0
+  max_hold_min:
+  - 1440
+  atr_bars: 14
+from_screen: camp-000009
+power:
+  target_sharpe: 2.0
+costs:
+  primary: coinone_conservative
+  grade: upbit_conservative
+  stress: coinone_stress
+  grade_stress: upbit_stress
+budget: 8
+family: vol_breakout
+hypothesis:
+  text: 'Coinone BTC-KRW 1h: donchian_breakout(lookback 48/144 h) with ATR exits (SL
+    2.5/3.5 ATR x TP 2.5/5 ATR, max hold 1440 min = information horizon) earns positive
+    coinone_conservative net returns that pass G0-G5 on Dev and the robustness suite.'
+  rationale: 'Mechanism M3 at multi-hour horizons (time-series momentum: slow information
+    diffusion, trend-following flows, short-liquidation/stop cascades). Counterparty:
+    counter-trend limit sellers and stops at breakout levels, late chasers we sell
+    to at exit. Kills it: bear regimes for a long-only spot book (2022 excess ~0 or
+    negative in the per-year side calculation for several configs), false breakouts,
+    regime beta (robustness alpha check). Screen camp-000009 (Dev only, lockbox none,
+    Val none) passed this entry; exits are ATR multiples centred on the screen''s
+    MFE/MAE suggestion and max hold at the information horizon. Pre-stated expectation:
+    Dev Sharpe >= 1.5 with leave-year-out and alpha checks passing; per-year side
+    calculation showed 2022/2025 weakness, so REGIME_DEPENDENT is the predicted failure
+    mode. Screen configs: lookback 144 n=583 net +80.7 bp at 1440 (Upbit +66.6), lookback
+    48 n=952 net +48.0 (Upbit +33.9); info horizon 1440 (rising); suggestion TP 2.4-2.7
+    ATR, SL 3.5-3.7 ATR. lookback 24 (also passed) is left out to keep the grid small;
+    48 is the neighbour for G3. [derived-from drv-000009 ← fact-000009; family vol_breakout]'
+  success_criteria: At least one spec passes G0-G6 and the Dev robustness suite (latency,
+    outliers, leave-year-out, cost x1.5, regime, alpha, cross-venue). Refuted for
+    this timeframe if the best Dev Sharpe_w < 1 or leave-year-out/regime/alpha fail.
