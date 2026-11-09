@@ -1,0 +1,962 @@
+# 파라미터 레지스트리 — 모든 한도·임계값의 등급·근거·버전 (docs/PARAMS.md)
+# class 1 = 시장 측정치(자동, 비대칭 규칙) · 2 = 증거 기준(합성 보정 제안 + 사람 승인, 다음 캠페인부터)
+# · 3 = 위험 선호(사람 선택). 값은 source 가 가리키는 곳이 원본이며, 여기 value 와 다르면 drift 오류.
+# 이 파일은 `python -m btc_quant.params` 가 갱신한다 — 손으로 고치지 말 것.
+version: 1
+settings:
+  calibration:
+    notional_krw: 300000
+    quantiles:
+      base: 0.5
+      conservative: 0.9
+      stress: 0.99
+    stress_safety_factor: 1.5
+    min_snapshots_per_hour: 60
+    min_hours_provisional: 2
+    min_snapshots_provisional: 300
+    min_hours_final: 72
+    min_kst_hours_final: 24
+    min_days_final: 7
+    provisional_ci: 0.95
+    provisional_auto_apply_stricter: false
+    tolerance_bps: 0.05
+    n_boot: 2000
+  risk_prefs:
+    capital_fraction: null
+uncatalogued_ok:
+- version
+- primary_metric.annualization
+- G6.val_budget.seed
+- G8.forward_states
+- G8.forward_exchanges
+params:
+- key: costs.coinone_base
+  class: 1
+  source: costs:coinone_base
+  rationale: '코인원 기본 비용: 실측 유효 편도 비용(스프레드/2+충격) 중앙값'
+  evidence: config/costs.yaml (버전 이력·근거 리포트)
+  version: 1
+  last_updated: '2026-11-09'
+  owner: auto
+  history: []
+- key: costs.coinone_conservative
+  class: 1
+  source: costs:coinone_conservative
+  rationale: '코인원 보수 비용(primary 지표 비용, D3): 실측 유효 편도 비용 p90'
+  evidence: config/costs.yaml (버전 이력·근거 리포트)
+  version: 1
+  last_updated: '2026-11-09'
+  owner: auto
+  history: []
+- key: costs.coinone_stress
+  class: 1
+  source: costs:coinone_stress
+  rationale: '코인원 stress 비용(G6 Sharpe>0 조건): 실측 p99 × 안전계수. 현재 21bp 왕복은 임의값(D12)'
+  evidence: config/costs.yaml (버전 이력·근거 리포트)
+  version: 1
+  last_updated: '2026-11-09'
+  owner: auto
+  history: []
+- key: costs.upbit_base
+  class: 1
+  source: costs:upbit_base
+  rationale: '업비트 기본 비용(등급 A 판정): 수수료 0.05% + 실측 중앙값'
+  evidence: config/costs.yaml (버전 이력·근거 리포트)
+  version: 1
+  last_updated: '2026-11-09'
+  owner: auto
+  history: []
+- key: costs.upbit_conservative
+  class: 1
+  source: costs:upbit_conservative
+  rationale: '업비트 보수 비용(등급 A 판정): 수수료 + 실측 p90'
+  evidence: config/costs.yaml (버전 이력·근거 리포트)
+  version: 1
+  last_updated: '2026-11-09'
+  owner: auto
+  history: []
+- key: costs.upbit_stress
+  class: 1
+  source: costs:upbit_stress
+  rationale: '업비트 stress 비용: 수수료 + 실측 p99 × 안전계수'
+  evidence: config/costs.yaml (버전 이력·근거 리포트)
+  version: 1
+  last_updated: '2026-11-09'
+  owner: auto
+  history: []
+- key: exchanges.coinone.taker_fee
+  class: 1
+  source: yaml:config/exchanges.yaml#coinone.taker_fee
+  value: 0.0
+  rationale: 코인원 테이커 수수료(0% 이벤트, 종료일 미정). 공식 페이지 확인값
+  evidence: '블록미디어 2026-08-26 (verified: false)'
+  version: 1
+  last_updated: '2026-11-09'
+  owner: auto
+  history: []
+- key: exchanges.upbit.taker_fee
+  class: 1
+  source: yaml:config/exchanges.yaml#upbit.taker_fee
+  value: 0.0005
+  rationale: 업비트 KRW 마켓 테이커 수수료 0.05%
+  evidence: '공개 수수료표 (verified: false)'
+  version: 1
+  last_updated: '2026-11-09'
+  owner: auto
+  history: []
+- key: risk.data_stall_minutes
+  class: 1
+  source: yaml:config/gates.yaml#risk.data_stall_minutes
+  value: 2
+  rationale: 체결 수신 지연 한도(분). 수집기 끊김(gap) 분포로 측정해야 할 값
+  evidence: PLAN §7
+  version: 1
+  last_updated: '2026-11-09'
+  owner: auto
+  history: []
+- key: risk.api_error_streak
+  class: 1
+  source: yaml:config/gates.yaml#risk.api_error_streak
+  value: 3
+  rationale: 연속 API 오류 허용 횟수 — 거래소 API 오류율 실측 대상
+  evidence: PLAN §7
+  version: 1
+  last_updated: '2026-11-09'
+  owner: auto
+  history: []
+- key: risk.price_anomaly_quantile
+  class: 1
+  source: yaml:config/gates.yaml#risk.price_anomaly_quantile
+  value: 0.999
+  rationale: 거래소 간 가격 괴리 이상 판정 분위 — 평소 괴리 분포에서 측정
+  evidence: PLAN §7
+  version: 1
+  last_updated: '2026-11-09'
+  owner: auto
+  history: []
+- key: quality.flag_wick_outliers.k
+  class: 1
+  source: pydefault:btc_quant.data.quality:flag_wick_outliers.k
+  value: 0.03
+  rationale: 비정상 꼬리 판정 폭(기준가 대비 3%) — 얇은 호가 오체결 탐지
+  evidence: data/quality.py
+  version: 1
+  last_updated: '2026-11-09'
+  owner: auto
+  history: []
+- key: quality.flag_wick_outliers.window
+  class: 1
+  source: pydefault:btc_quant.data.quality:flag_wick_outliers.window
+  value: 15
+  rationale: 꼬리 판정 기준가 창(직전 종가 15개 중앙값)
+  evidence: data/quality.py
+  version: 1
+  last_updated: '2026-11-09'
+  owner: auto
+  history: []
+- key: quality.clean_wicks.k
+  class: 1
+  source: pydefault:btc_quant.data.quality:clean_wicks.k
+  value: 0.03
+  rationale: 분석용 꼬리 정리 폭 (flag_wick_outliers.k 와 같아야 함)
+  evidence: data/quality.py
+  version: 1
+  last_updated: '2026-11-09'
+  owner: auto
+  history: []
+- key: quality.clean_wicks.window
+  class: 1
+  source: pydefault:btc_quant.data.quality:clean_wicks.window
+  value: 15
+  rationale: 분석용 꼬리 정리 창 (flag_wick_outliers.window 와 같아야 함)
+  evidence: data/quality.py
+  version: 1
+  last_updated: '2026-11-09'
+  owner: auto
+  history: []
+- key: quality.check_ohlcv.extreme_logret
+  class: 1
+  source: pydefault:btc_quant.data.quality:check_ohlcv.extreme_logret
+  value: 0.05
+  rationale: 품질 리포트의 극단 1분 로그수익 기준(5%)
+  evidence: data/quality.py
+  version: 1
+  last_updated: '2026-11-09'
+  owner: auto
+  history: []
+- key: collector.stale_seconds
+  class: 1
+  source: pydefault:btc_quant.live.ws_collector:CollectorConfig.stale_seconds
+  value: 30.0
+  rationale: WS 무수신 재연결 기준(초) — 거래소별 메시지 간격 분포로 측정
+  evidence: live/ws_collector.py
+  version: 1
+  last_updated: '2026-11-09'
+  owner: auto
+  history: []
+- key: collector.health.max_age
+  class: 1
+  source: pydefault:btc_quant.live.ws_collector:check_health.max_age
+  value: 90.0
+  rationale: 하트비트 파일 최대 경과(초)
+  evidence: live/ws_collector.py
+  version: 1
+  last_updated: '2026-11-09'
+  owner: auto
+  history: []
+- key: collector.health.max_data_age
+  class: 1
+  source: pydefault:btc_quant.live.ws_collector:check_health.max_data_age
+  value: 300.0
+  rationale: 거래소 마지막 메시지 최대 경과(초)
+  evidence: live/ws_collector.py
+  version: 1
+  last_updated: '2026-11-09'
+  owner: auto
+  history: []
+- key: robustness.latency_delays_min
+  class: 1
+  source: py:btc_quant.research.robustness:LATENCY_DELAYS_MIN
+  value:
+  - 1
+  rationale: 실시간 체결 지연 시나리오(분) — 주문 왕복 지연 실측 대상
+  evidence: research/robustness.py
+  version: 1
+  last_updated: '2026-11-09'
+  owner: auto
+  history: []
+- key: gates.primary_metric.half_life_days
+  class: 2
+  source: yaml:config/gates.yaml#primary_metric.half_life_days
+  value: 365
+  rationale: 최근 가중 반감기(D1)
+  evidence: PLAN §5.2 · 합성 보정 research/reports/pipeline_calibration.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: gates.primary_metric.cost
+  class: 2
+  source: yaml:config/gates.yaml#primary_metric.cost
+  value: conservative
+  rationale: 기준 지표 비용 역할(conservative, D3)
+  evidence: PLAN §5.2 · 합성 보정 research/reports/pipeline_calibration.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: gates.G0.max_filters
+  class: 2
+  source: yaml:config/gates.yaml#G0.max_filters
+  value: 2
+  rationale: 필터 수 상한 — 자유도 제한
+  evidence: PLAN §5.2 · 합성 보정 research/reports/pipeline_calibration.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: gates.G0.max_params
+  class: 2
+  source: yaml:config/gates.yaml#G0.max_params
+  value: 8
+  rationale: 파라미터 수 상한(청산 3개 포함) — 자유도 제한
+  evidence: PLAN §5.2 · 합성 보정 research/reports/pipeline_calibration.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: gates.G1.min_trades
+  class: 2
+  source: yaml:config/gates.yaml#G1.min_trades
+  value: 300
+  rationale: Dev 최소 거래 수 — 표본 크기
+  evidence: PLAN §5.2 · 합성 보정 research/reports/pipeline_calibration.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: gates.G1.min_recent_trades
+  class: 2
+  source: yaml:config/gates.yaml#G1.min_recent_trades
+  value: 60
+  rationale: 최근 12개월 최소 거래 수
+  evidence: PLAN §5.2 · 합성 보정 research/reports/pipeline_calibration.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: gates.G1.recent_days
+  class: 2
+  source: yaml:config/gates.yaml#G1.recent_days
+  value: 365
+  rationale: G1 최근 구간 길이
+  evidence: PLAN §5.2 · 합성 보정 research/reports/pipeline_calibration.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: gates.G2.min_weighted_sharpe
+  class: 2
+  source: yaml:config/gates.yaml#G2.min_weighted_sharpe
+  value: 0.0
+  rationale: 가중 Sharpe 하한(초과)
+  evidence: PLAN §5.2 · 합성 보정 research/reports/pipeline_calibration.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: gates.G2.null_runs
+  class: 2
+  source: yaml:config/gates.yaml#G2.null_runs
+  value: 1000
+  rationale: 무작위 진입 귀무 반복 수(p 해상도)
+  evidence: PLAN §5.2 · 합성 보정 research/reports/pipeline_calibration.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: gates.G2.null_top_fraction
+  class: 2
+  source: yaml:config/gates.yaml#G2.null_top_fraction
+  value: 0.05
+  rationale: 귀무 대비 유의수준(상위 5%)
+  evidence: PLAN §5.2 · 합성 보정 research/reports/pipeline_calibration.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: gates.G3.neighbor_median_ratio
+  class: 2
+  source: yaml:config/gates.yaml#G3.neighbor_median_ratio
+  value: 0.5
+  rationale: 인접 조합 고원 비율
+  evidence: PLAN §5.2 · 합성 보정 research/reports/pipeline_calibration.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: gates.G4.rolling_window_days
+  class: 2
+  source: yaml:config/gates.yaml#G4.rolling_window_days
+  value: 182
+  rationale: 롤링 안정성 창
+  evidence: PLAN §5.2 · 합성 보정 research/reports/pipeline_calibration.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: gates.G4.rolling_step_days
+  class: 2
+  source: yaml:config/gates.yaml#G4.rolling_step_days
+  value: 30
+  rationale: 롤링 간격
+  evidence: PLAN §5.2 · 합성 보정 research/reports/pipeline_calibration.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: gates.G4.min_rolling_positive_frac
+  class: 2
+  source: yaml:config/gates.yaml#G4.min_rolling_positive_frac
+  value: 0.6
+  rationale: 롤링 양수 비율 하한
+  evidence: PLAN §5.2 · 합성 보정 research/reports/pipeline_calibration.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: gates.G4.min_recent_sharpe
+  class: 2
+  source: yaml:config/gates.yaml#G4.min_recent_sharpe
+  value: 0.0
+  rationale: 최근 12개월 Sharpe 하한
+  evidence: PLAN §5.2 · 합성 보정 research/reports/pipeline_calibration.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: gates.G4.recent_days
+  class: 2
+  source: yaml:config/gates.yaml#G4.recent_days
+  value: 365
+  rationale: G4 최근 구간 길이
+  evidence: PLAN §5.2 · 합성 보정 research/reports/pipeline_calibration.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: gates.G5.min_dsr
+  class: 2
+  source: yaml:config/gates.yaml#G5.min_dsr
+  value: 0.95
+  rationale: Deflated Sharpe 하한 — 선택편향 보정 유의수준
+  evidence: PLAN §5.2 · 합성 보정 research/reports/pipeline_calibration.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: gates.G5.max_pbo
+  class: 2
+  source: yaml:config/gates.yaml#G5.max_pbo
+  value: 0.3
+  rationale: 과적합 확률(PBO) 상한
+  evidence: PLAN §5.2 · 합성 보정 research/reports/pipeline_calibration.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: gates.G5.pbo_splits
+  class: 2
+  source: yaml:config/gates.yaml#G5.pbo_splits
+  value: 16
+  rationale: CSCV 분할 수
+  evidence: PLAN §5.2 · 합성 보정 research/reports/pipeline_calibration.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: gates.G5.cluster_threshold
+  class: 2
+  source: yaml:config/gates.yaml#G5.cluster_threshold
+  value: 0.5
+  rationale: 실질 시도 수 군집 절단 높이
+  evidence: PLAN §5.2 · 합성 보정 research/reports/pipeline_calibration.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: gates.G6.min_sharpe
+  class: 2
+  source: yaml:config/gates.yaml#G6.min_sharpe
+  value: 0.0
+  rationale: Val Sharpe 하한(conservative 비용)
+  evidence: PLAN §5.2 · 합성 보정 research/reports/pipeline_calibration.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: gates.G6.min_stress_sharpe
+  class: 2
+  source: yaml:config/gates.yaml#G6.min_stress_sharpe
+  value: 0.0
+  rationale: Val stress 비용 Sharpe 하한 (규칙 b)
+  evidence: PLAN §5.2 · 합성 보정 research/reports/pipeline_calibration.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: gates.G6.mc_sims
+  class: 2
+  source: yaml:config/gates.yaml#G6.mc_sims
+  value: 10000
+  rationale: MC 반복 수
+  evidence: PLAN §5.2 · 합성 보정 research/reports/pipeline_calibration.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: gates.G6.val_budget.alpha
+  class: 2
+  source: yaml:config/gates.yaml#G6.val_budget.alpha
+  value: 0.1
+  rationale: Val 누적 Holm α
+  evidence: PLAN §5.2 · 합성 보정 research/reports/pipeline_calibration.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: gates.G6.val_budget.holm_mode
+  class: 2
+  source: yaml:config/gates.yaml#G6.val_budget.holm_mode
+  value: cumulative
+  rationale: Val Holm 방식
+  evidence: PLAN §5.2 · 합성 보정 research/reports/pipeline_calibration.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: gates.G6.val_budget.cap
+  class: 2
+  source: yaml:config/gates.yaml#G6.val_budget.cap
+  value: 20
+  rationale: Val 사용 상한
+  evidence: PLAN §5.2 · 합성 보정 research/reports/pipeline_calibration.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: gates.G6.val_budget.n_boot
+  class: 2
+  source: yaml:config/gates.yaml#G6.val_budget.n_boot
+  value: 2000
+  rationale: Val p 부트스트랩 반복 수
+  evidence: PLAN §5.2 · 합성 보정 research/reports/pipeline_calibration.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: gates.selection.method
+  class: 2
+  source: yaml:config/gates.yaml#selection.method
+  value: cluster_best
+  rationale: 후보 선택 방식(군집 대표)
+  evidence: PLAN §5.2 · 합성 보정 research/reports/pipeline_calibration.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: gates.selection.cluster_threshold
+  class: 2
+  source: yaml:config/gates.yaml#selection.cluster_threshold
+  value: 0.5
+  rationale: 후보 선택 군집 절단 높이
+  evidence: PLAN §5.2 · 합성 보정 research/reports/pipeline_calibration.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: gates.G7.alpha
+  class: 2
+  source: yaml:config/gates.yaml#G7.alpha
+  value: 0.1
+  rationale: 잠금 구간 누적 Holm α(D9)
+  evidence: PLAN §5.2 · 합성 보정 research/reports/pipeline_calibration.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: gates.G7.cap
+  class: 2
+  source: yaml:config/gates.yaml#G7.cap
+  value: 10
+  rationale: 잠금 구간 개봉 상한
+  evidence: PLAN §5.2 · 합성 보정 research/reports/pipeline_calibration.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: gates.G7.holm_mode
+  class: 2
+  source: yaml:config/gates.yaml#G7.holm_mode
+  value: cumulative
+  rationale: 잠금 Holm 방식(D9)
+  evidence: PLAN §5.2 · 합성 보정 research/reports/pipeline_calibration.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: gates.G8.min_paper_weeks
+  class: 2
+  source: yaml:config/gates.yaml#G8.min_paper_weeks
+  value: 3
+  rationale: 페이퍼 최소 기간
+  evidence: PLAN §5.2 · 합성 보정 research/reports/pipeline_calibration.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: gates.G8.min_paper_trades
+  class: 2
+  source: yaml:config/gates.yaml#G8.min_paper_trades
+  value: 30
+  rationale: 페이퍼 최소 거래 수
+  evidence: PLAN §5.2 · 합성 보정 research/reports/pipeline_calibration.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: gates.G8.pnl_band
+  class: 2
+  source: yaml:config/gates.yaml#G8.pnl_band
+  value: 0.9
+  rationale: 페이퍼 손익 허용 구간(백테스트 분포)
+  evidence: PLAN §5.2 · 합성 보정 research/reports/pipeline_calibration.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: gates.G8.forward_warmup_days
+  class: 2
+  source: yaml:config/gates.yaml#G8.forward_warmup_days
+  value: 14
+  rationale: 전진 인큐베이션 워밍업
+  evidence: PLAN §5.2 · 합성 보정 research/reports/pipeline_calibration.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: splits.lockbox_cap
+  class: 2
+  source: yaml:config/splits.yaml#lockbox_cap
+  value: 10
+  rationale: 잠금 구간 개봉 상한(splits.yaml)
+  evidence: PLAN §5.3
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: robustness.latency_min_retention
+  class: 2
+  source: py:btc_quant.research.robustness:LATENCY_MIN_RETENTION
+  value: 0.5
+  rationale: 지연 시 Sharpe 유지율 하한
+  evidence: research/robustness.py (gates.yaml 이관 대상)
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: robustness.outlier_top_frac
+  class: 2
+  source: py:btc_quant.research.robustness:OUTLIER_TOP_FRAC
+  value: 0.01
+  rationale: 상위 거래 제거 비율
+  evidence: research/robustness.py (gates.yaml 이관 대상)
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: robustness.outlier_top_n
+  class: 2
+  source: py:btc_quant.research.robustness:OUTLIER_TOP_N
+  value: 5
+  rationale: 상위 거래 제거 건수
+  evidence: research/robustness.py (gates.yaml 이관 대상)
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: robustness.loyo_min_days
+  class: 2
+  source: py:btc_quant.research.robustness:LOYO_MIN_DAYS
+  value: 60
+  rationale: 연도 제외 최소 일수
+  evidence: research/robustness.py (gates.yaml 이관 대상)
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: robustness.cost_mults
+  class: 2
+  source: py:btc_quant.research.robustness:COST_MULTS
+  value:
+  - 1.5
+  - 2.0
+  rationale: 비용 배수 시나리오
+  evidence: research/robustness.py (gates.yaml 이관 대상)
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: robustness.cost_pass_mult
+  class: 2
+  source: py:btc_quant.research.robustness:COST_PASS_MULT
+  value: 1.5
+  rationale: 비용 통과 배수
+  evidence: research/robustness.py (gates.yaml 이관 대상)
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: robustness.regime_lookback_days
+  class: 2
+  source: py:btc_quant.research.robustness:REGIME_LOOKBACK_DAYS
+  value: 30
+  rationale: 국면 특성 창
+  evidence: research/robustness.py (gates.yaml 이관 대상)
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: robustness.regime_max_pnl_share
+  class: 2
+  source: py:btc_quant.research.robustness:REGIME_MAX_PNL_SHARE
+  value: 0.7
+  rationale: 한 국면 손익 비중 상한
+  evidence: research/robustness.py (gates.yaml 이관 대상)
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: robustness.alpha_min_tstat
+  class: 2
+  source: py:btc_quant.research.robustness:ALPHA_MIN_TSTAT
+  value: 2.0
+  rationale: 알파 t 하한(Newey–West)
+  evidence: research/robustness.py (gates.yaml 이관 대상)
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: robustness.alpha_nw_lags
+  class: 2
+  source: py:btc_quant.research.robustness:ALPHA_NW_LAGS
+  value: 5
+  rationale: Newey–West 시차
+  evidence: research/robustness.py (gates.yaml 이관 대상)
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: robustness.cross_venue_min_ratio
+  class: 2
+  source: py:btc_quant.research.robustness:CROSS_VENUE_MIN_RATIO
+  value: 0.5
+  rationale: 교차 거래소 Sharpe 비율 하한
+  evidence: research/robustness.py (gates.yaml 이관 대상)
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: calibration.quantiles
+  class: 2
+  source: params:calibration.quantiles
+  value:
+    base: 0.5
+    conservative: 0.9
+    stress: 0.99
+  rationale: 비용 보정 분위(base 중앙값·conservative p90·stress p99) — 방법론, 사람 결정
+  evidence: docs/PARAMS.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: calibration.stress_safety_factor
+  class: 2
+  source: params:calibration.stress_safety_factor
+  value: 1.5
+  rationale: stress = p99 × 안전계수 — 관측 못 한 국면(급락·점검) 여유
+  evidence: docs/PARAMS.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: calibration.notional_krw
+  class: 2
+  source: params:calibration.notional_krw
+  value: 300000
+  rationale: 보정 기준 주문 금액(페이퍼 DEFAULT_NOTIONAL 과 같게)
+  evidence: docs/PARAMS.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: calibration.min_snapshots_per_hour
+  class: 2
+  source: params:calibration.min_snapshots_per_hour
+  value: 60
+  rationale: 한 시간 버킷을 '관측됨'으로 칠 최소 스냅샷 수
+  evidence: docs/PARAMS.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: calibration.min_hours_provisional
+  class: 2
+  source: params:calibration.min_hours_provisional
+  value: 2
+  rationale: '보정 거부 기준: 관측 시간 버킷 수 하한'
+  evidence: docs/PARAMS.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: calibration.min_snapshots_provisional
+  class: 2
+  source: params:calibration.min_snapshots_provisional
+  value: 300
+  rationale: '보정 거부 기준: 스냅샷 수 하한'
+  evidence: docs/PARAMS.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: calibration.min_hours_final
+  class: 2
+  source: params:calibration.min_hours_final
+  value: 72
+  rationale: 확정(non-provisional) 보정 최소 시간 버킷 수
+  evidence: docs/PARAMS.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: calibration.min_kst_hours_final
+  class: 2
+  source: params:calibration.min_kst_hours_final
+  value: 24
+  rationale: 확정 보정 최소 KST 시각 종류 수(하루 전체)
+  evidence: docs/PARAMS.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: calibration.min_days_final
+  class: 2
+  source: params:calibration.min_days_final
+  value: 7
+  rationale: 확정 보정 최소 일수
+  evidence: docs/PARAMS.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: calibration.provisional_ci
+  class: 2
+  source: params:calibration.provisional_ci
+  value: 0.95
+  rationale: '잠정 보정: 분위수 부트스트랩 상한 신뢰수준'
+  evidence: docs/PARAMS.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: calibration.provisional_auto_apply_stricter
+  class: 2
+  source: params:calibration.provisional_auto_apply_stricter
+  value: false
+  rationale: 잠정 보정에서도 엄격 변경 자동 적용 여부
+  evidence: docs/PARAMS.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: calibration.tolerance_bps
+  class: 2
+  source: params:calibration.tolerance_bps
+  value: 0.05
+  rationale: 변경 없음으로 볼 왕복 비용 차이
+  evidence: docs/PARAMS.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: calibration.n_boot
+  class: 2
+  source: params:calibration.n_boot
+  value: 2000
+  rationale: 분위수 부트스트랩 반복 수
+  evidence: docs/PARAMS.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: gates.G6.max_mdd
+  class: 3
+  source: yaml:config/gates.yaml#G6.max_mdd
+  value: 0.2
+  rationale: Val 최대낙폭 허용(primary 비용, 규칙 b) — 사람이 감내할 낙폭
+  evidence: PLAN §7 / D12 — preferences.option_table 로 결과 비교
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: gates.G6.max_mc_mdd95
+  class: 3
+  source: yaml:config/gates.yaml#G6.max_mc_mdd95
+  value: 0.2
+  rationale: 거래 MC 낙폭 95백분위 허용
+  evidence: PLAN §7 / D12 — preferences.option_table 로 결과 비교
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: gates.G6.max_stress_mdd
+  class: 3
+  source: yaml:config/gates.yaml#G6.max_stress_mdd
+  value: 0.2
+  rationale: 구 규칙 stress 낙폭 허용(legacy)
+  evidence: PLAN §7 / D12 — preferences.option_table 로 결과 비교
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: gates.risk.daily_loss_floor
+  class: 3
+  source: yaml:config/gates.yaml#risk.daily_loss_floor
+  value: -0.03
+  rationale: 일일 손실 한도 하한(§7)
+  evidence: PLAN §7 / D12 — preferences.option_table 로 결과 비교
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: gates.risk.weekly_loss_floor
+  class: 3
+  source: yaml:config/gates.yaml#risk.weekly_loss_floor
+  value: -0.06
+  rationale: 주간 손실 한도 하한(§7)
+  evidence: PLAN §7 / D12 — preferences.option_table 로 결과 비교
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: gates.risk.drawdown_floor
+  class: 3
+  source: yaml:config/gates.yaml#risk.drawdown_floor
+  value: -0.12
+  rationale: 누적 낙폭 정지 하한(§7)
+  evidence: PLAN §7 / D12 — preferences.option_table 로 결과 비교
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: gates.risk.drawdown_mc_mult
+  class: 3
+  source: yaml:config/gates.yaml#risk.drawdown_mc_mult
+  value: 1.2
+  rationale: 낙폭 한도 = MC MDD95 × 배수
+  evidence: PLAN §7 / D12 — preferences.option_table 로 결과 비교
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: gates.risk.loss_percentile
+  class: 3
+  source: yaml:config/gates.yaml#risk.loss_percentile
+  value: 1
+  rationale: 손실 한도 꼬리 백분위
+  evidence: PLAN §7 / D12 — preferences.option_table 로 결과 비교
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: gates.risk.min_max_trades_per_day
+  class: 3
+  source: yaml:config/gates.yaml#risk.min_max_trades_per_day
+  value: 5
+  rationale: 거래 폭주 한도 하한
+  evidence: PLAN §7 / D12 — preferences.option_table 로 결과 비교
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: gates.risk.trades_per_day_mult
+  class: 3
+  source: yaml:config/gates.yaml#risk.trades_per_day_mult
+  value: 3
+  rationale: 거래 폭주 = 일평균 × 배수
+  evidence: PLAN §7 / D12 — preferences.option_table 로 결과 비교
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: paper.notional_krw
+  class: 3
+  source: py:btc_quant.paper.fills:DEFAULT_NOTIONAL
+  value: 300000.0
+  rationale: 페이퍼 1회 주문 금액(원)
+  evidence: paper/fills.py
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []
+- key: risk_prefs.capital_fraction
+  class: 3
+  source: params:risk_prefs.capital_fraction
+  value: null
+  rationale: 총자산 중 전략 배정 비중 — 미정(사람 결정 대기)
+  evidence: null
+  version: 1
+  last_updated: '2026-11-09'
+  owner: human
+  history: []

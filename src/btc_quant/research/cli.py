@@ -1,6 +1,8 @@
 """연구 캠페인 CLI.
 
+  uv run python -m btc_quant.research.cli screen research/campaign_templates/<screen>.yaml   # 신호 선별 (v4)
   uv run python -m btc_quant.research.cli run research/campaign_templates/donchian_breakout.yaml [--max-candidates 5]
+                                         [--strict-power]
   uv run python -m btc_quant.research.cli report camp-000001
   uv run python -m btc_quant.research.cli list
 """
@@ -9,7 +11,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from .campaign import CampaignError, ResearchEnv, list_campaigns, run_campaign
+from .campaign import CampaignError, ResearchEnv, list_campaigns, run_campaign, run_screen
 from .pipeline import run_pipeline
 from .report import write_report
 
@@ -20,11 +22,23 @@ def _log(s: str) -> None:
 
 def cmd_run(a) -> int:
     env = ResearchEnv.at(a.root)
-    cr = run_campaign(a.template, env=env, progress=_log)
+    cr = run_campaign(a.template, env=env, progress=_log, strict_power=a.strict_power)
     if not a.no_pipeline:
         run_pipeline(cr, env=env, top_k=a.max_candidates, n_null=a.n_null, progress=_log)
     p = write_report(cr.campaign_id, env=env)
     print(f"{cr.campaign_id}\t{p}")
+    return 0
+
+
+def cmd_screen(a) -> int:
+    env = ResearchEnv.at(a.root)
+    res = run_screen(a.template, env=env, progress=_log)
+    t = res.table
+    for r in t.to_dict("records"):
+        print(f"{r['label']}\tn={r['n_events']}\tp={r['p_signal']:.3g}\tbest_h={r['best_h']}\t"
+              f"passed={r['passed']}\t{r['fail_reason'] or ''}")
+    print(f"{res.campaign_id}\t{res.dir / 'signal_screen.md' if res.dir else ''}\t"
+          f"{res.decision['n_passed']}/{len(t)} passed")
     return 0
 
 
@@ -60,7 +74,13 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--max-candidates", type=int, default=5)
     r.add_argument("--n-null", type=int, default=None, help="null seeds (default config G2.null_runs)")
     r.add_argument("--no-pipeline", action="store_true", help="only run the grid (gates later)")
+    r.add_argument("--strict-power", action="store_true",
+                   help="refuse (before any ledger write) when the power check fails: required Sharpe > "
+                        "power.target_sharpe or no target declared (default: warn only)")
     r.set_defaults(fn=cmd_run)
+    sc = sub.add_parser("screen", help="pre-register + run a signal screen (event study, no exits) on Dev")
+    sc.add_argument("template")
+    sc.set_defaults(fn=cmd_screen)
     g = sub.add_parser("gates", help="run the gate pipeline on a finished campaign")
     g.add_argument("campaign_id")
     g.add_argument("--max-candidates", type=int, default=5)

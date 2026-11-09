@@ -8,10 +8,12 @@ immediately with no output, so the normal permission flow applies untouched.
 In research mode every evaluated tool call is appended to
 logs/research_tool_calls.jsonl and the call is denied when it:
   1. writes to a protected path (approved strategies, gates/splits/risk config,
-     the ledger, the lessons notebook records, approval records,
+     the ledger, the lessons notebook records, approval records, the parameter
+     registry config/params.yaml + config/costs.yaml and research/param_approvals,
      engine/evaluation/registry/data code,
      raw data, the Claude config itself, the audit log);
-  2. runs the human-only admin CLI (approve-lockbox / activate / rollback) or
+  2. runs the human-only admin CLI (approve-lockbox / activate / rollback, and
+     `python -m btc_quant.params approve|reject`) or
      `git push` / other tree-mutating git commands;
   3. reads lockbox data (data/raw/**/year=2026/month=05..11/**) or an unscoped
      data/raw path that could cover the lockbox.
@@ -62,6 +64,10 @@ PROTECTED_WRITE = [
      "facts are immutable and interpretations are added with add_interpretation()"),
     (r"research/lockbox_approvals(/|$)", "lockbox approvals are human-only (PLAN §5.3)"),
     (r"research/activation_approvals(/|$)", "activation approvals are human-only (PLAN §6)"),
+    # 파라미터 거버넌스 (docs/PARAMS.md): 레지스트리·비용 모델은 btc_quant.params 규칙으로만, 승인은 사람만
+    (r"config/params\.ya?ml", "the parameter registry changes only through btc_quant.params class rules + human approval (docs/PARAMS.md)"),
+    (r"config/costs\.ya?ml", "cost models are versioned only by btc_quant.params calibrate (stricter) or human approval (looser)"),
+    (r"research/param_approvals(/|$)", "parameter-change approvals are human-only (docs/PARAMS.md)"),
     (r"src/btc_quant/(backtest|evaluation|registry|data)(/|$)", "engine/gates/registry/data code is not AI-editable (PLAN §3.3)"),
     (r"data/raw(/|$)", "raw market data is written only by the collectors"),
     (r"\.claude/(settings[^/\s'\"]*\.json|hooks|agents|skills)(/|$)", "the research guard configuration cannot be changed from a research session"),
@@ -83,6 +89,10 @@ ADMIN_RES = [
     re.compile(r"(?:^|[\s;&|])(activate|rollback)(?=\s|$|;|&|\|)"),
     re.compile(r"\b(activate|rollback|approve_lockbox|approve_activation)\s*\("),
     re.compile(r"\b(write_lockbox_approval|write_activation_approval)\b"),
+    # 파라미터 제안 승인/거부 (사람 전용) 와 검증 우회 쓰기 함수
+    re.compile(r"btc_quant[./]params\b[^;&|\n]*?\s(approve|reject)\b"),
+    re.compile(r"btc_quant\.params(?:\.\w+)?\s+import\s+[^;\n]*\b(approve|reject|add_versions?|record_change)\b"),
+    re.compile(r"\b(add_versions?|record_change|approve_proposal)\s*\("),
 ]
 
 WRITE_VERB_RE = re.compile(
@@ -187,7 +197,7 @@ def check_bash(cmd: str) -> str | None:
         return None
     for rx in ADMIN_RES:
         if rx.search(cmd):
-            return "human-only admin command (lockbox approval / activation / rollback) is not available to AI research sessions (PLAN §6)"
+            return "human-only admin command (lockbox approval / activation / rollback / parameter approval) is not available to AI research sessions (PLAN §6, docs/PARAMS.md)"
     for m in GIT_RE.finditer(cmd):
         sub = m.group(1)
         if sub == "push":

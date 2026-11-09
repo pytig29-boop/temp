@@ -7,20 +7,26 @@ PLAN §5.1 ①~③. 관문(④~⑥)은 `pipeline.py`, 리포트는 `report.py`.
 절차 (`run_campaign`)
 1. 템플릿 검증 + 격자 전수 열거(StrategySpec.validate, ≤2 필터, ≤8 파라미터). 조합 수 > budget 이면
    **원장에 아무것도 쓰지 않고** `CampaignBudgetError`.
-2. 데이터 스냅샷 id 계산(파일 해시만, 백테스트 아님) → 가설·캠페인을 원장에 등록(**실행 전**).
-3. Dev 데이터는 `DataAccess.read("dev", …)` 로만 읽고 `regularize(clean_wicks(…))`.
-4. 진입·필터 블록 신호는 (블록, 파라미터)마다 한 번씩만 계산·캐시, (진입 파라미터 × 필터 파라미터)
-   조합마다 `prepare` 한 번, 청산 격자는 `simulate_many` 로 스윕.
-5. 스펙 × 평가 비용(primary + grade)마다 `metrics.summarize` → 원장 runs 에 모두 기록
-   (스냅샷 id, 코드 커밋 포함).
-6. research/campaigns/<campaign_id>/ 에 결과 저장 (README 참조: 무엇을 git 에 넣는지).
+2. (v4) 신호 선별 연결 확인(`from_screen` / `requires_screen_pass`): 격자의 모든 진입(+필터) 구성이
+   원장에 기록된 선별에서 통과했어야 한다. 아니면 원장에 쓰기 전에 `ScreenGateError`.
+   (v4) 검정력 점검(`power.budget_report`): 격자의 실질 시도 수 → G5 통과 최소 연 Sharpe. 기본은 경고만,
+   `strict_power=True` 면 목표 Sharpe(`power.target_sharpe`) 미달·미선언 시 `PowerCheckError` (원장 쓰기 전).
+3. 데이터 스냅샷 id 계산(파일 해시만, 백테스트 아님) → 가설·캠페인을 원장에 등록(**실행 전**).
+4. Dev 데이터는 `DataAccess.read("dev", …)` 로만 읽고 `regularize(clean_wicks(…))`.
+   보조 데이터(`data.aux: [upbit]`)는 같은 구간을 같은 방식으로 읽어 결정 주기 봉(`to_tf`)으로 만든다 —
+   페이퍼(`paper.trader.evaluate_signals`)와 같은 구성 (`aux_context`).
+5. 진입·필터 블록 신호는 (블록, 파라미터)마다 한 번씩만 계산·캐시(결정 주기 봉 `to_tf(m1, B)`),
+   (진입 파라미터 × 필터 파라미터) 조합마다 `prepare` 한 번, 청산 격자는 `simulate_many` 로 스윕
+   (고정 % 또는 ATR 배수 — `exits.mode`).
+6. 스펙 × 평가 비용(primary + grade)마다 `metrics.summarize` → 원장 runs 에 모두 기록
+   (`Ledger.record_runs`, 스냅샷 id, 코드 커밋 포함).
+7. research/campaigns/<campaign_id>/ 에 결과 저장 (README 참조: 무엇을 git 에 넣는지).
 """
 from __future__ import annotations
 
 import itertools
 import json
 import math
-import os
 import subprocess
 import time
 from dataclasses import dataclass, field
@@ -36,13 +42,14 @@ from btc_quant.backtest.types import (COINONE_BASE, COINONE_CONSERVATIVE, COINON
                                       UPBIT_BASE, UPBIT_CONSERVATIVE, CostModel)
 from btc_quant.data.quality import clean_wicks, regularize
 from btc_quant.evaluation import metrics as M
-from btc_quant.registry.ledger import Ledger, LedgerError, repo_root, utcnow
+from btc_quant.registry.ledger import Ledger, repo_root, utcnow
 from btc_quant.registry.snapshot import snapshot_id
 from btc_quant.registry.splits import DataAccess
 from btc_quant.registry.strategies import StrategyRegistry
 from btc_quant.strategy.blocks import REGISTRY, Context, Registry
-from btc_quant.strategy.features import to_5m
-from btc_quant.strategy.spec import MAX_FILTERS, BlockRef, ExitSpec, StrategySpec
+from btc_quant.strategy.features import to_tf
+from btc_quant.strategy.spec import (DEFAULT_ATR_BARS, DEFAULT_TIMEFRAME, MAX_FILTERS, TIMEFRAMES, BlockRef,
+                                     ExitSpec, StrategySpec, tf_minutes)
 
 # types.py 에 업비트 stress 프리셋이 없어 여기서 정의 (코인원 stress 와 같은 스프레드·슬리피지 + 업비트 수수료).
 # 권장: backtest/types.py 에 UPBIT_STRESS 추가.
@@ -53,8 +60,12 @@ COST_MODELS: dict[str, CostModel] = {c.name: c for c in (
 
 DEFAULT_COSTS = {"primary": "coinone_conservative", "grade": "upbit_conservative",
                  "stress": "coinone_stress", "grade_stress": "upbit_stress"}
-EXIT_KEYS = ("sl_pct", "tp_pct", "max_hold_min")
+EXIT_KEYS = ("sl_pct", "tp_pct", "max_hold_min")            # 고정 % 청산 (기존)
+ATR_EXIT_KEYS = ("sl_atr", "tp_atr", "max_hold_min")        # ATR 배수 청산 (v4, ENGINE_SPEC "ATR 청산")
+EXIT_MODES = ("pct", "atr")
 HALF_LIFE_DAYS = 365          # PLAN D1
+# 실시간으로 만들 수 있는 보조 데이터 (paper.bars.LIVE_AUX 와 같은 값). 바이낸스는 실시간 수신 불가 → 캠페인 불가.
+LIVE_AUX = ("upbit",)
 
 
 class CampaignError(ValueError):
@@ -63,6 +74,14 @@ class CampaignError(ValueError):
 
 class CampaignBudgetError(CampaignError):
     pass
+
+
+class ScreenGateError(CampaignError):
+    """신호 선별 통과 기록이 없는 진입(+필터) 구성으로 캠페인을 돌리려 함 (원장 쓰기 전 거부)."""
+
+
+class PowerCheckError(CampaignError):
+    """`strict_power` 에서 검정력 점검 실패 (원장 쓰기 전 거부)."""
 
 
 def get_cost(name: str) -> CostModel:
@@ -131,12 +150,30 @@ class CampaignTemplate:
     aux: list[str]
     entry: BlockGrid
     filter_sets: list[list[BlockGrid]]
-    exits: dict[str, list]          # sl_pct, tp_pct, max_hold_min
+    exits: dict[str, list]          # 고정 %: sl_pct, tp_pct, max_hold_min | ATR: sl_atr, tp_atr, max_hold_min
     costs: dict[str, str]           # primary, grade, stress, grade_stress
     budget: int
     family: str
     segment: str = "dev"
     raw: dict = field(default_factory=dict)
+    decision_tf: str = DEFAULT_TIMEFRAME   # 결정 주기 "5m" | "1m" (StrategySpec.timeframe, D10)
+    exit_mode: str = "pct"                 # "pct" | "atr"
+    atr_bars: int = DEFAULT_ATR_BARS       # ATR 모드 ATR 창 (결정 주기 봉 수)
+    from_screen: str | None = None         # 선별 캠페인 id (원장) — 이 선별에서 통과한 구성만 허용
+    requires_screen_pass: bool = False     # True: 원장의 어떤 선별에서든 통과한 구성만 허용
+    power: dict = field(default_factory=dict)   # {target_sharpe: float} (선택)
+
+    @property
+    def tf_min(self) -> int:
+        return tf_minutes(self.decision_tf)
+
+    @property
+    def exit_keys(self) -> tuple[str, str, str]:
+        return ATR_EXIT_KEYS if self.exit_mode == "atr" else EXIT_KEYS
+
+    @property
+    def screen_gated(self) -> bool:
+        return bool(self.from_screen) or self.requires_screen_pass
 
     # ---------------------------------------------------------- 로드·검증
     @classmethod
@@ -149,7 +186,7 @@ class CampaignTemplate:
         if not isinstance(d, dict):
             raise CampaignError("template must be a mapping")
         allowed = {"name", "hypothesis", "data", "entry", "filters", "exits", "costs", "budget",
-                   "family", "segment"}
+                   "family", "segment", "timeframe", "from_screen", "requires_screen_pass", "power"}
         extra = set(d) - allowed
         if extra:
             raise CampaignError(f"unknown template keys {sorted(extra)}")
@@ -161,10 +198,18 @@ class CampaignTemplate:
             if not str(hyp.get(k) or "").strip():
                 raise CampaignError(f"hypothesis.{k} required")
         data = d.get("data") or {}
+        exchange = str(data.get("exchange", "coinone"))
         aux = list(data.get("aux") or [])
-        if aux:
-            raise CampaignError(f"aux data {aux} not supported yet (no live-available reference feed); "
-                                "use aux: []")
+        bad = [a for a in aux if a not in LIVE_AUX]
+        if bad:
+            raise CampaignError(f"aux data {bad} not supported: only live-available feeds {list(LIVE_AUX)} "
+                                "(binance has no live feed → cannot be paper traded)")
+        if len(set(aux)) != len(aux) or exchange in aux:
+            raise CampaignError(f"aux {aux}: duplicates or the target exchange {exchange!r} itself")
+        tf = str(d.get("timeframe", DEFAULT_TIMEFRAME))
+        if tf not in TIMEFRAMES:
+            raise CampaignError(f"timeframe must be one of {list(TIMEFRAMES)} (decision interval, D10)")
+        tf_min = tf_minutes(tf)
         entry = _block_grid(d.get("entry"), "entry", registry)
         fsets_raw = d.get("filters", [[]])
         if not isinstance(fsets_raw, list) or not fsets_raw:
@@ -183,17 +228,28 @@ class CampaignTemplate:
         keys = [tuple(sorted(b.block for b in fs)) for fs in fsets]
         if len(set(keys)) != len(keys):
             raise CampaignError("duplicate filter sets (same blocks); merge their grids instead")
-        ex = d.get("exits") or {}
-        if set(ex) != set(EXIT_KEYS):
-            raise CampaignError(f"exits must have exactly {EXIT_KEYS}")
+        ex = dict(d.get("exits") or {})
+        mode = str(ex.pop("mode", "pct"))
+        if mode not in EXIT_MODES:
+            raise CampaignError(f"exits.mode must be one of {EXIT_MODES}")
+        atr_bars = DEFAULT_ATR_BARS
+        if mode == "atr":
+            atr_bars = ex.pop("atr_bars", DEFAULT_ATR_BARS)
+            if isinstance(atr_bars, bool) or not isinstance(atr_bars, int) or atr_bars < 1:
+                raise CampaignError("exits.atr_bars must be one positive integer (not a grid)")
+        keys = ATR_EXIT_KEYS if mode == "atr" else EXIT_KEYS
+        if set(ex) != set(keys):
+            raise CampaignError(f"exits ({mode} mode) must have exactly {keys}"
+                                + (" (+ mode, atr_bars)" if mode == "atr" else " (+ optional mode: pct)"))
         exits = {}
-        for k in EXIT_KEYS:
+        for k in keys:
             vals = _value_list(ex[k], f"exits.{k}")
             for v in vals:
-                if not (isinstance(v, (int, float)) and v > 0):
+                if isinstance(v, bool) or not (isinstance(v, (int, float)) and v > 0):
                     raise CampaignError(f"exits.{k} values must be > 0")
-                if k == "max_hold_min" and (int(v) != v or int(v) % 5):
-                    raise CampaignError("max_hold_min values must be positive multiples of 5")
+                if k == "max_hold_min" and (int(v) != v or int(v) % tf_min):
+                    raise CampaignError(f"max_hold_min values must be positive multiples of {tf_min} "
+                                        f"(timeframe {tf})")
             exits[k] = [int(v) for v in vals] if k == "max_hold_min" else [float(v) for v in vals]
         costs = {**DEFAULT_COSTS, **(d.get("costs") or {})}
         if set(costs) != set(DEFAULT_COSTS):
@@ -208,11 +264,35 @@ class CampaignTemplate:
         segment = d.get("segment", "dev")
         if segment != "dev":
             raise CampaignError("campaigns run on the dev segment only (PLAN §5)")
+        from_screen = d.get("from_screen")
+        if from_screen is not None and (not isinstance(from_screen, str) or not from_screen.strip()):
+            raise CampaignError("from_screen must be a screen campaign id (e.g. camp-000012)")
+        rsp = d.get("requires_screen_pass", False)
+        if not isinstance(rsp, bool):
+            raise CampaignError("requires_screen_pass must be true/false")
+        power = d.get("power") or {}
+        if not isinstance(power, dict) or set(power) - {"target_sharpe"}:
+            raise CampaignError("power must be a mapping with optional target_sharpe")
+        if "target_sharpe" in power:
+            ts = power["target_sharpe"]
+            if isinstance(ts, bool) or not isinstance(ts, (int, float)) or not ts > 0:
+                raise CampaignError("power.target_sharpe must be > 0 (annualised)")
+            power = {"target_sharpe": float(ts)}
+        # 블록이 요구하는 보조 데이터는 data.aux 에 선언돼 있어야 한다
+        need = sorted({r for b in [entry, *(f for fs in fsets for f in fs)]
+                       for r in registry.get(b.block).requires})
+        missing = [r for r in need if r not in aux]
+        if missing:
+            raise CampaignError(f"blocks require aux data {missing}; declare data.aux: {need} "
+                                f"(live-available: {list(LIVE_AUX)})")
         tpl = cls(name=name, hypothesis={k: hyp[k] for k in ("text", "rationale", "success_criteria")},
-                  exchange=str(data.get("exchange", "coinone")), symbol=str(data.get("symbol", "BTC-KRW")),
+                  exchange=exchange, symbol=str(data.get("symbol", "BTC-KRW")),
                   timeframe=str(data.get("timeframe", "1m")), aux=aux, entry=entry, filter_sets=fsets,
                   exits=exits, costs=costs, budget=budget,
-                  family=str(d.get("family") or entry.block), segment=segment, raw=d)
+                  family=str(d.get("family") or entry.block), segment=segment, raw=d,
+                  decision_tf=tf, exit_mode=mode, atr_bars=int(atr_bars),
+                  from_screen=from_screen.strip() if from_screen else None, requires_screen_pass=rsp,
+                  power=power)
         tpl.validate_specs(registry)
         return tpl
 
@@ -225,8 +305,24 @@ class CampaignTemplate:
         return n_entry * n_f * n_exit
 
     def exit_combos(self) -> list[tuple[float, float, int]]:
-        return list(itertools.product(self.exits["sl_pct"], self.exits["tp_pct"],
-                                      self.exits["max_hold_min"]))
+        """(sl, tp, max_hold_min) — sl/tp 는 고정 % 모드에서 %, ATR 모드에서 ATR 배수."""
+        return list(itertools.product(*(self.exits[k] for k in self.exit_keys)))
+
+    @property
+    def sim_atr_bars(self) -> int | None:
+        """fast.simulate_many(..., atr_bars=) 인자: ATR 모드면 ATR 창, 아니면 None."""
+        return self.atr_bars if self.exit_mode == "atr" else None
+
+    def make_exit(self, sl: float, tp: float, hold: int) -> ExitSpec:
+        if self.exit_mode == "atr":
+            return ExitSpec(max_hold_min=int(hold), stop_loss_atr=float(sl), take_profit_atr=float(tp),
+                            atr_bars=int(self.atr_bars))
+        return ExitSpec(float(sl), float(tp), int(hold))
+
+    def exit_values(self, ex: ExitSpec) -> dict[str, float]:
+        """스펙의 청산 → {exit_key: 값} (G3 인접·결과표 열 이름)."""
+        k_sl, k_tp, k_h = self.exit_keys
+        return {k_sl: ex.sl, k_tp: ex.tp, k_h: ex.max_hold_min}
 
     def signal_combos(self) -> list[tuple[BlockRef, tuple[BlockRef, ...], int]]:
         """(진입 BlockRef, 필터 BlockRef 튜플, 필터 세트 번호) — prepare 단위."""
@@ -240,9 +336,11 @@ class CampaignTemplate:
 
     def make_spec(self, entry: BlockRef, filters: tuple[BlockRef, ...], sl: float, tp: float,
                   hold: int) -> StrategySpec:
-        tmp = StrategySpec("x", entry, ExitSpec(float(sl), float(tp), int(hold)), tuple(filters))
-        return StrategySpec(f"{self.name}_{tmp.logic_hash()[:10]}", entry,
-                            ExitSpec(float(sl), float(tp), int(hold)), tuple(filters))
+        """sl/tp: 고정 % 모드는 %, ATR 모드는 ATR 배수. 결정 주기 = 템플릿 timeframe."""
+        ex = self.make_exit(sl, tp, hold)
+        tmp = StrategySpec("x", entry, ex, tuple(filters), timeframe=self.decision_tf)
+        return StrategySpec(f"{self.name}_{tmp.logic_hash()[:10]}", entry, ex, tuple(filters),
+                            timeframe=self.decision_tf)
 
     def enumerate(self) -> list[StrategySpec]:
         exits = self.exit_combos()
@@ -250,7 +348,7 @@ class CampaignTemplate:
 
     def validate_specs(self, registry: Registry = REGISTRY) -> None:
         """구조(필터 세트)마다 대표 스펙 하나로 StrategySpec.validate (모든 스펙의 파라미터 수가 같음)."""
-        x = (self.exits["sl_pct"][0], self.exits["tp_pct"][0], self.exits["max_hold_min"][0])
+        x = tuple(self.exits[k][0] for k in self.exit_keys)
         e = BlockRef(self.entry.block, self.entry.combos()[0])
         for fs in self.filter_sets:
             spec = self.make_spec(e, tuple(BlockRef(f.block, f.combos()[0]) for f in fs), *x)
@@ -270,15 +368,24 @@ class CampaignTemplate:
     def cost_models(self) -> list[str]:
         return [self.costs[k] for k in ("primary", "grade", "stress", "grade_stress")]
 
+    def exits_record(self) -> dict:
+        if self.exit_mode == "atr":
+            return {"mode": "atr", **self.exits, "atr_bars": self.atr_bars}
+        return dict(self.exits)
+
     def to_record(self) -> dict:
-        return {
+        rec = {
             "name": self.name, "family": self.family, "segment": self.segment,
             "data": {"exchange": self.exchange, "symbol": self.symbol, "timeframe": self.timeframe,
                      "aux": self.aux},
+            "timeframe": self.decision_tf,
             "entry": {"block": self.entry.block, "grid": self.entry.grid},
             "filters": [[{"block": f.block, "grid": f.grid} for f in fs] for fs in self.filter_sets],
-            "exits": self.exits, "costs": self.costs, "budget": self.budget,
+            "exits": self.exits_record(), "costs": self.costs, "budget": self.budget,
         }
+        if self.screen_gated:
+            rec["screen_gate"] = {"from_screen": self.from_screen, "requires_screen_pass": self.requires_screen_pass}
+        return rec
 
 
 def _value_list(v, where: str) -> list:
@@ -314,15 +421,25 @@ def _block_grid(d, kind: str, registry: Registry) -> BlockGrid:
 
 # ============================================================== 신호 캐시
 class SignalCache:
-    """5분봉과 블록 평가 결과를 (블록, 파라미터)마다 한 번만 계산한다."""
+    """결정 주기 봉(`to_tf(m1, B)`)과 블록 평가 결과를 (블록, 파라미터)마다 한 번만 계산한다.
 
-    def __init__(self, m1: pd.DataFrame, ctx: Context | None = None, registry: Registry = REGISTRY):
+    ctx: 보조 데이터(`aux_context`). tf_min: 결정 주기 B (5 또는 1). atr_bars: ATR 청산 창(있으면 prepare 에서
+    결정 행 ATR 비율을 함께 만든다)."""
+
+    def __init__(self, m1: pd.DataFrame, ctx: Context | None = None, registry: Registry = REGISTRY,
+                 tf_min: int = 5, atr_bars: int | None = None):
         self.m1 = m1
-        self.bars = to_5m(m1)
+        self.tf_min = int(tf_min)
+        self.bars = to_tf(m1, self.tf_min)
         self.complete = self.bars["complete"].to_numpy(bool)
-        self.ctx = ctx or Context()
+        self.ctx = ctx or Context(bar=pd.Timedelta(minutes=self.tf_min))
         self.registry = registry
+        self.atr_bars = atr_bars
         self._cache: dict[str, np.ndarray] = {}
+
+    @property
+    def timeframe(self) -> str:
+        return f"{self.tf_min}m"
 
     def block(self, ref: BlockRef) -> np.ndarray:
         k = json.dumps([ref.block, ref.params], sort_keys=True, default=str)
@@ -343,7 +460,8 @@ class SignalCache:
                          name="entry_ok")
 
     def prepared(self, entry: BlockRef, filters) -> fast.Prepared:
-        return fast.prepare(self.m1, self.entry_ok(entry, filters), None)
+        return fast.prepare(self.m1, self.entry_ok(entry, filters), None, timeframe=self.timeframe,
+                            atr_bars=self.atr_bars, bars=self.bars)
 
 
 def load_segment(env: ResearchEnv, segment: str, exchange: str, symbol: str, timeframe: str
@@ -357,6 +475,144 @@ def prepare_m1(raw: pd.DataFrame) -> pd.DataFrame:
     if raw.empty:
         raise CampaignError("no data")
     return regularize(clean_wicks(raw))
+
+
+def aux_context(aux_m1: dict[str, pd.DataFrame], tf_min: int) -> Context:
+    """보조 1분봉(이미 `regularize(clean_wicks(raw))`) → 블록 Context.
+
+    페이퍼와 같은 구성: `paper.trader.evaluate_signals` 는 업비트 1분봉 이력(M1History = regularize(clean_wicks))을
+    `to_tf(·, B)` 로 만들어 `ctx.aux["upbit"]` 에 넣고, 블록은 `aux_frame` 으로 대상 bars.index 에 reindex
+    (ffill 없음 — 없는 시각은 NaN → 조건 False) 한다. 여기서도 같은 함수(`to_tf`)로 같은 봉을 만든다.
+    bar = 결정 주기 길이 명시."""
+    return Context(aux={k: to_tf(df, int(tf_min)) for k, df in (aux_m1 or {}).items()},
+                   bar=pd.Timedelta(minutes=int(tf_min)))
+
+
+def load_aux_m1(env: ResearchEnv, tpl: "CampaignTemplate", start=None, end=None,
+                segment: str | None = None) -> dict[str, pd.DataFrame]:
+    """템플릿 data.aux 의 보조 거래소 1분봉 (같은 구간, DataAccess 경유, regularize(clean_wicks))."""
+    out = {}
+    for a in tpl.aux:
+        raw = (env.data.read(segment, a, tpl.symbol, tpl.timeframe) if segment is not None
+               else env.data.read_range(start, end, a, tpl.symbol, tpl.timeframe))
+        if raw.empty:
+            raise CampaignError(f"no {a} aux data for {segment or (start, end)}")
+        out[a] = prepare_m1(raw)
+    return out
+
+
+def data_snapshot(env: ResearchEnv, tpl: "CampaignTemplate", start, end) -> str:
+    """대상 시계열 스냅샷 id (+ 보조 데이터가 있으면 `|<aux>:<id>` 를 이어 붙임)."""
+    snap = snapshot_id(tpl.exchange, tpl.symbol, tpl.timeframe, start, end, data_root=env.data.data_root)
+    for a in tpl.aux:
+        snap += f"|{a}:" + snapshot_id(a, tpl.symbol, tpl.timeframe, start, end, data_root=env.data.data_root)
+    return snap
+
+
+# ============================================================== 신호 선별 연결 (v4)
+def _norm_params(p: dict) -> str:
+    def nv(v):
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            return v
+        return float(v)
+    return json.dumps({str(k): nv(v) for k, v in (p or {}).items()}, sort_keys=True, default=str)
+
+
+def signal_config_key(entry: dict | BlockRef, filters, timeframe: str) -> str:
+    """선별·캠페인 공통 '신호 구성' 키: 진입(블록·파라미터) + 필터 집합(순서 무관) + 결정 주기.
+    숫자 파라미터는 float 로 정규화(48 == 48.0)."""
+    def one(r):
+        if isinstance(r, BlockRef):
+            return [r.block, _norm_params(r.params)]
+        return [r["block"], _norm_params(r.get("params") or {})]
+    fs = sorted(json.dumps(one(f)) for f in (filters or []))
+    return json.dumps([one(entry), fs, str(timeframe)])
+
+
+def screen_passes(ledger: Ledger, screen_id: str | None = None, exchange: str | None = None
+                  ) -> dict[str, dict]:
+    """원장의 선별 통과 구성 {signal_config_key: 근거}. screen_id 가 있으면 그 선별만.
+    exchange 가 있으면 대상 거래소가 같은 선별만 (선별 캠페인 grid.data.exchange)."""
+    camps = {c["id"]: c for c in ledger.records("campaigns")}
+    out: dict[str, dict] = {}
+    for r in ledger.records("runs"):
+        m = r.get("metrics") or {}
+        if m.get("kind") != "signal_screen" or not (m.get("decision") or {}).get("passed"):
+            continue
+        if screen_id is not None and r["campaign_id"] != screen_id:
+            continue
+        grid = (camps.get(r["campaign_id"]) or {}).get("grid") or {}
+        ex = (grid.get("data") or {}).get("exchange")
+        if exchange is not None and ex != exchange:
+            continue
+        sp = r.get("spec") or {}
+        key = signal_config_key(sp["entry"], sp.get("filters") or [], sp.get("timeframe", DEFAULT_TIMEFRAME))
+        out.setdefault(key, {"screen_id": r["campaign_id"], "run_id": r["id"], "p_signal": m.get("p_signal"),
+                             "n_events": m.get("n_events"), "info_horizon": m.get("info_horizon"),
+                             "exchange": ex, "aux": (grid.get("data") or {}).get("aux") or []})
+    return out
+
+
+def check_screen_gate(ledger: Ledger, tpl: "CampaignTemplate") -> dict | None:
+    """매칭 규칙 (README '신호 선별 연결'): 캠페인 격자의 **모든** 신호 구성(진입 파라미터 × 필터 세트 파라미터,
+    결정 주기 포함)이 원장에 기록된 선별 시도 중 **통과(decision.passed)** 한 것과 같아야 한다.
+    - from_screen 이 있으면 그 선별 캠페인 안에서만, 아니면(requires_screen_pass) 어떤 선별이든.
+    - 같음 = 진입 블록·파라미터, 필터 블록·파라미터 집합(순서 무관), 결정 주기(5m/1m), 대상 거래소가 모두 같음.
+    - 선별 결과가 원장에 없으면(존재하지 않는 id 포함) 거부.
+    게이트가 없으면 None. 하나라도 어긋나면 ScreenGateError (원장 쓰기 전)."""
+    if not tpl.screen_gated:
+        return None
+    if tpl.from_screen is not None:
+        camp = ledger.get("campaigns", tpl.from_screen)
+        if camp is None or (camp.get("grid") or {}).get("kind") != "signal_screen":
+            raise ScreenGateError(f"from_screen {tpl.from_screen!r} is not a signal screen in the ledger")
+    passes = screen_passes(ledger, tpl.from_screen, tpl.exchange)
+    matches, missing = [], []
+    for e, fs, _ in tpl.signal_combos():
+        k = signal_config_key(e, fs, tpl.decision_tf)
+        lbl = e.block + str(e.params) + "".join(f" & {f.block}{f.params}" for f in fs)
+        if k in passes:
+            matches.append({"config": lbl, **passes[k]})
+        else:
+            missing.append(lbl)
+    if missing:
+        where = f"screen {tpl.from_screen}" if tpl.from_screen else "any recorded screen"
+        raise ScreenGateError(
+            f"{len(missing)} of {len(matches) + len(missing)} signal configs did not pass {where} "
+            f"(exchange {tpl.exchange}, timeframe {tpl.decision_tf}): {missing[:5]}"
+            f"{' …' if len(missing) > 5 else ''}. Screen them first (research.cli screen) or narrow the grid.")
+    return {"from_screen": tpl.from_screen, "requires_screen_pass": tpl.requires_screen_pass,
+            "n_configs": len(matches), "matches": matches,
+            "rule": "every (entry params × filter params × timeframe × exchange) config passed a recorded screen"}
+
+
+# ============================================================== 검정력 (v4)
+def power_check(env: ResearchEnv, tpl: "CampaignTemplate", n_specs: int, strict: bool = False) -> dict:
+    """power.budget_report 로 계획 격자의 G5 통과 최소 연 Sharpe. 경고(기본) / strict 면 PowerCheckError.
+    strict 실패 조건: 목표 Sharpe 미선언, 또는 필요 Sharpe > 목표 Sharpe."""
+    from .power import budget_report
+    start, end = env.data.segment_bounds(tpl.segment)
+    n_days = int((end - start) / pd.Timedelta(days=1))
+    target = tpl.power.get("target_sharpe")
+    rep = budget_report(n_specs, n_days, tpl.family, target, root=env.root, ledger=env.ledger,
+                        campaigns_dir=env.campaigns_dir)
+    need = float(rep["required_sharpe_ann"])
+    warn = None
+    if target is None:
+        warn = (f"no power.target_sharpe declared; G5 needs annual Sharpe ≈ {need:.2f} with "
+                f"≈{rep['n_trials_dsr']:.1f} effective trials")
+    elif need > target:
+        warn = (f"required annual Sharpe {need:.2f} > target {target:.2f} (≈{rep['n_trials_dsr']:.1f} effective "
+                f"trials) — shrink the grid or drop the campaign")
+    out = {k: rep.get(k) for k in ("n_grid", "family", "n_family_prior", "ratio", "ratio_source", "k_eff_est",
+                                   "n_trials_dsr", "n_days", "var_trial_sr", "var_source", "min_dsr",
+                                   "required_sharpe_ann", "required_sharpe_ann_single_trial",
+                                   "target_sharpe_ann", "max_trials_for_target", "max_grid_for_target")}
+    out.update(markdown=rep["markdown"], warning=warn, strict=bool(strict),
+               ok=warn is None)
+    if strict and warn:
+        raise PowerCheckError(f"power check failed (--strict-power): {warn}")
+    return out
 
 
 # ============================================================== 결과
@@ -389,52 +645,8 @@ def _metrics_record(m: dict) -> dict:
 
 def record_runs_batch(ledger: Ledger, campaign_id: str, items: list[tuple[StrategySpec, str, dict]],
                       period: dict, data_snapshot: str, code_commit: str, family: str) -> list[str]:
-    """Ledger.record_run 과 같은 검증·형식으로 여러 실행을 한 번의 잠금 안에서 추가한다.
-
-    Ledger.record_run 은 호출마다 runs.jsonl 전체를 다시 읽으므로(예산 확인) 수천 건이면 O(n²) 이다.
-    이 함수는 같은 검증(사전등록 비용·예산)을 한 번에 하고, 레코드 형식은 record_run 과 동일하다.
-    권장: Ledger 에 record_runs(batch) API 추가 (그때 이 함수는 그 API 호출로 교체).
-    """
-    from btc_quant.registry import ledger as L
-
-    with ledger.lock():
-        camp = ledger.get("campaigns", campaign_id)
-        if camp is None:
-            raise LedgerError(f"unknown campaign {campaign_id} (create_campaign first)")
-        seen = {r["logic_hash"] for r in ledger.records("runs") if r["campaign_id"] == campaign_id}
-        for spec, cost_name, _ in items:
-            if cost_name not in camp["cost_models"]:
-                raise LedgerError(f"cost {cost_name!r} not pre-registered in {campaign_id}")
-            seen.add(spec.logic_hash())
-        if len(seen) > camp["budget"]:
-            raise L.BudgetExceededError(f"campaign {campaign_id} budget {camp['budget']} exceeded "
-                                        f"({len(seen)} distinct specs)")
-        p = ledger.path("runs")
-        seq0 = ledger._count_lines("runs")
-        lines, ids = [], []
-        for j, (spec, cost_name, mets) in enumerate(items, start=1):
-            seq = seq0 + j
-            rec = {"id": f"{L.TABLES['runs']}-{seq:06d}", "seq": seq, "ts": utcnow(), **L._clean({
-                "campaign_id": campaign_id, "hypothesis_id": camp["hypothesis_id"],
-                "family": family or camp.get("family") or spec.entry.block,
-                "spec_id": spec.id, "spec_version": spec.version, "logic_hash": spec.logic_hash(),
-                "spec": spec.to_dict(), "cost_name": cost_name, "period": dict(period),
-                "data_snapshot": data_snapshot, "code_commit": code_commit, "metrics": mets or {}})}
-            lines.append(json.dumps(rec, ensure_ascii=False, allow_nan=False))
-            ids.append(rec["id"])
-        if not lines:
-            return ids
-        prefix = ""
-        if p.exists() and p.stat().st_size > 0:
-            with open(p, "rb") as fh:
-                fh.seek(-1, 2)
-                if fh.read(1) != b"\n":
-                    prefix = "\n"
-        with open(p, "a", encoding="utf-8") as fh:
-            fh.write(prefix + "\n".join(lines) + "\n")
-            fh.flush()
-            os.fsync(fh.fileno())
-        return ids
+    """호환용 별칭 → `Ledger.record_runs` (같은 검증·형식, 한 번의 잠금). signal_study.screen 이 쓴다."""
+    return ledger.record_runs(campaign_id, items, period, data_snapshot, code_commit, family)
 
 
 # ============================================================== 실행
@@ -447,13 +659,25 @@ def register_campaign(env: ResearchEnv, tpl: CampaignTemplate, snapshot: str, pe
         hyp_id, grid=tpl.to_record(), budget=n_specs, cost_models=tpl.cost_models(),
         period={**period, "data_snapshot": snapshot}, family=tpl.family,
         note=f"campaign template {tpl.name}: {n_specs} specs (template budget {tpl.budget}); "
-             f"evaluated on dev with {tpl.costs['primary']} (primary) and {tpl.costs['grade']} (grade)")
+             f"timeframe {tpl.decision_tf}, exits {tpl.exit_mode}"
+             + (f", aux {tpl.aux}" if tpl.aux else "")
+             + (f", screen-gated ({tpl.from_screen or 'any screen'})" if tpl.screen_gated else "")
+             + f"; evaluated on dev with {tpl.costs['primary']} (primary) and {tpl.costs['grade']} (grade)")
     return hyp_id, camp_id
+
+
+def exit_columns(tpl: CampaignTemplate, sl, tp, hold) -> dict:
+    """결과표의 청산 열: 고정 % = sl_pct/tp_pct/max_hold_min, ATR = sl_atr/tp_atr/max_hold_min/atr_bars."""
+    k_sl, k_tp, k_h = tpl.exit_keys
+    out = {k_sl: sl, k_tp: tp, k_h: hold}
+    if tpl.exit_mode == "atr":
+        out["atr_bars"] = tpl.atr_bars
+    return out
 
 
 def run_campaign(template: CampaignTemplate | str | Path, root: str | Path | None = None,
                  env: ResearchEnv | None = None,
-                 progress: Callable[[str], None] | None = None) -> CampaignResult:
+                 progress: Callable[[str], None] | None = None, strict_power: bool = False) -> CampaignResult:
     tpl = template if isinstance(template, CampaignTemplate) else CampaignTemplate.from_yaml(template)
     env = env or ResearchEnv.at(root)
     log = progress or (lambda s: None)
@@ -461,8 +685,12 @@ def run_campaign(template: CampaignTemplate | str | Path, root: str | Path | Non
     specs_all = tpl.enumerate()
     if len({s.logic_hash() for s in specs_all}) != len(specs_all):
         raise CampaignError("grid produces duplicate specs")
+    screen = check_screen_gate(env.ledger, tpl)        # 선별 미통과 구성 → 원장 쓰기 전 거부
+    pw = power_check(env, tpl, n_specs, strict=strict_power)   # strict 면 원장 쓰기 전 거부
+    if pw["warning"]:
+        log(f"POWER WARNING: {pw['warning']}")
     start, end = env.data.segment_bounds(tpl.segment)
-    snap = snapshot_id(tpl.exchange, tpl.symbol, tpl.timeframe, start, end, data_root=env.data.data_root)
+    snap = data_snapshot(env, tpl, start, end)
     commit = git_commit(env.code_root)
     period = {"segment": tpl.segment, "start": start.isoformat(), "end": end.isoformat()}
     hyp_id, camp_id = register_campaign(env, tpl, snap, period, n_specs)   # ① ② 사전등록
@@ -470,7 +698,9 @@ def run_campaign(template: CampaignTemplate | str | Path, root: str | Path | Non
 
     t0 = time.time()
     m1 = load_segment(env, tpl.segment, tpl.exchange, tpl.symbol, tpl.timeframe)
-    cache = SignalCache(m1)
+    aux_m1 = load_aux_m1(env, tpl, segment=tpl.segment)
+    ctx = aux_context(aux_m1, tpl.tf_min)
+    cache = SignalCache(m1, ctx, tf_min=tpl.tf_min, atr_bars=tpl.sim_atr_bars)
     eval_costs = [tpl.costs["primary"], tpl.costs["grade"]]
     exits = tpl.exit_combos()
     rows, items, ret_cols, specs = [], [], {}, {}
@@ -480,7 +710,7 @@ def run_campaign(template: CampaignTemplate | str | Path, root: str | Path | Non
         p = cache.prepared(entry, filters)
         for cost_name in eval_costs:
             cost = get_cost(cost_name)
-            trs = fast.simulate_many(p, exits, cost, start, end)
+            trs = fast.simulate_many(p, exits, cost, start, end, atr_bars=tpl.sim_atr_bars)
             if cost_name == tpl.costs["primary"]:
                 days, mat = fast.daily_returns_matrix(p, trs, start, end)
             for xi, ((sl, tp, hold), tr) in enumerate(zip(exits, trs)):
@@ -495,12 +725,12 @@ def run_campaign(template: CampaignTemplate | str | Path, root: str | Path | Non
                              "filters": "+".join(f.block for f in filters) or "-",
                              **{f"entry.{k}": v for k, v in entry.params.items()},
                              **{f"{f.block}.{k}": v for f in filters for k, v in f.params.items()},
-                             "sl_pct": sl, "tp_pct": tp, "max_hold_min": hold,
+                             **exit_columns(tpl, sl, tp, hold),
                              "spec_json": json.dumps(spec.to_dict(), sort_keys=True),
                              **met, "cost": cost_name})
                 items.append((spec, cost_name, _metrics_record(met)))
         log(f"  signals {ci + 1}/{len(combos)} done ({len(rows)} runs, {time.time() - t0:.1f}s)")
-    record_runs_batch(env.ledger, camp_id, items, period, snap, commit, tpl.family)   # 모든 실행 기록
+    env.ledger.record_runs(camp_id, items, period, snap, commit, tpl.family)   # 모든 실행 기록
 
     results = pd.DataFrame(rows)
     returns = pd.DataFrame(ret_cols, index=days)
@@ -509,10 +739,15 @@ def run_campaign(template: CampaignTemplate | str | Path, root: str | Path | Non
         "campaign_id": camp_id, "hypothesis_id": hyp_id, "template": tpl.name, "family": tpl.family,
         "created": utcnow(), "data": {"exchange": tpl.exchange, "symbol": tpl.symbol,
                                       "timeframe": tpl.timeframe, "rows_1m": int(len(m1)),
-                                      "filled_frac": float(m1["filled"].mean())},
+                                      "filled_frac": float(m1["filled"].mean()), "aux": list(tpl.aux),
+                                      "aux_rows_1m": {k: int(len(v)) for k, v in aux_m1.items()}},
+        "timeframe": tpl.decision_tf,
+        "exits": {"mode": tpl.exit_mode, **({"atr_bars": tpl.atr_bars} if tpl.exit_mode == "atr" else {}),
+                  "n_variants": len(exits)},
         "period": period, "data_snapshot": snap, "code_commit": commit, "n_specs": n_specs,
         "n_runs": len(items), "costs": tpl.costs, "evaluated_costs": eval_costs,
         "runtime_sec": round(time.time() - t0, 2), "half_life_days": HALF_LIFE_DAYS,
+        "power": pw, "screen": screen,
     }
     out = save_campaign(env, tpl, camp_id, results, returns, manifest)
     log(f"campaign {camp_id} done: {len(items)} runs in {manifest['runtime_sec']}s → {out}")
@@ -527,7 +762,8 @@ def save_campaign(env: ResearchEnv, tpl: CampaignTemplate, camp_id: str, results
                                     encoding="utf-8")
     (out / "template.yaml").write_text(
         yaml.safe_dump(tpl.raw, allow_unicode=True, sort_keys=False), encoding="utf-8")
-    (out / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False),
+    from .pipeline import jsonable
+    (out / "manifest.json").write_text(json.dumps(jsonable(manifest), indent=2, ensure_ascii=False),
                                        encoding="utf-8")
     results.to_parquet(out / "results.parquet", index=False)
     returns.to_parquet(out / f"returns_{tpl.costs['primary']}.parquet")
@@ -569,3 +805,82 @@ def list_campaigns(root: str | Path | None = None, env: ResearchEnv | None = Non
                     "budget": c.get("budget"), "hypothesis": hyps.get(c["hypothesis_id"], {}).get("text"),
                     "saved": (d / "manifest.json").exists(), "verdict": verdict, "note": c.get("note", "")})
     return out
+
+
+# ============================================================== 신호 선별 (v4, signal_study.screen 래퍼)
+def _aux_screen_template_cls():
+    """보조 데이터(data.aux)를 지원하는 ScreenTemplate 하위 클래스 (signal_study 는 aux 를 거부하므로
+    여기서 aux 를 떼어 검증한 뒤 ctx 로 넘긴다. 원장 grid 기록·template.yaml 에는 aux 를 그대로 남긴다)."""
+    from btc_quant.research.signal_study import ScreenTemplate
+
+    @dataclass
+    class AuxScreenTemplate(ScreenTemplate):
+        aux: list = field(default_factory=list)
+
+        @classmethod
+        def from_dict(cls, d: dict, registry: Registry = REGISTRY):
+            if not isinstance(d, dict):
+                raise CampaignError("template must be a mapping")
+            data = dict(d.get("data") or {})
+            aux = list(data.pop("aux", None) or [])
+            exchange = str(data.get("exchange", "upbit"))
+            bad = [a for a in aux if a not in LIVE_AUX]
+            if bad:
+                raise CampaignError(f"screen aux {bad} not supported (live-available: {list(LIVE_AUX)})")
+            if len(set(aux)) != len(aux) or exchange in aux:
+                raise CampaignError(f"screen aux {aux}: duplicates or the target exchange {exchange!r} itself")
+            tpl = super(AuxScreenTemplate, cls).from_dict({**d, "data": data}, registry)
+            tpl.aux, tpl.raw = aux, d
+            need = sorted({r for e, fs in tpl.configs() for b in (e, *fs) for r in registry.get(b.block).requires})
+            missing = [r for r in need if r not in aux]
+            if missing:
+                raise CampaignError(f"screen blocks require aux data {missing}; declare data.aux: {need}")
+            return tpl
+
+        def to_record(self) -> dict:
+            rec = super().to_record()
+            rec["data"] = {**rec["data"], "aux": list(self.aux)}
+            return rec
+
+    return AuxScreenTemplate
+
+
+def load_screen_template(template, registry: Registry = REGISTRY):
+    """YAML 경로 | dict | ScreenTemplate → (aux 지원) ScreenTemplate."""
+    cls = _aux_screen_template_cls()
+    if isinstance(template, cls):
+        return template
+    if isinstance(template, dict):
+        return cls.from_dict(template, registry)
+    if isinstance(template, (str, Path)):
+        return cls.from_yaml(template, registry)
+    from btc_quant.research.signal_study import ScreenTemplate
+    if isinstance(template, ScreenTemplate):
+        return template
+    raise CampaignError(f"unsupported screen template {type(template)}")
+
+
+def run_screen(template, root: str | Path | None = None, env: ResearchEnv | None = None,
+               progress: Callable[[str], None] | None = None, lessons: bool = True):
+    """신호 선별 (`signal_study.screen`) + 보조 데이터(ctx, 캠페인·페이퍼와 같은 구성) + 오답노트 사실 기록.
+    데이터는 Dev 만 (screen 이 DataAccess.read("dev") 로 읽는다)."""
+    from btc_quant.research.signal_study import screen
+    env = env or ResearchEnv.at(root)
+    tpl = load_screen_template(template)
+    ctx = None
+    aux = list(getattr(tpl, "aux", []) or [])
+    if aux:
+        aux_m1 = {}
+        for a in aux:
+            raw = env.data.read("dev", a, tpl.symbol, tpl.timeframe)
+            if raw.empty:
+                raise CampaignError(f"no {a} aux data on dev")
+            aux_m1[a] = prepare_m1(raw)
+        ctx = aux_context(aux_m1, tpl.bar_minutes)
+    res = screen(tpl, env=env, ctx=ctx, progress=progress)
+    if lessons:
+        from btc_quant.research.lessons import LessonBook
+        book = LessonBook.at(env.root)
+        res.lesson_facts = [f.get("id") for f in book.record_facts_from_screen(res)]
+        book.render_markdown()
+    return res

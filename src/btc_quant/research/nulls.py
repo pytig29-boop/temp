@@ -12,11 +12,14 @@
      귀무를 이긴다(무작위 보행 합성 시장에서 p≈0.004 로 확인). `calibration="signal_rate"` 로 1)만 쓸 수 있다.
   두 p 와 귀무 거래 수 분포를 모두 보고한다.
 - seed = seed0 .. seed0+n-1 (기본 1,000개, config G2.null_runs).
+- **결정 주기 B** (`tf_min`, D10): 신호 비율·무작위 진입 해시·쿨다운 모두 결정 주기 봉 기준
+  (5m: 5분봉, 1m: 1분봉 — 후보 스펙과 같은 결정 행). **ATR 청산**(`atr_bars`): 귀무도 후보와 같은 결정 행
+  ATR 비율 배열과 같은 ATR 배수로 실행 (ATR 이 정의되지 않은 결정에서는 진입하지 않음 — 엔진 규칙 그대로).
 
 구현 (빠른 경로, `random_entry` 블록과 비트 단위 동일)
 - `random_entry(bars, p, seed)[s] = hash_uniform(s, seed) < p` 이므로, 1분봉 결정 배열에서
-  `F & complete` 가 True 이고 ~filled 인 결정 위치(t = s+5분)만 미리 구해 두고, seed 마다
-  그 위치의 5분봉 시각 s 에 대해 해시만 계산 → 후보 인덱스 → `fast.simulate_prepared`.
+  `F & complete` 가 True 이고 ~filled 인 결정 위치(t = s+B분)만 미리 구해 두고, seed 마다
+  그 위치의 결정 봉 시각 s 에 대해 해시만 계산 → 후보 인덱스 → `fast.simulate_prepared`.
 - 통계량: primary 비용 일간 수익의 **가중 Sharpe**(반감기 365일, `metrics.weighted_sharpe` 와 같은 식,
   행렬로 벡터화).
 """
@@ -28,7 +31,7 @@ import numpy as np
 import pandas as pd
 
 from btc_quant.backtest import fast
-from btc_quant.backtest.signals import FIVE_MIN, period_bounds
+from btc_quant.backtest.signals import period_bounds
 from btc_quant.backtest.types import CostModel
 from btc_quant.evaluation.metrics import ANN, exp_weights
 from btc_quant.strategy.blocks.null import _splitmix64
@@ -50,10 +53,10 @@ def weighted_sharpe_rows(mat: np.ndarray, days: pd.DatetimeIndex, half_life_days
 
 
 def calibrated_rate(entry: np.ndarray, filter_ok: np.ndarray, bars_index: pd.DatetimeIndex,
-                    start, end) -> dict:
-    """p = #(entry & filter_ok) / #(filter_ok), 5분봉 결정 시각 s+5분 ∈ [start, end) 범위."""
+                    start, end, tf_min: int = 5) -> dict:
+    """p = #(entry & filter_ok) / #(filter_ok), 결정 봉(B = tf_min 분) 결정 시각 s+B분 ∈ [start, end) 범위."""
     s, e, _, _ = period_bounds(bars_index, start, end)
-    t = bars_index + FIVE_MIN
+    t = bars_index + pd.Timedelta(minutes=int(tf_min))
     m = (t >= s) & (t < e)
     base = np.asarray(filter_ok, bool) & m
     n_base = int(base.sum())
@@ -64,11 +67,15 @@ def calibrated_rate(entry: np.ndarray, filter_ok: np.ndarray, bars_index: pd.Dat
 class RandomEntryNull:
     """같은 필터 통과 봉 집합 위에서 seed 별 random_entry 후보를 빠르게 만든다."""
 
-    def __init__(self, m1: pd.DataFrame, bars_index: pd.DatetimeIndex, filter_ok: np.ndarray):
-        base5 = pd.Series(np.asarray(filter_ok, bool), index=bars_index)
-        self.prepared = fast.prepare(m1, base5, None)     # cand = 필터 통과 결정 위치
+    def __init__(self, m1: pd.DataFrame, bars_index: pd.DatetimeIndex, filter_ok: np.ndarray,
+                 tf_min: int = 5, atr_bars: int | None = None, bars: pd.DataFrame | None = None):
+        base = pd.Series(np.asarray(filter_ok, bool), index=bars_index)
+        self.atr_bars = atr_bars
+        # cand = 필터 통과 결정 위치. ATR 청산이면 같은 결정 행 ATR 비율(후보 스펙과 동일 배열)
+        self.prepared = fast.prepare(m1, base, None, timeframe=f"{int(tf_min)}m", atr_bars=atr_bars,
+                                     bars=bars)
         self.pos = self.prepared.cand
-        bar_times = pd.DatetimeIndex(m1.index[self.pos] - FIVE_MIN)
+        bar_times = pd.DatetimeIndex(m1.index[self.pos] - pd.Timedelta(minutes=int(tf_min)))
         self._ns = np.asarray(bar_times.as_unit("ns").asi8, dtype=np.int64).view(np.uint64)
 
     def uniform(self, seed: int) -> np.ndarray:
@@ -86,7 +93,7 @@ class RandomEntryNull:
     def simulate(self, p: float, seed: int, sl: float, tp: float, hold: int, cost: CostModel,
                  si: int, ei: int) -> fast.TradeArrays:
         pr = replace(self.prepared, cand=self.candidates(p, seed))
-        return fast.simulate_prepared(pr, sl, tp, hold, cost, si, ei)
+        return fast.simulate_prepared(pr, sl, tp, hold, cost, si, ei, self.atr_bars)
 
 
 def calibrate_p_to_trades(gen: RandomEntryNull, p0: float, target_trades: int, sl: float, tp: float,
@@ -141,7 +148,8 @@ def null_distribution(m1: pd.DataFrame, bars_index: pd.DatetimeIndex, entry: np.
                       filter_ok: np.ndarray, sl: float, tp: float, hold: int, cost: CostModel,
                       start, end, n_seeds: int = 1000, seed0: int = 0,
                       half_life_days: float = 365, calibration: str = "trade_count",
-                      target_trades: int | None = None) -> dict:
+                      target_trades: int | None = None, tf_min: int = 5, atr_bars: int | None = None,
+                      bars: pd.DataFrame | None = None) -> dict:
     """귀무 가중 Sharpe 분포. 반환: sharpe_w(np.ndarray), n_trades(np.ndarray), p, seeds 등.
 
     calibration="signal_rate": p = 필터 통과 봉 중 진입 신호 비율 (calibrated_rate).
@@ -150,8 +158,8 @@ def null_distribution(m1: pd.DataFrame, bars_index: pd.DatetimeIndex, entry: np.
       같아도 귀무가 훨씬 많이 거래해 비용을 더 내므로, 신호 비율 보정만으로는 '거래를 덜 하는'
       것만으로 귀무를 이기는 편향이 생긴다(무작위 보행 합성 데이터에서 확인).
     """
-    cal = calibrated_rate(entry, filter_ok, bars_index, start, end)
-    gen = RandomEntryNull(m1, bars_index, filter_ok)
+    cal = calibrated_rate(entry, filter_ok, bars_index, start, end, tf_min)
+    gen = RandomEntryNull(m1, bars_index, filter_ok, tf_min, atr_bars, bars)
     pr = gen.prepared
     _, _, si, ei = pr.bounds(start, end)
     info = {"p_signal_rate": cal["p"], "calibration": calibration}
@@ -174,6 +182,7 @@ def null_distribution(m1: pd.DataFrame, bars_index: pd.DatetimeIndex, entry: np.
         srs[c0:c0 + len(trs)] = weighted_sharpe_rows(mat, days, half_life_days)
         ntr[c0:c0 + len(trs)] = [len(t.net_ret) for t in trs]
     return {"sharpe_w": srs, "n_trades": ntr, **cal, **info, "p": p, "n_seeds": int(n_seeds),
+            "tf_min": int(tf_min), "atr_bars": atr_bars,
             "seed0": int(seed0),
             "n_trades_median": float(np.median(ntr)) if n_seeds else 0.0,
             "sharpe_w_p95": float(np.percentile(srs, 95)) if n_seeds else float("nan"),

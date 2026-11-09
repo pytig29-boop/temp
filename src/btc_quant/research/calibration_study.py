@@ -326,6 +326,14 @@ def run_market(task: dict) -> dict:
         if task["override_null_runs"]:
             cfg = json.loads(json.dumps(cfg))
             cfg["G2"]["null_runs"] = task["n_null"]
+        if task.get("gate_overrides"):   # params.criteria: 한 기준의 후보 값 (점 경로 → 값)
+            cfg = json.loads(json.dumps(cfg))
+            for dotted, val in task["gate_overrides"].items():
+                *parents, leaf = dotted.split(".")
+                d = cfg
+                for k in parents:
+                    d = d[k]
+                d[leaf] = val
         out = run_pipeline(cr, env=env, top_k=task["top_k"], n_null=task["n_null"], gate_cfg=cfg,
                            register=False, reference_check=False)
         ex = PLANTED_SPEC.exit

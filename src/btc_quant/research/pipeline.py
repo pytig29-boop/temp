@@ -9,9 +9,13 @@
 - 후보 선택 (PLAN §10b-4): 캠페인 primary 일간 수익 행렬을 selection.correlation_clusters
   (gates.yaml selection.cluster_threshold) 로 군집화 → 군집마다 가중 Sharpe 최고 스펙 1개 → 그 대표들
   중 상위 K. 같은 군집의 변형들이 Val 사용량을 잡아먹지 않게 한다. selection.method=top_sharpe 는 구 방식.
-- G0: spec.validate(REGISTRY), 모든 블록 live_ready, aux 요구 없음, 그리고 이 데이터에서의 인과성
-  점검(5분봉을 3개 지점에서 절단해 재계산 → 절단 전 구간 신호 불변). 정식 미래참조 테스트는
-  tests/test_blocks.py.
+- G0: spec.validate(REGISTRY), 모든 블록 live_ready, 보조 데이터 요구는 실시간 가능한 것(`upbit`)만이고
+  템플릿 data.aux 에 선언된 것, 그리고 이 데이터에서의 인과성 점검(결정 주기 봉을 3개 지점에서 절단해
+  재계산 → 절단 전 구간 신호 불변). 정식 미래참조 테스트는 tests/test_blocks*.py.
+  실험 블록 사용(`spec_uses_experimental`)은 G0 를 막지 않고 `uses_experimental` 로 기록 → 리포트에
+  "잠금 전 사람 블록 검토 필요" 표시 (D11).
+- 결정 주기(1m/5m)·ATR 청산: 모든 Dev/Val 실행·귀무·G3·G6 는 스펙의 timeframe·청산 모드 그대로
+  (G2 귀무는 결정 주기 봉 기준 신호 비율·같은 ATR 배수, G3 인접은 ATR 배수 격자에서도 한 칸 이동).
 - G2 귀무: `nulls.py` — 같은 필터·청산 + random_entry, seed 1,000개. p 는 필터 통과 봉 중 진입 신호
   비율에서 출발해 귀무 거래 수 중앙값이 후보 거래 수와 같아지도록 조정(기본, 사유는 nulls.py).
   통계량 = primary 비용 가중 Sharpe. n_null < config G2.null_runs 이면 G2 실패(검정력 부족)로 처리.
@@ -41,6 +45,15 @@
   원장·리포트에는 pass/fail + 요약 통계만 남긴다(연·월·일 분해 없음 — Val 구조가 다음 가설로 새지 않게).
 - 등급: G2(귀무 재계산)·G4(Dev)·G6(Val) 을 grade 비용(upbit_conservative / upbit_stress)으로 재확인 →
   모두 통과 A, 아니면 B.
+- 견고성 묶음 (PLAN §10b-7, `robustness.robustness_suite`): G6 통과 후보마다 **Dev** 데이터로
+  (지연·상위 거래 제거·연도 제외·비용 ×1.5·국면·알파·거래소 재현; 거래소 재현 = 대상이 코인원이면 업비트,
+  업비트면 코인원 Dev). 업비트 보조 데이터를 쓰는 스펙은 거래소 재현을 skipped 로 둔다(업비트에서 자기 자신과
+  비교하게 되므로). 실패(failed 1개 이상) → status "validated (robustness FAIL)", 레지스트리는
+  **candidate 에서 멈춘다**(validated 전이·risk.yaml 없음). skipped 만 있으면 통과.
+- 레지스트리 증거: validated 전이 시 `strategies/validated/<id>_v<ver>.risk.yaml` (grade + §7 리스크 한도,
+  paper.service.load_risk_meta 형식: grade, limits{daily_loss, weekly_loss, max_drawdown, max_trades_per_day,
+  expected_fee_rate}).
+- 오답노트: run 끝에서 `lessons.record_facts_from_pipeline(out, root=…)` (멱등).
 """
 from __future__ import annotations
 
@@ -59,11 +72,12 @@ from btc_quant.evaluation import gates as G
 from btc_quant.evaluation import inference, montecarlo, selection
 from btc_quant.evaluation import metrics as M
 from btc_quant.registry.ledger import ValBudgetExhaustedError
-from btc_quant.strategy.blocks import REGISTRY
+from btc_quant.strategy.blocks import REGISTRY, Context, spec_uses_experimental
 from btc_quant.strategy.spec import BlockRef, StrategySpec
 
-from .campaign import (HALF_LIFE_DAYS, CampaignResult, ResearchEnv, SignalCache, get_cost,
-                       git_commit, load_campaign, load_segment, prepare_m1)
+from .campaign import (HALF_LIFE_DAYS, LIVE_AUX, CampaignResult, ResearchEnv, SignalCache,
+                       aux_context, data_snapshot, get_cost, git_commit, load_aux_m1, load_campaign,
+                       load_segment, prepare_m1)
 from .nulls import null_distribution, weighted_sharpe_rows
 
 VAL_WARMUP_DAYS = 14
@@ -123,7 +137,9 @@ def _blocks(spec: StrategySpec) -> list[BlockRef]:
 
 
 # ============================================================== G0
-def gate_g0(spec: StrategySpec, cache: SignalCache, n_cuts: int = 3, seed: int = 0) -> dict:
+def gate_g0(spec: StrategySpec, cache: SignalCache, n_cuts: int = 3, seed: int = 0,
+            allowed_aux: tuple[str, ...] = ()) -> dict:
+    """allowed_aux: 템플릿이 선언한 보조 데이터 중 실시간 가능한 것(LIVE_AUX). 그 밖의 aux 요구는 실패."""
     d: dict = {}
     try:
         spec.validate(REGISTRY)
@@ -133,8 +149,11 @@ def gate_g0(spec: StrategySpec, cache: SignalCache, n_cuts: int = 3, seed: int =
     defs = [REGISTRY.get(b.block) for b in _blocks(spec)]
     not_live = [x.name for x in defs if not x.live_ready]
     needs_aux = sorted({r for x in defs for r in x.requires})
+    allowed = set(allowed_aux) & set(LIVE_AUX)
+    bad_aux = [a for a in needs_aux if a not in allowed]
     d.update(n_filters=len(spec.filters), n_params=spec.n_params(), not_live_ready=not_live,
-             requires_aux=needs_aux)
+             requires_aux=needs_aux, disallowed_aux=bad_aux, timeframe=spec.timeframe,
+             exit_mode=spec.exit.mode, uses_experimental=spec_uses_experimental(spec))
     # 인과성 점검: 절단 지점 이후를 지워도 이전 신호가 같아야 한다
     bars = cache.bars
     n = len(bars)
@@ -148,7 +167,7 @@ def gate_g0(spec: StrategySpec, cache: SignalCache, n_cuts: int = 3, seed: int =
             if not np.array_equal(part, full[:c]):
                 bad.append(f"{ref.block}@{bars.index[c]}")
     d.update(causality_cuts=len(cuts), causality_violations=bad)
-    return _gate(not not_live and not needs_aux and not bad, **d)
+    return _gate(not not_live and not bad_aux and not bad, **d)
 
 
 # ============================================================== G3 인접
@@ -168,8 +187,7 @@ def neighbor_specs(cr: CampaignResult, spec: StrategySpec) -> list[tuple[str, St
             return []
         return [grid[j] for j in (i - 1, i + 1) if 0 <= j < len(grid)]
 
-    ex = spec.exit
-    xs = {"sl_pct": ex.stop_loss_pct, "tp_pct": ex.take_profit_pct, "max_hold_min": ex.max_hold_min}
+    xs = tpl.exit_values(spec.exit)        # 고정 %: sl_pct/tp_pct/max_hold_min, ATR: sl_atr/tp_atr/max_hold_min
     # 진입 파라미터
     for k, v in spec.entry.params.items():
         for nv in steps(tpl.entry.grid[k], v):
@@ -209,8 +227,10 @@ class Pipeline:
                  null_seed0: int = 0, gate_cfg: dict | None = None, register: bool = True,
                  reference_check: bool = True, null_calibration: str = "trade_count",
                  progress: Callable[[str], None] | None = None, selection_method: str | None = None,
-                 val_budget: bool = True):
+                 val_budget: bool = True, robustness: bool = True, lessons: bool = True):
         self.cr, self.env, self.top_k = cr, env, int(top_k)
+        self.robustness = bool(robustness)
+        self.lessons = bool(lessons)
         self.cfg = gate_cfg or G.load_gate_config()
         self.n_null = int(n_null if n_null is not None else self.cfg["G2"]["null_runs"])
         self.null_seed0 = null_seed0
@@ -232,22 +252,25 @@ class Pipeline:
         self.grade_tbl = cr.results[cr.results["cost"] == tpl.costs["grade"]].set_index("logic_hash")
         self._m1 = None
         self._cache = None
+        self._ctx_val: Context | None = None
 
     # ---------------------------------------------------------- 데이터
     @property
     def cache(self) -> SignalCache:
+        """Dev 1분봉 + 보조 데이터(campaign 과 같은 구성) + 결정 주기 봉 신호 캐시."""
         if self._cache is None:
             tpl = self.cr.template
             self._m1 = load_segment(self.env, "dev", tpl.exchange, tpl.symbol, tpl.timeframe)
-            self._cache = SignalCache(self._m1)
+            ctx = aux_context(load_aux_m1(self.env, tpl, segment="dev"), tpl.tf_min)
+            self._cache = SignalCache(self._m1, ctx, tf_min=tpl.tf_min, atr_bars=tpl.sim_atr_bars)
         return self._cache
 
     def dev_result(self, spec: StrategySpec, cost_name: str):
         p = self.cache.prepared(spec.entry, spec.filters)
         ex = spec.exit
         _, _, si, ei = p.bounds(self.start, self.end)
-        tr = fast.simulate_prepared(p, ex.stop_loss_pct, ex.take_profit_pct, ex.max_hold_min,
-                                    get_cost(cost_name), si, ei)
+        tr = fast.simulate_prepared(p, ex.sl, ex.tp, ex.max_hold_min,
+                                    get_cost(cost_name), si, ei, ex.atr_bars if ex.is_atr else None)
         return fast.to_result(p, tr, get_cost(cost_name), self.start, self.end, spec.id, spec.logic_hash())
 
     # ---------------------------------------------------------- 캠페인 수준 (G5 입력)
@@ -333,14 +356,15 @@ class Pipeline:
         c = self.cache
         ex = spec.exit
         nd = null_distribution(self.cache.m1, c.bars.index, c.block(spec.entry), c.filter_ok(spec.filters),
-                               ex.stop_loss_pct, ex.take_profit_pct, ex.max_hold_min, get_cost(cost_name),
+                               ex.sl, ex.tp, ex.max_hold_min, get_cost(cost_name),
                                self.start, self.end, self.n_null, self.null_seed0, HALF_LIFE_DAYS,
-                               calibration=self.null_calibration, target_trades=int(observed["n_trades"]))
+                               calibration=self.null_calibration, target_trades=int(observed["n_trades"]),
+                               tf_min=spec.tf_min, atr_bars=ex.atr_bars if ex.is_atr else None, bars=c.bars)
         ok, d = G.check_g2(observed, nd["sharpe_w"], self.cfg)
         enough = self.n_null >= self.cfg["G2"]["null_runs"]
         d.update({k: nd.get(k) for k in ("p", "p_signal_rate", "calibration", "calibration_probe_trades",
-                                         "n_entry_bars", "n_filter_bars", "n_seeds", "seed0",
-                                     "n_trades_median", "sharpe_w_p95", "sharpe_w_median")},
+                                         "n_entry_bars", "n_filter_bars", "n_seeds", "seed0", "tf_min",
+                                         "atr_bars", "n_trades_median", "sharpe_w_p95", "sharpe_w_median")},
                  candidate_n_trades=int(observed["n_trades"]), ok_null_runs=enough, cost=cost_name)
         return _gate(ok and enough, **d)
 
@@ -375,7 +399,7 @@ class Pipeline:
             for i, f in enumerate(spec.filters):
                 rest = spec.filters[:i] + spec.filters[i + 1:]
                 ex = spec.exit
-                drop = tpl.make_spec(spec.entry, rest, ex.stop_loss_pct, ex.take_profit_pct, ex.max_hold_min)
+                drop = tpl.make_spec(spec.entry, rest, ex.sl, ex.tp, ex.max_hold_min)
                 lh = drop.logic_hash()
                 if lh not in self.prim.index:
                     to_run[lh] = drop
@@ -428,7 +452,7 @@ class Pipeline:
                 sp = self.cr.specs[slh]
                 keep = tuple(f for f in sp.filters if f not in removable)
                 ex = sp.exit
-                ns = tpl.make_spec(sp.entry, keep, ex.stop_loss_pct, ex.take_profit_pct, ex.max_hold_min)
+                ns = tpl.make_spec(sp.entry, keep, ex.sl, ex.tp, ex.max_hold_min)
                 simplified = {"spec": ns.to_dict(), "logic_hash": ns.logic_hash(),
                               "note": "NEW spec — not swapped in; test it in a follow-up campaign"}
             out[slh] = {"filters": rows, "simplified": simplified, "ablation_campaign": abl_camp,
@@ -437,10 +461,12 @@ class Pipeline:
 
     # ---------------------------------------------------------- G6 (Val)
     def load_val(self):
+        """Val(+14일 워밍업) 1분봉. 보조 데이터는 같은 범위를 같은 방식으로 → self._ctx_val."""
         tpl = self.cr.template
         vs, ve = self.env.data.segment_bounds("val")
-        raw = self.env.data.read_range(vs - pd.Timedelta(days=VAL_WARMUP_DAYS), ve, tpl.exchange,
-                                       tpl.symbol, tpl.timeframe)
+        w0 = vs - pd.Timedelta(days=VAL_WARMUP_DAYS)
+        raw = self.env.data.read_range(w0, ve, tpl.exchange, tpl.symbol, tpl.timeframe)
+        self._ctx_val = aux_context(load_aux_m1(self.env, tpl, w0, ve), tpl.tf_min)
         return prepare_m1(raw), vs, ve
 
     def val_id(self, vs: pd.Timestamp, ve: pd.Timestamp) -> str:
@@ -470,18 +496,20 @@ class Pipeline:
         return {"val_id": vid, "opening": op["id"], "k": op["k"], "cap": int(vb["cap"])}
 
     def g6(self, spec: StrategySpec, m1v, vs, ve, cost_name: str, stress_name: str,
-           record: bool = True, budget: bool | None = None) -> tuple:
+           record: bool = True, budget: bool | None = None, ctx: Context | None = None) -> tuple:
         """G6. budget=True(기본: self.val_budget) 이면 Val 사용 원장 + 누적 Holm 적용 (primary 비용 전용).
-        사용 상한 도달 시 Val 을 평가하지 않고 (gate, None, None, None) 반환."""
+        사용 상한 도달 시 Val 을 평가하지 않고 (gate, None, None, None) 반환.
+        스펙은 그대로(timeframe·ATR 청산) run_fast / run_reference. ctx = Val 보조 데이터(기본 load_val 의 것)."""
         budget = self.val_budget if budget is None else budget
+        ctx = ctx if ctx is not None else self._ctx_val
         vb_cfg = self.cfg["G6"]["val_budget"]
         vbd = None
         if budget:
             vbd = self._open_val(spec, vs, ve)          # ← Val 을 보기 전에 기록
             if vbd.get("exhausted"):
                 return _gate(False, val_budget=vbd, cost=cost_name, val_status="exhausted"), None, None, None
-        res = fast.run_fast(spec, m1v, get_cost(cost_name), vs, ve)
-        st = fast.run_fast(spec, m1v, get_cost(stress_name), vs, ve)
+        res = fast.run_fast(spec, m1v, get_cost(cost_name), vs, ve, ctx=ctx)
+        st = fast.run_fast(spec, m1v, get_cost(stress_name), vs, ve, ctx=ctx)
         met, smet = M.summarize(res, HALF_LIFE_DAYS), M.summarize(st, HALF_LIFE_DAYS)
         mc = montecarlo.worst_case_mdd95(res.trades["net_ret"].to_numpy(float),
                                          n_sims=self.cfg["G6"]["mc_sims"])
@@ -490,7 +518,7 @@ class Pipeline:
                  total_return=met["total_return"], max_dd=met["max_dd"], n_days=met["n_days"],
                  sharpe_w=met["sharpe_w"])
         if self.reference_check:
-            ref = run_reference(spec, m1v, get_cost(cost_name), vs, ve)
+            ref = run_reference(spec, m1v, get_cost(cost_name), vs, ve, ctx=ctx)
             a, b = res.trades, ref.trades
             match = (len(a) == len(b)
                      and pd.DatetimeIndex(a["entry_time"]).equals(pd.DatetimeIndex(b["entry_time"]))
@@ -523,10 +551,7 @@ class Pipeline:
             per = {"segment": "val", "start": vs.isoformat(), "end": ve.isoformat(),
                    "warmup_days": VAL_WARMUP_DAYS}
             tpl = self.cr.template
-            from btc_quant.registry.snapshot import snapshot_id
-            snap = snapshot_id(tpl.exchange, tpl.symbol, tpl.timeframe,
-                               vs - pd.Timedelta(days=VAL_WARMUP_DAYS), ve,
-                               data_root=self.env.data.data_root)
+            snap = data_snapshot(self.env, tpl, vs - pd.Timedelta(days=VAL_WARMUP_DAYS), ve)
             d["data_snapshot"] = snap
             self.env.ledger.record_runs(
                 self.cr.campaign_id,
@@ -534,6 +559,40 @@ class Pipeline:
                  (spec, stress_name, _val_metrics(smet))],
                 per, snap, git_commit(self.env.code_root), tpl.family)
         return _gate(ok, **d), res, met, mc
+
+    # ---------------------------------------------------------- 견고성 (Dev)
+    def other_venue(self) -> str:
+        return "upbit" if self.cr.template.exchange != "upbit" else "coinone"
+
+    def _other_m1(self):
+        """거래소 재현용 다른 거래소 Dev 1분봉 (없으면 None → cross_venue skipped)."""
+        if not hasattr(self, "_other_cache"):
+            tpl = self.cr.template
+            try:
+                self._other_cache = load_segment(self.env, "dev", self.other_venue(), tpl.symbol, tpl.timeframe)
+            except Exception:     # noqa: BLE001 — 파티션 없음(duckdb IOException 등) → cross_venue skipped
+                self._other_cache = None
+        return self._other_cache
+
+    def robustness_check(self, spec: StrategySpec) -> dict:
+        """Dev 데이터·primary 비용으로 견고성 묶음. 업비트 aux 스펙은 거래소 재현 skipped."""
+        from .robustness import CHECKS, robustness_suite
+        c = self.cache
+        uses_aux = sorted({r for b in _blocks(spec) for r in REGISTRY.get(b.block).requires})
+        checks = CHECKS if not uses_aux else tuple(k for k in CHECKS if k != "cross_venue")
+        other = self._other_m1() if "cross_venue" in checks else None
+        out = robustness_suite(spec, c.m1, self.start, self.end, get_cost(self.costs["primary"]),
+                               other_m1=other, other_venue=self.other_venue(), ctx=c.ctx, checks=checks)
+        if uses_aux:
+            out["checks"]["cross_venue"] = {
+                "passed": None, "other_venue": self.other_venue(),
+                "reason": f"spec uses aux {uses_aux} (cross-venue block): replaying on the aux venue would "
+                          "compare it with itself"}
+            out["skipped"] = [*out["skipped"], "cross_venue"]
+            if out["passed"]:
+                out["verdict"] = f"robust on available checks (skipped: {', '.join(out['skipped'])})"
+        out.update(segment="dev", exchange=self.cr.template.exchange)
+        return out
 
     # ---------------------------------------------------------- 실행
     def run(self) -> dict:
@@ -546,7 +605,10 @@ class Pipeline:
                     f"{[x['cluster_size'] for x in sel['selected']]}" if "n_clusters" in sel else "") + ")")
         stats = self.campaign_stats()
         out = {"campaign_id": cr.campaign_id, "hypothesis_id": cr.hypothesis_id, "top_k": self.top_k,
-               "selection": sel,
+               "selection": sel, "timeframe": tpl.decision_tf,
+               "exits": {"mode": tpl.exit_mode, **({"atr_bars": tpl.atr_bars} if tpl.exit_mode == "atr" else {})},
+               "aux": list(tpl.aux), "power": (cr.manifest.get("power") or None),
+               "screen": (cr.manifest.get("screen") or None),
                "n_null": self.n_null, "funnel_all": self.funnel_all(), "campaign_stats": stats,
                "gate_config_version": self.cfg.get("version"), "candidates": [],
                "code_commit": git_commit(self.env.code_root)}
@@ -556,11 +618,12 @@ class Pipeline:
             row = self.prim.loc[lh].to_dict()
             c = {"rank": rank, "logic_hash": lh, "spec_id": spec.id, "spec": spec.to_dict(),
                  "cluster": sel_by[lh].get("cluster"), "cluster_size": sel_by[lh].get("cluster_size"),
-                 "metrics": {k: row[k] for k in row if k not in ("spec_json",)}, "gates": {}}
+                 "metrics": {k: row[k] for k in row if k not in ("spec_json",)}, "gates": {},
+                 "uses_experimental": spec_uses_experimental(spec)}
             res = self.dev_result(spec, self.costs["primary"])
             c["yearly"] = M.yearly_table(res.daily_returns, res.trades).reset_index(names="year").to_dict("records")
             gts = c["gates"]
-            gts["G0"] = gate_g0(spec, self.cache)
+            gts["G0"] = gate_g0(spec, self.cache, allowed_aux=tuple(tpl.aux))
             ok1, d1 = G.check_g1(row, self.cfg)
             gts["G1"] = _gate(ok1, **d1)
             gts["G2"] = self.g2(spec, row, self.costs["primary"])
@@ -577,7 +640,7 @@ class Pipeline:
                 dev_survivors.append(spec)
         # 기여도 (Dev 생존자만)
         abl = self.ablation([s for s in dev_survivors if s.filters]) if dev_survivors else {}
-        # G6 + 등급 (Dev 생존자만, 파라미터 고정)
+        # G6 + 등급 + 견고성 (Dev 생존자만, 파라미터 고정)
         m1v = None
         for c in out["candidates"]:
             c["ablation"] = abl.get(c["logic_hash"])
@@ -606,13 +669,31 @@ class Pipeline:
                               budget=False)      # 같은 후보의 비용 견고성 확인 → Val 예산 미사용
             c["grade_checks"] = {"G2": g2g, "G4": _gate(ok4g, **d4g), "G6": g6g}
             c["grade"] = "A" if (g2g["passed"] and ok4g and g6g["passed"]) else "B"
-            c["status"] = f"validated (grade {c['grade']})"
+            # 견고성 묶음 (Dev) — 실패하면 validated 로 올리지 않는다
+            if self.robustness:
+                rb = self.robustness_check(spec)
+                c["robustness"] = rb
+                self.log(f"  robustness {spec.id}: {rb['verdict']}")
+            else:
+                c["robustness"] = None
+            rob_ok = c["robustness"] is None or bool(c["robustness"]["passed"])
+            c["status"] = (f"validated (grade {c['grade']})" if rob_ok
+                           else f"validated (robustness FAIL) (grade {c['grade']})")
+            if c["uses_experimental"]:
+                c["human_review"] = ("experimental blocks " + ", ".join(c["uses_experimental"])
+                                     + ": human block review required before lockbox (D11)")
             if self.register:
                 c["registry"] = self.register_candidate(spec, c)
         n_val = sum(1 for c in out["candidates"] if c.get("status", "").startswith("validated"))
+        n_rfail = sum(1 for c in out["candidates"] if "robustness FAIL" in str(c.get("status", "")))
         out["n_dev_survivors"] = len(dev_survivors)
         out["n_validated"] = n_val
-        out["verdict"] = (f"{n_val} candidate(s) passed G0–G6" if n_val else "no candidate passed")
+        out["n_robustness_fail"] = n_rfail
+        out["n_registry_validated"] = n_val - n_rfail
+        out["uses_experimental"] = sorted({b for c in out["candidates"] for b in c.get("uses_experimental") or []})
+        out["verdict"] = ((f"{n_val} candidate(s) passed G0–G6"
+                           + (f" ({n_rfail} failed the robustness suite → kept at candidate)" if n_rfail else ""))
+                          if n_val else "no candidate passed")
         out["runtime_sec"] = round(time.time() - t0, 2)
         if self.val_budget and m1v is not None:
             vs_, ve_ = self.env.data.segment_bounds("val")
@@ -621,10 +702,22 @@ class Pipeline:
         out["lockbox"] = "not accessed (G7 requires human approval: admin_cli approve-lockbox)"
         path = cr.dir / "pipeline.json"
         path.write_text(json.dumps(jsonable(out), indent=2, ensure_ascii=False), encoding="utf-8")
+        if self.lessons:      # 오답노트 사실 (멱등). 실패해도 파이프라인 결과는 남긴다.
+            from . import lessons as LS
+            try:
+                fact = LS.record_facts_from_pipeline(path, root=self.env.root)
+                out["lessons_fact"] = fact.get("id")
+            except (LS.LessonsError, OSError, ValueError, KeyError) as e:
+                out["lessons_fact"] = None
+                out["lessons_error"] = f"{type(e).__name__}: {e}"
+                self.log(f"lessons: {out['lessons_error']}")
+            path.write_text(json.dumps(jsonable(out), indent=2, ensure_ascii=False), encoding="utf-8")
         self.log(f"pipeline done: {out['verdict']} ({out['runtime_sec']}s) → {path}")
         return out
 
     def register_candidate(self, spec: StrategySpec, c: dict) -> dict:
+        """draft → candidate (Dev 증거) → validated (Val·견고성 증거 + risk.yaml).
+        견고성 실패면 candidate 에서 멈춘다 (validated 전이·risk.yaml 없음)."""
         reg = self.env.registry
         if reg.state_of(spec.id, spec.version) is not None:
             return {"skipped": f"{spec.id}_v{spec.version} already registered "
@@ -632,15 +725,48 @@ class Pipeline:
         dev_ev = jsonable({"campaign_id": self.cr.campaign_id, "data_snapshot": self.cr.manifest["data_snapshot"],
                            **{g: c["gates"][g] for g in ("G0", "G1", "G3", "G4")},
                            "G2": {k: v for k, v in c["gates"]["G2"].items()},
-                           "G5": c["gates"]["G5"]})
+                           "G5": c["gates"]["G5"], "uses_experimental": c.get("uses_experimental") or []})
         reg.register(spec, actor="research.pipeline", reason=f"campaign {self.cr.campaign_id} Dev survivor")
         reg.transition(spec.id, spec.version, "candidate", "passed G0–G5 on Dev",
                        actor="research.pipeline", evidence=dev_ev)
+        rob = c.get("robustness")
+        rob_ev = (None if rob is None else
+                  {"passed": rob["passed"], "verdict": rob["verdict"], "failed": rob["failed"],
+                   "skipped": rob["skipped"], "segment": rob.get("segment")})
+        if rob is not None and not rob["passed"]:
+            return {"strategy_id": spec.id, "version": spec.version, "state": "candidate",
+                    "blocked": f"robustness suite failed ({', '.join(rob['failed'])}) — not promoted to validated",
+                    "robustness": rob_ev}
         val_ev = jsonable({"G6": c["gates"]["G6"], "grade": c["grade"], "grade_checks": c["grade_checks"],
-                           "risk_limits": c["risk_limits"], "ablation": c.get("ablation")})
+                           "risk_limits": c["risk_limits"], "ablation": c.get("ablation"),
+                           "robustness": rob_ev, "uses_experimental": c.get("uses_experimental") or []})
         reg.transition(spec.id, spec.version, "validated", f"passed G6 on Val, cost grade {c['grade']}",
                        actor="research.pipeline", evidence=val_ev)
-        return {"strategy_id": spec.id, "version": spec.version, "state": "validated"}
+        rp = self.write_risk_yaml(spec, c)
+        return {"strategy_id": spec.id, "version": spec.version, "state": "validated", "risk_yaml": str(rp)}
+
+    def write_risk_yaml(self, spec: StrategySpec, c: dict) -> Path:
+        """`strategies/validated/<id>_v<ver>.risk.yaml` — paper.service.load_risk_meta 가 읽는 형식:
+        grade + limits{daily_loss, weekly_loss, max_drawdown, max_trades_per_day, expected_fee_rate}."""
+        import yaml
+        from btc_quant.registry.strategies import key_of
+        rl = c["risk_limits"]
+        prim = get_cost(self.costs["primary"])
+        doc = {
+            "grade": c["grade"],
+            "limits": {"daily_loss": float(rl["daily_loss_limit"]), "weekly_loss": float(rl["weekly_loss_limit"]),
+                       "max_drawdown": float(rl["drawdown_limit"]),
+                       "max_trades_per_day": int(math.ceil(float(rl["max_trades_per_day"]))),
+                       "expected_fee_rate": float(prim.fee_rate)},
+            "source": {"campaign_id": self.cr.campaign_id, "logic_hash": spec.logic_hash(),
+                       "formula": "PLAN §7 via evaluation.gates.risk_limits_from_validation (Val)",
+                       "inputs": jsonable(rl.get("inputs") or {}), "cost_primary": prim.name,
+                       "uses_experimental": c.get("uses_experimental") or [], "written": pd.Timestamp.now(
+                           tz="UTC").isoformat()},
+        }
+        p = self.env.registry.dir / "validated" / f"{key_of(spec.id, spec.version)}.risk.yaml"
+        p.write_text(yaml.safe_dump(doc, allow_unicode=True, sort_keys=False), encoding="utf-8")
+        return p
 
 
 def run_pipeline(campaign_id: str | CampaignResult, root: str | Path | None = None,

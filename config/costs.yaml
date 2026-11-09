@@ -1,0 +1,102 @@
+# 비용 모델 레지스트리 (class ① 시장 측정치) — docs/PARAMS.md
+# 이 파일은 btc_quant.params 가 쓴다: 더 보수적인(비싼) 버전은 보정이 자동 추가, 더 느슨한(싼) 버전은
+# research/param_proposals/ 제안 → 사람 승인(`python -m btc_quant.params approve <id>`) 후에만 추가.
+# 손으로 고치지 말 것. version 1 = backtest/types.py 하드코딩 프리셋과 동일.
+schema: 1
+models:
+  coinone_base:
+    venue: coinone
+    role: base
+    current: 1
+    versions:
+    - version: 1
+      fee_rate: 0.0
+      spread_bps: 1.0
+      slip_bps: 1.0
+      tick: 0.0
+      created: '2026-11-09'
+      direction: initial
+      applied_by: preset
+      source: backtest/types.py 하드코딩 프리셋
+      evidence: null
+      proposal_id: null
+  coinone_conservative:
+    venue: coinone
+    role: conservative
+    current: 1
+    versions:
+    - version: 1
+      fee_rate: 0.0
+      spread_bps: 2.0
+      slip_bps: 3.0
+      tick: 0.0
+      created: '2026-11-09'
+      direction: initial
+      applied_by: preset
+      source: backtest/types.py 하드코딩 프리셋
+      evidence: null
+      proposal_id: null
+  coinone_stress:
+    venue: coinone
+    role: stress
+    current: 1
+    versions:
+    - version: 1
+      fee_rate: 0.0
+      spread_bps: 5.0
+      slip_bps: 8.0
+      tick: 0.0
+      created: '2026-11-09'
+      direction: initial
+      applied_by: preset
+      source: backtest/types.py 하드코딩 프리셋
+      evidence: null
+      proposal_id: null
+  upbit_base:
+    venue: upbit
+    role: base
+    current: 1
+    versions:
+    - version: 1
+      fee_rate: 0.0005
+      spread_bps: 1.4
+      slip_bps: 1.0
+      tick: 0.0
+      created: '2026-11-09'
+      direction: initial
+      applied_by: preset
+      source: backtest/types.py 하드코딩 프리셋
+      evidence: null
+      proposal_id: null
+  upbit_conservative:
+    venue: upbit
+    role: conservative
+    current: 1
+    versions:
+    - version: 1
+      fee_rate: 0.0005
+      spread_bps: 2.0
+      slip_bps: 3.0
+      tick: 0.0
+      created: '2026-11-09'
+      direction: initial
+      applied_by: preset
+      source: backtest/types.py 하드코딩 프리셋
+      evidence: null
+      proposal_id: null
+  upbit_stress:
+    venue: upbit
+    role: stress
+    current: 1
+    versions:
+    - version: 1
+      fee_rate: 0.0005
+      spread_bps: 5.0
+      slip_bps: 8.0
+      tick: 0.0
+      created: '2026-11-09'
+      direction: initial
+      applied_by: preset
+      source: research/campaign.py UPBIT_STRESS (코인원 stress 스프레드·슬리피지 + 업비트 수수료)
+      evidence: null
+      proposal_id: null

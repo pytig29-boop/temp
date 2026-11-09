@@ -27,7 +27,8 @@
 
 수치 기준은 아래 모듈 상수 (나중에 통합 담당이 config/gates.yaml 의 `robustness:` 로 옮긴다).
 엔진 호출은 공개 API(`fast.prepare_spec`, `fast.prepare`, `fast.simulate_prepared`,
-`fast.daily_returns_matrix`)만 쓴다. 청산은 `spec.exit` 의 고정 % SL/TP/최대보유(현재 엔진 계약).
+`fast.daily_returns_matrix`)만 쓴다. 청산은 `spec.exit` 의 고정 % 또는 ATR 배수 SL/TP + 최대보유
+(ATR 모드: `Candidate.atr_bars`; 지연 시나리오는 결정 봉 ATR 절대값을 지연 진입가 기준 비율로 다시 계산).
 """
 from __future__ import annotations
 
@@ -79,14 +80,15 @@ class Candidate:
     max_hold_min: int
     bar_minutes: int = 5
     name: str = ""
+    atr_bars: int | None = None     # ATR 청산: sl_pct/tp_pct 자리는 ATR 배수 (Prepared.atr_frac[atr_bars])
 
     @classmethod
     def from_spec(cls, spec, ctx=None, other_ctx=None) -> Candidate:
         tf = str(getattr(spec, "timeframe", "5m") or "5m")
         bar = int(pd.Timedelta(tf.replace("m", "min")).total_seconds() // 60) if tf.endswith("m") else 5
         ex = spec.exit
-        return cls(lambda m1, _c=ctx: fast.prepare_spec(spec, m1, _c), ex.stop_loss_pct,
-                   ex.take_profit_pct, int(ex.max_hold_min), max(bar, 1), spec.id)
+        return cls(lambda m1, _c=ctx: fast.prepare_spec(spec, m1, _c), ex.sl, ex.tp,
+                   int(ex.max_hold_min), max(bar, 1), spec.id, ex.atr_bars if ex.is_atr else None)
 
     @classmethod
     def from_signals(cls, signal_fn: Callable[[pd.DataFrame], tuple[pd.Series, pd.Series | None]],
@@ -144,10 +146,31 @@ class _Engine:
             ex = np.zeros(self.n, dtype=bool)
             ex[ex_pos] = True
             p = replace(p, cand=self._shift_positions(p.cand, delay), exit_dec=ex)
-        tr = fast.simulate_prepared(p, c.sl_pct, c.tp_pct, c.max_hold_min, cost, self.si, self.ei)
+            if c.atr_bars is not None:
+                p = replace(p, atr_frac={c.atr_bars: self._shift_frac(p.frac(c.atr_bars), delay)})
+        tr = fast.simulate_prepared(p, c.sl_pct, c.tp_pct, c.max_hold_min, cost, self.si, self.ei,
+                                    c.atr_bars)
         if delay and len(tr.reason):
             tr = self._delay_exits(tr, cost, delay)
         return _Run(tr, self.daily(tr))
+
+    def _shift_frac(self, frac: np.ndarray, d: int) -> np.ndarray:
+        """ATR 모드 지연: 결정 행 i 의 ATR(절대값 = frac[i]·o_i)을 지연 진입 행 j(= i + d 분)로 옮겨
+        새 진입가 기준 비율 ATR/o_j 로 다시 계산 (SL/TP 레벨은 새 진입가 기준)."""
+        src = np.flatnonzero(np.isfinite(frac))
+        out = np.full(self.n, np.nan)
+        if src.size == 0:
+            return out
+        target = self.p.tmin[src] + d
+        j = np.searchsorted(self.p.tmin, target)
+        ok = j < self.n
+        src, j, target = src[ok], j[ok], target[ok]
+        ok = self.p.tmin[j] == target
+        src, j = src[ok], j[ok]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            out[j] = (frac[src] * self.p.o[src]) / self.p.o[j]
+        out[~(np.isfinite(out) & (out > 0))] = np.nan
+        return out
 
     def _delay_exits(self, tr: fast.TradeArrays, cost: CostModel, d: int) -> fast.TradeArrays:
         """SL/TP(봉 내 트리거)·만기 청산을 d 분 뒤 봉 시가로 재가격. 신호 청산은 결정 자체가 이미 지연됨."""

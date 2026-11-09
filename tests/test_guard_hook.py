@@ -236,3 +236,48 @@ def test_lessons_bash_write_denied(tmp_path, cmd):
 ])
 def test_lessons_reads_and_api_allowed(tmp_path, tool, ti):
     assert run(tool, ti, tmp_path=tmp_path) is None
+
+
+# ---- parameter governance (docs/PARAMS.md) ---------------------------------
+@pytest.mark.parametrize("rel", [
+    "config/params.yaml",
+    "config/costs.yaml",
+    "research/param_approvals/pp-20261109-x-abc123.json",
+])
+@pytest.mark.parametrize("tool", ["Write", "Edit"])
+def test_param_files_protected(tmp_path, rel, tool):
+    assert denied(run(tool, {"file_path": abs_(tmp_path, rel)}, tmp_path=tmp_path))
+
+
+@pytest.mark.parametrize("cmd", [
+    "uv run python -m btc_quant.params approve pp-20261109-cost-abc123",
+    "python -m btc_quant.params --root . approve pp-1 --choice -0.12",
+    "uv run python -m btc_quant.params reject pp-1 --reason x",
+    "python -c 'from btc_quant.params.proposals import approve; approve(\"pp-1\", \"me\", confirm=lambda *a: None)'",
+    "python -c 'from btc_quant.params.costs import add_versions'",
+    "python -c 'import btc_quant.params.costs as c; c.add_version(\"coinone_stress\", m)'",
+    "python -c 'from btc_quant.params import registry; registry.record_change(\"k\", 1, by=\"x\")'",
+    "sed -i 's/5.0/1.0/' config/costs.yaml",
+    "echo x > config/params.yaml",
+    "cp x.json research/param_approvals/pp-1.json",
+])
+def test_param_admin_bash_denied(tmp_path, cmd):
+    assert denied(run("Bash", {"command": cmd}, tmp_path=tmp_path)), cmd
+
+
+@pytest.mark.parametrize("cmd", [
+    "uv run python -m btc_quant.params status",
+    "uv run python -m btc_quant.params calibrate --dry-run",
+    "uv run python -m btc_quant.params calibrate",
+    "uv run python -m btc_quant.params propose-criteria gates.G5.min_dsr --values 0.9 --motivation 'synthetic FPR check'",
+    "uv run python -m btc_quant.params history costs",
+    "cat config/costs.yaml config/params.yaml",
+    "ls research/param_proposals",
+])
+def test_param_research_commands_allowed(tmp_path, cmd):
+    assert run("Bash", {"command": cmd}, tmp_path=tmp_path) is None, cmd
+
+
+def test_param_proposals_writable(tmp_path):
+    assert run("Write", {"file_path": abs_(tmp_path, "research/param_proposals/pp-x.yaml"), "content": "x"},
+               tmp_path=tmp_path) is None
