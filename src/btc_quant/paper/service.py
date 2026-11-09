@@ -365,7 +365,21 @@ class PaperService:
             await asyncio.sleep(wait)
         end = minute_ts(m0)
         log.info("warm-up: fetching %d min of coinone 1m candles up to %s", self.lookback_min, end)
-        raw = await asyncio.to_thread(fetch_warmup, end, self.lookback_min, "KRW-BTC", self.fetch)
+        attempt = 0
+        while True:
+            try:
+                raw = await asyncio.to_thread(fetch_warmup, end, self.lookback_min, "KRW-BTC", self.fetch)
+                if raw is not None and len(raw):
+                    break
+                err = "empty response"
+            except Exception as e:     # 네트워크·요청 제한 등 → 재시도 (실시간 봉은 대기열에 쌓인다)
+                err = f"{type(e).__name__}: {e}"
+            attempt += 1
+            delay = min(60.0, 5.0 * 2 ** (attempt - 1))
+            log.warning("warm-up fetch failed (%s); retry %d in %.0fs", err, attempt, delay)
+            if attempt == 3:
+                self.notify(f"[paper] 워밍업 REST 실패 3회: {err}", "warning")
+            await asyncio.sleep(delay)
         n = self.hist.seed(raw)
         log.info("warm-up: %d bars (%s → %s)", n, self.hist.first_ts, self.hist.last_ts)
         for key, tr in self.traders.items():
@@ -511,6 +525,8 @@ def check_health(path: Path, max_age: float = 90.0, now: float | None = None) ->
     age = now - float(hb.get("ts", 0))
     if age > max_age:
         return False, f"heartbeat stale ({age:.0f}s > {max_age:g}s)"
+    if hb.get("idle"):
+        return True, f"idle: waiting for active/challenger strategy (heartbeat {age:.0f}s ago)"
     if hb.get("ready") is False and hb.get("uptime", 0) > 600:
         return False, "not ready after 600s (warm-up failed?)"
     return True, f"ok (heartbeat {age:.0f}s ago, bars {hb.get('bars')})"

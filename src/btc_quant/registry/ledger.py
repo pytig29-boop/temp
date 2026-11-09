@@ -6,6 +6,11 @@ research/ledger/ 아래 git 친화적 JSONL 파일:
   runs.jsonl        — 개별 실행 (스펙·비용·기간·데이터 스냅샷·코드 커밋·지표)
   lockbox.jsonl     — 잠금 구간 개봉(event=open) / 결과(event=result)
   transitions.jsonl — 전략 레지스트리 상태 전이
+  val_evaluations.jsonl — 검증(Val) 구간 사용 기록(event=open → event=result, PLAN §10b-4).
+                    k = 같은 val_id 안의 사용 순번. 누적 Holm 보정·상한의 근거.
+                    결과는 pass/fail + 요약 통계만(월별·일별 분해 금지 — Val 구조 누설 방지).
+  forward_results.jsonl — 전진 인큐베이션 일일 결과(PLAN §10b-5). (strategy_key, logic_hash, as_of)
+                    당 1줄(멱등).
 
 규칙: 기존 줄은 절대 수정·삭제하지 않는다. id는 파일별 단조 증가(접두사-일련번호).
 동시 추가는 research/ledger/.lock 에 대한 fcntl 배타 잠금으로 직렬화한다.
@@ -42,7 +47,12 @@ TABLES = {
     "runs": "run",
     "lockbox": "lbx",
     "transitions": "trn",
+    "val_evaluations": "val",
+    "forward_results": "fwd",
 }
+
+# Val 결과 레코드에 남기지 않는 지표 (연도·월 단위 분해 = Val 구조 누설)
+_VAL_DROP_PREFIXES = ("sharpe_year_", "month", "yearly", "monthly", "daily")
 
 
 class LedgerError(RuntimeError):
@@ -51,6 +61,10 @@ class LedgerError(RuntimeError):
 
 class BudgetExceededError(LedgerError):
     pass
+
+
+class ValBudgetExhaustedError(LedgerError):
+    """Val 사용 상한 도달 — Val 롤링(사람)이 필요."""
 
 
 def utcnow() -> str:
@@ -121,6 +135,30 @@ class Ledger:
             fh.flush()
             os.fsync(fh.fileno())
         return rec
+
+    def _append_many_locked(self, table: str, records: list[dict]) -> list[dict]:
+        """잠금을 잡은 상태에서 호출. 여러 줄을 한 번의 쓰기로 추가 (줄 수는 한 번만 센다)."""
+        if not records:
+            return []
+        seq0 = self._count_lines(table)
+        now = utcnow()
+        out, lines = [], []
+        for j, r in enumerate(records, start=1):
+            rec = {"id": f"{TABLES[table]}-{seq0 + j:06d}", "seq": seq0 + j, "ts": now, **_clean(r)}
+            out.append(rec)
+            lines.append(json.dumps(rec, ensure_ascii=False, sort_keys=False, allow_nan=False))
+        p = self.path(table)
+        prefix = ""
+        if p.exists() and p.stat().st_size > 0:
+            with open(p, "rb") as fh:
+                fh.seek(-1, os.SEEK_END)
+                if fh.read(1) != b"\n":
+                    prefix = "\n"
+        with open(p, "a", encoding="utf-8") as fh:
+            fh.write(prefix + "\n".join(lines) + "\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+        return out
 
     def append(self, table: str, record: dict) -> dict:
         with self.lock():
@@ -213,6 +251,45 @@ class Ledger:
                 "data_snapshot": data_snapshot, "code_commit": code_commit,
                 "metrics": metrics or {}})["id"]
 
+    def record_runs(self, campaign_id: str, items, period, data_snapshot: str, code_commit: str,
+                    family: str | None = None) -> list[str]:
+        """record_run 의 일괄판 (O(n): runs.jsonl 을 한 번만 읽고 한 번에 추가).
+
+        items: [(spec | spec dict, cost_name, metrics), ...]. 검증(사전등록 비용, 캠페인 예산 =
+        고유 logic_hash 수)은 record_run 과 같고, 하나라도 어긋나면 아무것도 쓰지 않는다.
+        레코드 형식도 record_run 과 동일하다. 반환 = run id 목록(입력 순서).
+        """
+        from btc_quant.strategy.spec import StrategySpec
+
+        norm = []
+        for spec, cost_name, mets in items:
+            if not isinstance(spec, StrategySpec):
+                spec = StrategySpec.from_dict(spec)
+            norm.append((spec, spec.logic_hash(), cost_name, mets))
+        per = _period(period)
+        with self.lock():
+            camp = self.get("campaigns", campaign_id)
+            if camp is None:
+                raise LedgerError(f"unknown campaign {campaign_id} (create_campaign first)")
+            seen = {r["logic_hash"] for r in self.records("runs") if r["campaign_id"] == campaign_id}
+            for _, lh, cost_name, _ in norm:
+                if cost_name not in camp["cost_models"]:
+                    raise LedgerError(f"cost {cost_name!r} not pre-registered in {campaign_id}: "
+                                      f"{camp['cost_models']}")
+                seen.add(lh)
+            if len(seen) > camp["budget"]:
+                raise BudgetExceededError(
+                    f"campaign {campaign_id} budget {camp['budget']} exceeded ({len(seen)} distinct "
+                    "specs); register a new campaign (trials accumulate)")
+            recs = [{
+                "campaign_id": campaign_id, "hypothesis_id": camp["hypothesis_id"],
+                "family": family or camp.get("family") or spec.entry.block,
+                "spec_id": spec.id, "spec_version": spec.version, "logic_hash": lh,
+                "spec": spec.to_dict(), "cost_name": cost_name, "period": per,
+                "data_snapshot": data_snapshot, "code_commit": code_commit,
+                "metrics": mets or {}} for spec, lh, cost_name, mets in norm]
+            return [r["id"] for r in self._append_many_locked("runs", recs)]
+
     def trials_count(self, campaign_id: str | None = None, family: str | None = None) -> int:
         """시도 횟수 = 고유 (campaign_id, logic_hash) 수. 같은 스펙의 비용 모델별 실행은 1회로 센다.
         캠페인을 새로 만들어 다시 돌린 조합은 누적된다(PLAN §5.1)."""
@@ -268,6 +345,103 @@ class Ledger:
                         "result": res["result"] if res else None,
                         "result_ts": res["ts"] if res else None})
         return out
+
+    # ------------------------------------------------------------ 검증(Val) 구간 사용 원장
+    def open_val_evaluation(self, logic_hash: str, campaign_id: str, val_id: str, cap: int,
+                            spec_id: str | None = None, note: str = "") -> dict:
+        """Val 평가 *전에* 사용을 기록한다 (event=open). k = 이 val_id 의 사용 순번(1부터).
+
+        - 같은 (val_id, logic_hash) 가 이미 열렸으면 새로 세지 않고 LedgerError (호출 측은
+          val_prior() 로 이전 결정을 재사용한다).
+        - k > cap 이면 ValBudgetExhaustedError (아무것도 기록하지 않음) — Val 을 롤링해야 한다.
+        반환 = 기록된 레코드(+ "k").
+        """
+        if not logic_hash:
+            raise ValueError("logic_hash required")
+        with self.lock():
+            hist = [r for r in self.records("val_evaluations")
+                    if r.get("event") == "open" and r.get("val_id") == val_id]
+            if any(r["logic_hash"] == logic_hash for r in hist):
+                raise LedgerError(f"{logic_hash} already evaluated on {val_id} (reuse val_prior())")
+            k = len(hist) + 1
+            if k > int(cap):
+                raise ValBudgetExhaustedError(
+                    f"Val {val_id} reached its cap of {cap} evaluations. Roll Val (human): fold it into "
+                    "dev, take a fresh val segment from later data, and give it a new val_id.")
+            rec = self._append_locked("val_evaluations", {
+                "event": "open", "val_id": val_id, "k": k, "logic_hash": logic_hash,
+                "campaign_id": campaign_id, "spec_id": spec_id, "note": note})
+            return rec
+
+    def record_val_result(self, opening_id: str, passed: bool, p_value: float | None,
+                          summary: dict | None = None, decision: dict | None = None) -> str:
+        """Val 평가 결과 (event=result). summary 는 요약 통계만 — 연·월·일 분해 키는 버린다."""
+        with self.lock():
+            recs = self.records("val_evaluations")
+            op = next((r for r in recs if r["id"] == opening_id and r.get("event") == "open"), None)
+            if op is None:
+                raise LedgerError(f"unknown val evaluation {opening_id}")
+            if any(r.get("event") == "result" and r.get("opening_id") == opening_id for r in recs):
+                raise LedgerError(f"result already recorded for {opening_id}")
+            summ = {k: v for k, v in (summary or {}).items()
+                    if not str(k).startswith(_VAL_DROP_PREFIXES) and not isinstance(v, (dict, list))}
+            return self._append_locked("val_evaluations", {
+                "event": "result", "opening_id": opening_id, "val_id": op["val_id"], "k": op["k"],
+                "logic_hash": op["logic_hash"], "campaign_id": op["campaign_id"],
+                "passed": bool(passed), "p_value": p_value, "summary": summ,
+                "decision": decision or {}})["id"]
+
+    def val_history(self, val_id: str | None = None) -> list[dict]:
+        """사용 순서대로 open 레코드 + result(없으면 None: 평가 중단/진행 중)."""
+        recs = self.records("val_evaluations")
+        results = {r["opening_id"]: r for r in recs if r.get("event") == "result"}
+        out = []
+        for r in recs:
+            if r.get("event") != "open" or (val_id is not None and r["val_id"] != val_id):
+                continue
+            res = results.get(r["id"])
+            out.append({**r, "result": res, "passed": res["passed"] if res else None,
+                        "p_value": res["p_value"] if res else None})
+        return out
+
+    def val_prior(self, val_id: str, logic_hash: str) -> dict | None:
+        """이 logic_hash 의 이전 Val 사용(있으면). 같은 스펙은 Val 을 두 번 쓰지 않는다."""
+        return next((h for h in self.val_history(val_id) if h["logic_hash"] == logic_hash), None)
+
+    def val_prior_p_values(self, val_id: str, before_k: int | None = None) -> list[float]:
+        """누적 Holm 입력: 이 val_id 의 사용 p 값(사용 순서, before_k 가 있으면 k < before_k 만).
+        결과가 없는(중단된) 사용은 p = 1 로 센다 — 사용 자체가 시도이므로 빼지 않는다."""
+        out = []
+        for h in self.val_history(val_id):
+            if before_k is not None and h["k"] >= before_k:
+                continue
+            p = h["p_value"]
+            out.append(1.0 if p is None else float(p))
+        return out
+
+    def val_status(self, val_id: str, cap: int) -> dict:
+        hist = self.val_history(val_id)
+        return {"val_id": val_id, "cap": int(cap), "used": len(hist),
+                "remaining": max(0, int(cap) - len(hist)),
+                "passed": sum(1 for h in hist if h["passed"]),
+                "pending": sum(1 for h in hist if h["result"] is None)}
+
+    # ------------------------------------------------------------ 전진 인큐베이션
+    def record_forward_result(self, strategy_key: str, logic_hash: str, as_of: str,
+                              result: dict) -> tuple[str, bool]:
+        """(strategy_key, logic_hash, as_of) 당 1줄. 이미 있으면 쓰지 않고 (기존 id, False)."""
+        with self.lock():
+            for r in self.records("forward_results"):
+                if (r["strategy_key"], r["logic_hash"], r["as_of"]) == (strategy_key, logic_hash, as_of):
+                    return r["id"], False
+            rec = self._append_locked("forward_results", {
+                "strategy_key": strategy_key, "logic_hash": logic_hash, "as_of": as_of, **result})
+            return rec["id"], True
+
+    def forward_results(self, strategy_key: str | None = None, as_of: str | None = None) -> list[dict]:
+        return [r for r in self.records("forward_results")
+                if (strategy_key is None or r["strategy_key"] == strategy_key)
+                and (as_of is None or r["as_of"] == as_of)]
 
     # ------------------------------------------------------------ 상태 전이
     def record_transition(self, strategy_id: str, version: int, from_state: str | None,

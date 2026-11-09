@@ -196,3 +196,43 @@ def test_every_call_logged(tmp_path):
 
 def test_bad_input_fails_closed(tmp_path):
     assert denied(run("Bash", {}, tmp_path=tmp_path, raw_stdin="not json"))
+
+
+# ---- lessons notebook (오답노트): records only via the Python API ----------
+@pytest.mark.parametrize("rel", [
+    "research/lessons/facts.jsonl",
+    "research/lessons/interpretations.jsonl",
+    "research/lessons/marks.jsonl",
+    "research/lessons/postmortems.jsonl",
+    "research/lessons/derivations.jsonl",
+    "research/lessons/LESSONS.md",
+    "research/lessons/.lock",
+    "research/lessons/README.md.bak",
+])
+@pytest.mark.parametrize("tool", ["Write", "Edit"])
+def test_lessons_records_write_denied(tmp_path, rel, tool):
+    assert denied(run(tool, {"file_path": abs_(tmp_path, rel)}, tmp_path=tmp_path))
+    assert denied(run(tool, {"file_path": rel}, tmp_path=tmp_path))
+
+
+@pytest.mark.parametrize("cmd", [
+    "echo '{}' >> research/lessons/facts.jsonl",
+    "sed -i 's/unverified/verified/' research/lessons/interpretations.jsonl",
+    "rm -rf research/lessons",
+    "cp /tmp/x research/lessons/LESSONS.md",
+    "python -c \"open('research/lessons/facts.jsonl','w').write('')\"",
+])
+def test_lessons_bash_write_denied(tmp_path, cmd):
+    assert denied(run("Bash", {"command": cmd}, tmp_path=tmp_path)), cmd
+
+
+@pytest.mark.parametrize("tool,ti", [
+    ("Write", {"file_path": "research/lessons/README.md", "content": "x"}),
+    ("Read", {"file_path": "research/lessons/facts.jsonl"}),
+    ("Write", {"file_path": "research/knowledge/mechanisms.md", "content": "x"}),
+    ("Bash", {"command": "cat research/lessons/facts.jsonl | tail -3"}),
+    ("Bash", {"command": "uv run python -c 'from btc_quant.research.lessons import LessonBook; "
+                         "LessonBook().render_markdown()'"}),
+])
+def test_lessons_reads_and_api_allowed(tmp_path, tool, ti):
+    assert run(tool, ti, tmp_path=tmp_path) is None

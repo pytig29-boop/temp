@@ -215,3 +215,79 @@ docker compose -f deploy/docker-compose.yml up -d --build
 - 업비트 WS 는 연결 직후 최근 체결 1건을 SNAPSHOT 으로 보내며, 코인원 호가 첫 메시지의 `ts` 는 수 초 전일 수 있다
   (지연 분석 시 첫 메시지 제외 권장).
 - 텔레그램 → 킬스위치 명령 수신은 미구현.
+
+---
+
+## 11. 페이퍼 트레이딩 (`paper` 서비스)
+
+> 코드: `src/btc_quant/paper/`. 기준 엔진(`ReferenceEngine`)을 실시간 데이터로 그대로 구동한다(PLAN §6, §9).
+> 레지스트리의 **active 1개 + challenger 최대 3개**를 같은 실시간 데이터로 동시에 운용한다.
+
+### 동작 요약
+- 코인원 WS 체결 → UTC 1분봉(분 종료 + 2초 유예 후 마감, 늦은 체결은 버리고 `late_trades` 로 집계,
+  체결 없는 분은 `filled` 평탄 봉). 업비트 체결은 **참조가**(가격 괴리 판정)로만 쓴다. 원천 데이터는 기록하지 않는다.
+- 시작 시 첫 체결 다음 분(M0)부터 실시간 봉을 만들고, M0 + 4초에 코인원 REST 1분 캔들로 워밍업
+  (기본 3일, 블록 파라미터가 더 요구하면 그만큼 — 예: `vol_regime` 7일, EMA 계열은 수렴 길이, 상한 120일).
+- 매 5분 경계 + 2초: 방금 닫힌 5분봉의 신호를 백테스트와 같은 블록 함수로 계산 → 리스크 게이트(`can_enter`)
+  → 다음 1분봉 시가에 모델 체결(시가 ± 비용 모델, 기본 `coinone_conservative`).
+- 실측 비교용 **호가 체결 추정**: 결정 시점의 코인원 호가에 실제 금액(기본 300,000원, 이후 복리 자산)을 대입.
+  SL/TP 청산은 체결 스트림이 레벨에 닿는 순간의 호가를 쓴다. → G8 "실측 슬리피지 ≤ conservative 가정" 입력.
+- `RiskManager` 는 전략별. 킬스위치(`runtime/KILL`, `runtime/FLATTEN`)를 collector 와 공유한다.
+  FLATTEN·HUMAN 정지 시 다음 1분봉 시가에 강제 청산(사유 `flatten`).
+- 재시작: 상태(`state.json`, `risk.json`)를 복원하고, 다운타임 동안의 봉을 REST 이력으로 **재생**해
+  (기록에 `live: false`) 백테스트와 같은 규칙으로 청산·진입을 반영한 뒤 실시간으로 이어간다.
+
+### 파일 (`runtime/paper/`)
+| 파일 | 내용 |
+|---|---|
+| `service.heartbeat` | 서비스 하트비트(10초). 헬스체크 대상 |
+| `service_state.json` | 일일 요약 발송 기록 |
+| `<id>_v<ver>/decisions.jsonl` | 5분 경계마다 신호 값(진입·필터·complete·신호청산), 리스크 판단, 쿨다운/보유 여부 |
+| `<id>_v<ver>/fills.jsonl` | 모델 체결 + 호가 체결 추정(VWAP·단계·mid 대비 bp·모델 대비 bp) |
+| `<id>_v<ver>/trades.jsonl` | 왕복 거래(`TRADE_COLUMNS` + 호가 기준 순수익 `book_net_ret`, 자산) |
+| `<id>_v<ver>/risk.jsonl` | 리스크 이벤트(정지/플래그/해제), 시작·복원·공백 기록 |
+| `<id>_v<ver>/state.json`, `risk.json` | 엔진·자산 상태, 리스크 상태 (재시작 복원용) |
+| `<id>_v<ver>/heartbeat.json`, `spec.yaml`, `meta.json` | 전략별 상태 스냅샷, 운용 중 스펙 사본, 등급·한도·lookback |
+
+크기: 결정 288행/일 + 거래 수 → 전략당 하루 수백 KB. 월 1회 백업 후 오래된 jsonl 을 압축 보관.
+
+### 리스크 한도·등급
+스펙 파일 옆 `<스펙 파일명>.risk.yaml` 에 둔다 (예: `strategies/challenger/foo_v2.risk.yaml`):
+```yaml
+grade: A            # D8: A=업비트 비용에서도 통과, B=0%에서만 (수수료 변경 시 정지)
+limits:             # evaluation.gates.risk_limits_from_validation 결과를 그대로 옮겨도 된다
+  daily_loss: -0.03
+  weekly_loss: -0.06
+  max_drawdown: -0.12
+  max_trades_per_day: 5
+```
+없으면 등급 B, 한도는 `config/gates.yaml` 하한(−3% / −6% / −12% / 하루 5회)과 같은 기본값.
+한도 변경은 재시작 시 반영(상태의 일/주 손익 기준값은 유지).
+
+### 명령
+| 작업 | 명령 |
+|---|---|
+| 기동 | `dc up -d --build paper` (레지스트리가 비어 있으면 대기 상태로 떠 있음 — 헬스 정상) |
+| 로그 | `dc logs -f --tail 200 paper` |
+| 상태 | `dc exec paper python -m btc_quant.paper status --runtime /app/runtime` |
+| 페이퍼 vs 백테스트 | `dc exec paper python -m btc_quant.paper report --runtime /app/runtime [--key foo_v2] [--start 2026-11-20 --end 2026-12-11] [--json /app/runtime/paper/report.json]` |
+| 헬스체크 | `dc exec paper python -m btc_quant.paper healthcheck --heartbeat /app/runtime/paper/service.heartbeat` |
+| 로컬 단독 실행 | `uv run python -m btc_quant.paper run --spec path/to/spec.yaml [--duration 600]` |
+
+- 레지스트리 상태가 바뀌면(승격·교체) 10분 안에 텔레그램으로 "재시작 필요" 알림 → `dc restart paper`.
+  바뀐 전략은 새 `<id>_v<ver>` 디렉터리로 새로 시작하고, 이전 전략 디렉터리는 그대로 남는다.
+- `report` 는 같은 기간을 코인원 REST 1분 캔들로 백테스트해 거래를 진입 시각으로 짝짓는다
+  (완전 일치 수, 한쪽에만 있는 진입, 누적 순수익, 호가 슬리피지 통계와 G8 판정). 백테스트에는 리스크 게이트가
+  없으므로 게이트로 막힌 진입은 `backtest_only` 로 나타난다(`blocked_by_risk` 참조). 페이퍼 봉은 체결 스트림으로
+  만들기 때문에 REST 캔들과 고가·저가가 드물게 달라 SL/TP 시점이 갈릴 수 있다.
+
+### 알림
+진입·청산(실시간분만, 재생분은 제외), 리스크 정지/플래그(HUMAN 은 critical), 시작·종료, 처리 오류,
+레지스트리 변경, **매일 KST 09:00 요약**(전략별 자산·누적 수익·24시간 거래·정지 수준).
+
+### 알려진 제한
+- 워밍업이 REST 에 의존한다. 코인원 REST 장애 시 시작이 지연된다(헬스체크는 600초 후 unhealthy).
+- 워밍업·재생 구간이 잠금 구간(Lockbox)과 겹칠 수 있으나 신호 계산용 lookback 일 뿐 성과를 계산·기록하지 않는다
+  (진입 허용은 서비스 최초 시작 시각부터).
+- `binance_*` 블록(실시간 바이낸스 피드 없음, `live_ready=False`)을 쓰는 전략은 시작을 거부한다.
+- 실주문은 없다. 수수료 변경 감지(B등급 정지)는 실거래 API 키 연동 후에야 의미가 있다.

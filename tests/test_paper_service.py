@@ -197,3 +197,25 @@ def test_price_deviation_vs_reference_gates_entries(tmp_path):
     svc.on_event("coinone", "trades", {"ts_exchange": int(clock.t * 1000), "price": 1.02e8, "qty": 0.1})
     ok, why = tr.risk.can_enter(pd.Timestamp(clock.t, unit="s", tz="UTC").to_pydatetime())
     assert ok, why
+
+
+def test_warmup_retries_on_fetch_failure(tmp_path, monkeypatch):
+    rng = np.random.default_rng(8)
+    raw = synth_raw(rng, T0 - pd.Timedelta(days=4), 4 * 1440)
+    calls = []
+
+    def fetch(market, unit, start, end, progress=False):
+        calls.append(1)
+        if len(calls) < 3:
+            raise ConnectionError("boom")
+        return raw[(raw.index >= start) & (raw.index < end)]
+
+    async def no_sleep(_):
+        return None
+    clock = Clock(T0.timestamp() + 10)
+    svc = _service(tmp_path, clock, fetch=fetch)
+    svc.on_event("coinone", "trades", {"ts_exchange": int(clock.t * 1000), "price": 1e8, "qty": 0.1})
+    clock.t = T0.timestamp() + 70
+    monkeypatch.setattr(S.asyncio, "sleep", no_sleep)
+    asyncio.run(svc.warmup())
+    assert len(calls) == 3 and svc.ready and svc.hist.last_ts == raw.index[-1]

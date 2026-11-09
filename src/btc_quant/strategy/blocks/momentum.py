@@ -9,7 +9,9 @@ import pandas as pd
 
 from .base import REGISTRY, Context
 
-BARS_PER_DAY = 288  # 5분봉
+BARS_PER_DAY = 288  # 5분봉 기준 상수 (하위 호환용). 벽시계 창은 bars_per(index, "1D", ctx) 사용
+DEFAULT_BAR = pd.Timedelta("5min")
+_FREQ_PREFIX = 10_000
 
 
 # ---------------------------------------------------------------- 공용 헬퍼
@@ -33,6 +35,29 @@ def aux_frame(bars: pd.DataFrame, ctx: Context, key: str) -> pd.DataFrame:
     if key not in ctx.aux:
         raise KeyError(f"block requires ctx.aux[{key!r}]")
     return ctx.aux[key].reindex(bars.index)
+
+
+def bar_delta(index: pd.Index, ctx: Context | None = None) -> pd.Timedelta:
+    """봉 길이. 우선순위: ctx.bar > index 인접 간격의 최빈값 > 5분.
+
+    최빈값은 결측 봉(간격 2배 등)이 조금 있어도 안정적이다. 속도를 위해 앞쪽 _FREQ_PREFIX 개 간격만 본다
+    (뒤를 잘라내도 결과 불변 → 절단 인과성 유지). 봉 1개 이하이면 ctx.bar 또는 5분.
+    """
+    if ctx is not None and ctx.bar is not None:
+        return pd.Timedelta(ctx.bar)
+    if len(index) < 2:
+        return DEFAULT_BAR
+    d = np.diff(pd.DatetimeIndex(index[:_FREQ_PREFIX + 1]).as_unit("ns").asi8)
+    d = d[d > 0]
+    if not len(d):
+        return DEFAULT_BAR
+    vals, counts = np.unique(d, return_counts=True)
+    return pd.Timedelta(int(vals[np.argmax(counts)]), unit="ns")
+
+
+def bars_per(index: pd.Index, period: str | pd.Timedelta, ctx: Context | None = None) -> int:
+    """벽시계 기간(예: "1D", "7D", "1h")에 해당하는 봉 수 (최소 1). 5분봉 "1D" → 288, 1분봉 → 1440."""
+    return max(1, int(pd.Timedelta(period) // bar_delta(index, ctx)))
 
 
 def as_signal(cond, index: pd.Index, warmup: int = 0) -> pd.Series:

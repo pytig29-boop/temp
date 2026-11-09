@@ -30,6 +30,8 @@ def cmd_run(a) -> int:
         slots = service.slots_from_specs(a.spec, grade=a.grade, risk_path=a.risk)
     else:
         slots = service.slots_from_registry(a.registry_root, grade=a.grade)
+    if not slots and a.wait_for_strategies and not a.spec:
+        slots = _wait_for_registry(a)
     if not slots:
         print("no strategies: registry has no active/challenger; pass --spec", file=sys.stderr)
         return 2
@@ -43,6 +45,22 @@ def cmd_run(a) -> int:
     summary = asyncio.run(svc.run(duration=a.duration or None))
     print(json.dumps(summary, ensure_ascii=False, indent=1, default=str))
     return 0
+
+
+def _wait_for_registry(a) -> list:
+    """레지스트리에 active/challenger 가 생길 때까지 대기(컨테이너 재시작 루프 방지). 대기 중에도 하트비트 기록."""
+    import time
+    out = Path(a.out) if a.out else Path(a.runtime) / "paper"
+    log = logging.getLogger("btc_quant.paper")
+    log.info("registry has no active/challenger strategy; waiting (rescan every %ss)", a.rescan)
+    t0 = time.time()
+    while True:
+        service._atomic_json(out / "service.heartbeat", {"ts": time.time(), "ready": False, "idle": True,
+                                                         "uptime": round(time.time() - t0, 1)})
+        time.sleep(a.rescan)
+        slots = service.slots_from_registry(a.registry_root, grade=a.grade)
+        if slots:
+            return slots
 
 
 def cmd_status(a) -> int:
@@ -97,6 +115,9 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--max-warmup-days", type=float, default=120.0)
     r.add_argument("--record", action="store_true", help="수집 원천 데이터도 data/raw 에 기록")
     r.add_argument("--no-upbit", action="store_true", help="업비트 참조가 미사용")
+    r.add_argument("--wait-for-strategies", action="store_true",
+                   help="레지스트리에 전략이 없으면 종료하지 않고 대기 (컨테이너용)")
+    r.add_argument("--rescan", type=float, default=60.0, help="대기 중 레지스트리 재확인 주기(초)")
     r.set_defaults(fn=cmd_run)
 
     s = sub.add_parser("status", help="전략별 상태 요약 (JSON)")

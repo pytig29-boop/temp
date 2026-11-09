@@ -43,3 +43,38 @@ services:
     stop_grace_period: 30s   # SIGTERM 후 버퍼 flush 시간
     logging: *logging
     mem_limit: 512m
+
+  # 페이퍼 트레이딩: 레지스트리 active 1 + challenger ≤3 을 실시간 데이터로 운용 (docs/OPERATIONS.md §11)
+  # 자체 WebSocket 연결을 쓰며 원천 데이터는 기록하지 않는다(기록은 collector 담당).
+  paper:
+    image: btc-quant:latest
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      TZ: Asia/Seoul
+      BTC_QUANT_ROOT: /app
+    command: ["python", "-m", "btc_quant.paper", "run",
+              "--runtime", "/app/runtime",
+              "--registry-root", "/app",
+              "--cost", "${PAPER_COST:-coinone_conservative}",
+              "--notional", "${PAPER_NOTIONAL:-300000}",
+              "--wait-for-strategies"]
+    volumes:
+      - ${BTCQ_RUNTIME_DIR:-../runtime}:/app/runtime
+      - ${BTCQ_STRATEGIES_DIR:-../strategies}:/app/strategies:ro
+      - ${BTCQ_RESEARCH_DIR:-../research}:/app/research:ro
+    healthcheck:
+      test: ["CMD", "python", "-m", "btc_quant.paper", "healthcheck",
+             "--heartbeat", "/app/runtime/paper/service.heartbeat", "--max-age", "90"]
+      interval: 30s
+      timeout: 10s
+      start_period: 180s     # REST 워밍업(최대 수십 초) + 첫 분 대기
+      retries: 3
+    stop_grace_period: 30s   # SIGTERM → 상태 저장 후 종료
+    logging: *logging
+    mem_limit: 1g

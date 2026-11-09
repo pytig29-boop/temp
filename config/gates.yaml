@@ -34,6 +34,21 @@ G6:
   max_stress_mdd: 0.20         # 이하(<=), stress 비용
   max_mc_mdd95: 0.20           # 이하(<=), 거래당 몬테카를로 MDD 95백분위
   mc_sims: 10000
+  # Val 사용 원장 + 누적 Holm (PLAN §10b-4, §5.3 잠금 규칙과 같은 구조). 후보마다 Val 평가 *전에*
+  # 원장 val_evaluations 에 기록(k번째 사용). 통계량 = primary 비용 Val 일간 수익 평균 > 0 의
+  # 정상 블록 부트스트랩 단측 p (inference.bootstrap_mean_test). 기존 G6 조건에 더해 이 p 가
+  # 이 Val(val_id) 의 이전 모든 사용 p 와 함께 Holm(alpha, mode) 을 통과해야 G6 통과.
+  # 같은 logic_hash 는 Val 을 한 번만 쓴다(재실행은 이전 결정 재사용). cap 회 사용 후 Val 롤링(사람).
+  val_budget:
+    alpha: 0.10
+    holm_mode: cumulative      # G7 과 같은 의미 (cap: m=cap 고정 | cumulative: m=k)
+    cap: 20                    # 20회 사용 시 Val 은퇴 → dev 편입, 새 Val 필요 (val_id 는 splits.yaml 의 val_id, 없으면 구간 경계로 생성)
+    n_boot: 2000
+    seed: 0
+# 후보 선택 (PLAN §10b-4): 캠페인 수익 행렬의 상관 군집별 최고(primary 가중 Sharpe) 1개 → 그 중 상위 K.
+selection:
+  method: cluster_best         # cluster_best | top_sharpe(구 방식)
+  cluster_threshold: 0.5       # selection.correlation_clusters 절단 높이 (G5 와 같은 값)
 G7:
   alpha: 0.10
   cap: 10                      # 10회 개봉 시 잠금 구간 은퇴
@@ -42,6 +57,10 @@ G8:
   min_paper_weeks: 3
   min_paper_trades: 30
   pnl_band: 0.90               # 손익이 백테스트 90% 구간 안
+  # 전진 인큐베이션 (research/forward.py, PLAN §10b-5)
+  forward_states: [validated, challenger]
+  forward_warmup_days: 14      # Forward 시작 후 이 기간은 지표 워밍업만(거래·평가 없음). 잠금 구간 데이터로 워밍업하지 않는다.
+  forward_exchanges: [coinone, upbit]   # 매일 REST 로 Forward 1분봉을 저장소에 추가하는 거래소
 risk:
   daily_loss_floor: -0.03      # min(-3%, Val 일간 1백분위)
   weekly_loss_floor: -0.06     # min(-6%, Val 주간 1백분위)

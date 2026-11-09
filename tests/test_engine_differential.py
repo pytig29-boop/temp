@@ -181,3 +181,118 @@ def test_fast_engine_timing_3m_bars(capsys):
               f"simulate_many {len(combos)} combos: {t_sweep:.2f}s "
               f"({t_sweep / len(combos) * 1e3:.1f} ms/combo)")
     assert len(res.trades) > 0
+
+
+# ================================================================ 결정 주기 {1m, 5m} × 청산 모드 {%, ATR}
+def random_case_tf(seed):
+    """random_case 의 일반화: 무작위 timeframe ∈ {1m, 5m}, 청산 모드 ∈ {%, ATR}."""
+    rng = np.random.default_rng([seed, 2026])
+    n = int(rng.integers(500, 3000))
+    m1 = synth_m1(rng, n)
+    tf = "1m" if rng.random() < 0.5 else "5m"
+    b = 1 if tf == "1m" else 5
+    p_hi = 0.3 if tf == "1m" else 0.8
+    entry = BlockRef("_test_rand_entry", {"seed": seed, "p": float(rng.uniform(0.01, p_hi))})
+    filters = ()
+    if rng.random() < 0.4:
+        filters = (BlockRef("_test_rand_filter", {"seed": seed + 1, "p": float(rng.uniform(0.3, 1))}),)
+    sig = None
+    if rng.random() < 0.6:
+        sig = BlockRef("_test_rand_exit", {"seed": seed + 2, "p": float(rng.uniform(0.01, 0.4 / (6 - b)))})
+    hold = int(rng.integers(1, 40)) * b if b == 5 else int(rng.integers(1, 200))
+    if rng.random() < 0.5:
+        atr_bars = int(rng.choice([14, int(rng.integers(1, 40))]))
+        ex = ExitSpec(stop_loss_atr=float(rng.uniform(0.2, 5)), take_profit_atr=float(rng.uniform(0.2, 8)),
+                      max_hold_min=hold, signal_exit=sig, atr_bars=atr_bars)
+    else:
+        ex = ExitSpec(float(rng.uniform(0.03, 1.5)), float(rng.uniform(0.03, 1.5)), hold, sig)
+    spec = StrategySpec(f"rtf{seed}", entry, ex, filters, timeframe=tf)
+    spec.exit.validate(b)
+    cost = CostModel("rand", float(rng.choice([0.0, 0.0005, 0.001])), float(rng.uniform(0, 5)),
+                     float(rng.uniform(0, 8)), float(rng.choice([0.0, 0.001, 0.01, 0.05])))
+    i0 = m1.index[0]
+    span = len(m1)
+    start = i0 + pd.Timedelta(minutes=int(rng.integers(-30, span // 3)))
+    if rng.random() < 0.3:
+        end = m1.index[-1] + pd.Timedelta(minutes=int(rng.integers(-3, 30)))
+    else:
+        end = i0 + pd.Timedelta(minutes=int(rng.integers(span // 2, span)))
+    return spec, m1, cost, start, end
+
+
+def assert_identical(rf, rr):
+    """비트 단위 일치."""
+    pd.testing.assert_frame_equal(rf.trades, rr.trades, check_exact=True)
+    pd.testing.assert_series_equal(rf.daily_returns, rr.daily_returns, check_exact=True)
+
+
+TF_SEEDS = list(range(300))
+
+
+@pytest.mark.parametrize("seed", TF_SEEDS)
+def test_fast_equals_reference_timeframe_and_exit_mode(seed):
+    spec, m1, cost, start, end = random_case_tf(seed)
+    rf = run_fast(spec, m1, cost, start, end, registry=REG)
+    rr = run_reference(spec, m1, cost, start, end, registry=REG)
+    assert_identical(rf, rr)
+    if len(rf.trades):
+        t = rf.trades
+        assert (t.entry_time >= rf.start).all() and (t.entry_time < rf.end).all()
+        assert (t.entry_time.dt.minute % spec.tf_min == 0).all()
+        assert (t.exit_time >= t.entry_time).all() and (t.entry_time.diff().dropna() > pd.Timedelta(0)).all()
+
+
+def test_tf_differential_covers_all_combinations_and_reasons():
+    seen = {}
+    for seed in TF_SEEDS[:120]:
+        spec, m1, cost, start, end = random_case_tf(seed)
+        key = (spec.timeframe, spec.exit.mode)
+        seen.setdefault(key, set())
+        seen[key] |= set(run_fast(spec, m1, cost, start, end, registry=REG).trades.exit_reason)
+    assert set(seen) == {("1m", "pct"), ("1m", "atr"), ("5m", "pct"), ("5m", "atr")}
+    for key, reasons in seen.items():
+        assert {"sl", "tp", "time"} <= reasons, key
+    assert set().union(*seen.values()) == {"sl", "tp", "signal", "time", "end"}
+
+
+def test_fast_engine_timing_1m_decisions_3m_bars(capsys):
+    """성능 측정(하드 단언 아님): 1분 결정 · 1분봉 ~3,000,000개 (% 청산 + ATR 청산 스윕)."""
+    rng = np.random.default_rng(1)
+    n = 3_000_000
+    idx = pd.date_range("2021-01-01", periods=n, freq="1min", tz="UTC", name="ts")
+    c = 1e8 * np.exp(np.cumsum(rng.normal(0, 0.001, n)))
+    o = np.r_[1e8, c[:-1]]
+    h = np.maximum(o, c) * (1 + np.abs(rng.normal(0, 0.0005, n)))
+    l = np.minimum(o, c) * (1 - np.abs(rng.normal(0, 0.0005, n)))
+    m1 = pd.DataFrame({"open": o, "high": h, "low": l, "close": c, "volume": 1.0,
+                       "filled": False}, index=idx)
+    entry = BlockRef("_test_rand_entry", {"seed": 1, "p": 0.05})
+    sig = BlockRef("_test_rand_exit", {"seed": 2, "p": 0.01})
+    spec = StrategySpec("timing1m", entry, ExitSpec(0.7, 1.0, 120, sig), timeframe="1m")
+    spec_atr = StrategySpec("timing1m_atr", entry,
+                            ExitSpec(stop_loss_atr=2.0, take_profit_atr=3.0, max_hold_min=120,
+                                     signal_exit=sig), timeframe="1m")
+    cost = CostModel("t", 0.0005, 2.0, 3.0, 1000.0)
+    run_fast(spec_atr, m1.iloc[:10000], cost, idx[0], idx[9999], registry=REG)  # JIT 워밍업
+    t0 = time.perf_counter()
+    res = run_fast(spec, m1, cost, idx[0], idx[-1], registry=REG)
+    t_pct = time.perf_counter() - t0
+    t0 = time.perf_counter()
+    res_atr = run_fast(spec_atr, m1, cost, idx[0], idx[-1], registry=REG)
+    t_atr = time.perf_counter() - t0
+    from btc_quant.backtest.signals import build_signals
+    t0 = time.perf_counter()
+    bars, ent, exs = build_signals(spec_atr, m1, registry=REG)
+    p = prepare(m1, ent, exs, timeframe="1m", atr_bars=[14, 30], bars=bars)
+    t_prep = time.perf_counter() - t0
+    combos = [(sl, tp, hd) for sl in (1.0, 1.5, 2.0, 3.0) for tp in (1.5, 2.0, 3.0, 4.0, 6.0)
+              for hd in (30, 60, 120, 240, 480)]
+    t0 = time.perf_counter()
+    simulate_many(p, combos, cost, idx[0], idx[-1], atr_bars=14)
+    t_sweep = time.perf_counter() - t0
+    with capsys.disabled():
+        print(f"\n[timing 1m] run_fast 3M bars: pct {t_pct:.2f}s ({len(res.trades)} trades), "
+              f"atr {t_atr:.2f}s ({len(res_atr.trades)} trades); signals+prepare(2 ATR windows) "
+              f"{t_prep:.2f}s; ATR simulate_many {len(combos)} combos: {t_sweep:.2f}s "
+              f"({t_sweep / len(combos) * 1e3:.1f} ms/combo)")
+    assert len(res.trades) > 0 and len(res_atr.trades) > 0

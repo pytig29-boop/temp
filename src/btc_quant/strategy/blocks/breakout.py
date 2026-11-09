@@ -4,7 +4,7 @@ from __future__ import annotations
 import pandas as pd
 
 from .base import REGISTRY, Context
-from .momentum import BARS_PER_DAY, as_signal, ema
+from .momentum import as_signal, bars_per, ema
 
 
 def true_range(bars: pd.DataFrame) -> pd.Series:
@@ -36,7 +36,8 @@ def atr_channel_breakout(bars: pd.DataFrame, ctx: Context, span: int = 24, mult:
 @REGISTRY.register(
     "entry",
     grid={"lookback": [12, 24, 48], "squeeze_pct": [0.1, 0.2, 0.3, 0.4]},
-    description=("수축 후 돌파: 직전 lookback봉 범위폭 (max high-min low)/close 의 1일(288봉) 백분위 ≤ squeeze_pct "
+    description=("수축 후 돌파: 직전 lookback봉 범위폭 (max high-min low)/close 의 1일(5분봉 288봉/1분봉 1440봉) "
+                 "백분위 ≤ squeeze_pct "
                  "이고 close_t > 직전 lookback봉 최고가."),
 )
 def range_compression_break(bars: pd.DataFrame, ctx: Context, lookback: int = 24,
@@ -44,6 +45,7 @@ def range_compression_break(bars: pd.DataFrame, ctx: Context, lookback: int = 24
     hi = bars["high"].rolling(lookback, min_periods=lookback).max()
     lo = bars["low"].rolling(lookback, min_periods=lookback).min()
     width = (hi - lo) / bars["close"]
-    rank = width.rolling(BARS_PER_DAY, min_periods=BARS_PER_DAY).rank(pct=True)
+    day = bars_per(bars.index, "1D", ctx)
+    rank = width.rolling(day, min_periods=day).rank(pct=True)
     squeezed_before = (rank <= squeeze_pct).shift(1, fill_value=False)
     return as_signal(squeezed_before & (bars["close"] > hi.shift(1)), bars.index)

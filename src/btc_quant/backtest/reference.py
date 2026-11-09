@@ -2,37 +2,49 @@
 
 의미론은 docs/ENGINE_SPEC.md. 빠른 엔진(fast.py)과 거래 목록이 정확히 일치해야 한다.
 
-구동 방법 (실시간/재생 공통):
-    eng = ReferenceEngine(sl_pct, tp_pct, max_hold_min, cost, start, end)
-    매 5분 경계 t (5분봉 t-5m 확정 직후):  eng.on_decision(t, entry_ok, exit_sig)
-    매 1분봉 t (시가부터 알려짐):            events = eng.on_bar_1m(t, o, h, l, c, filled)
-    데이터가 끝났을 때:                      eng.finish(last_ts, last_close)
+구동 방법 (실시간/재생 공통). B = 결정 주기 봉 길이(분, 기본 5):
+    eng = ReferenceEngine(sl_pct, tp_pct, max_hold_min, cost, start, end)        # 5분·고정 % (기존)
+    eng = ReferenceEngine.from_exit(spec.exit, cost, start, end, spec.timeframe)   # 일반
+    매 B분 경계 t (봉 t-B 확정 직후):  eng.on_decision(t, entry_ok, exit_sig[, atr])
+    매 1분봉 t (시가부터 알려짐):       events = eng.on_bar_1m(t, o, h, l, c, filled)
+    데이터가 끝났을 때:                 eng.finish(last_ts, last_close)
+
+ATR 청산 모드(sl_atr/tp_atr 지정)에서는 on_decision 에 봉 t-B 의 ATR(절대값, `signals.atr_series`)을 넘긴다.
 
 엔진은 I/O가 없고 모든 상태는 속성으로 드러나 있다(position, cooldown_until, trades).
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 
 import pandas as pd
 
-from btc_quant.backtest.signals import FIVE_MIN, build_signals, day_index, period_bounds
+from btc_quant.backtest.signals import (
+    FIVE_MIN,
+    atr_series,
+    build_signals,
+    day_index,
+    period_bounds,
+)
 from btc_quant.backtest.types import TRADE_COLUMNS, BacktestResult, CostModel
 from btc_quant.strategy.blocks.base import REGISTRY, Context, Registry
-from btc_quant.strategy.spec import StrategySpec
+from btc_quant.strategy.spec import ExitSpec, StrategySpec, tf_minutes
 
 ONE_MIN = pd.Timedelta(minutes=1)
 
 
-def is_boundary(ts: pd.Timestamp) -> bool:
-    return ts.minute % 5 == 0 and ts.second == 0 and ts.microsecond == 0 and ts.nanosecond == 0
+def is_boundary(ts: pd.Timestamp, tf_min: int = 5) -> bool:
+    """결정 시점(B분 경계) 여부. B=1 이면 모든 정각 분."""
+    return ts.minute % tf_min == 0 and ts.second == 0 and ts.microsecond == 0 and ts.nanosecond == 0
 
 
 @dataclass(frozen=True)
 class Decision:
-    ts: pd.Timestamp       # 이 결정이 적용되는 1분봉 시각(5분 경계)
-    entry_ok: bool         # 5분봉 ts-5m 기준 진입 신호
-    exit_sig: bool         # 5분봉 ts-5m 기준 신호 청산
+    ts: pd.Timestamp       # 이 결정이 적용되는 1분봉 시각(B분 경계)
+    entry_ok: bool         # 봉 ts-B 기준 진입 신호
+    exit_sig: bool         # 봉 ts-B 기준 신호 청산
+    atr: float | None = None   # 봉 ts-B 의 ATR (ATR 청산 모드에서만 사용)
 
 
 @dataclass(frozen=True)
@@ -52,6 +64,7 @@ class Position:
     sl: float
     tp: float
     expiry: pd.Timestamp
+    atr_frac: float | None = None   # ATR 모드: 진입 시 ATR / ref
 
 
 @dataclass
@@ -68,11 +81,28 @@ class ReferenceEngine:
     decision: Decision | None = None
     trades: list[dict] = field(default_factory=list)
     done: bool = False                            # end 청산 후 True
+    timeframe_min: int = 5                        # 결정 주기 B (분)
+    sl_atr: float | None = None                   # 지정 시 ATR 모드 (sl_pct/tp_pct 무시)
+    tp_atr: float | None = None
+
+    @classmethod
+    def from_exit(cls, exit: ExitSpec, cost: CostModel, start: pd.Timestamp | None = None,
+                  end: pd.Timestamp | None = None, timeframe: str = "5m") -> ReferenceEngine:
+        return cls(exit.stop_loss_pct, exit.take_profit_pct, exit.max_hold_min, cost, start, end,
+                   timeframe_min=tf_minutes(timeframe), sl_atr=exit.stop_loss_atr,
+                   tp_atr=exit.take_profit_atr)
+
+    @property
+    def atr_mode(self) -> bool:
+        return self.sl_atr is not None
 
     # ---------- 이벤트 ----------
-    def on_decision(self, ts: pd.Timestamp, entry_ok: bool, exit_sig: bool) -> None:
-        """5분 경계 ts의 1분봉 시가 직전에 호출. 다음 on_bar_1m(ts, ...)에서 사용된다."""
-        self.decision = Decision(ts, bool(entry_ok), bool(exit_sig))
+    def on_decision(self, ts: pd.Timestamp, entry_ok: bool, exit_sig: bool,
+                    atr: float | None = None) -> None:
+        """B분 경계 ts의 1분봉 시가 직전에 호출. 다음 on_bar_1m(ts, ...)에서 사용된다.
+        atr = 봉 ts-B 의 ATR (ATR 청산 모드에서 없거나 NaN 이면 진입 불가)."""
+        self.decision = Decision(ts, bool(entry_ok), bool(exit_sig),
+                                 None if atr is None else float(atr))
 
     def on_bar_1m(self, ts: pd.Timestamp, o: float, h: float, l: float, c: float,
                   filled: bool = False) -> list[FillEvent]:
@@ -99,8 +129,9 @@ class ReferenceEngine:
                     return events
 
         # 2) 무포지션: 진입 (이 봉 시가)
-        if self.position is None and self._can_enter(ts, dec, filled, past_end):
-            events.append(self._open(ts, o))
+        frac = self._atr_frac(dec, o)
+        if self.position is None and self._can_enter(ts, dec, filled, past_end, frac):
+            events.append(self._open(ts, o, frac))
             entered_now = True
         else:
             entered_now = False
@@ -128,19 +159,34 @@ class ReferenceEngine:
         return [ev]
 
     # ---------- 내부 ----------
-    def _can_enter(self, ts, dec: Decision | None, filled: bool, past_end: bool) -> bool:
+    def _atr_frac(self, dec: Decision | None, o: float) -> float | None:
+        """ATR 모드: ATR(봉 ts-B) / o. 유한한 양수가 아니면 None (진입 불가)."""
+        if not self.atr_mode or dec is None or dec.atr is None:
+            return None
+        frac = dec.atr / o if o != 0 else math.nan
+        return frac if (math.isfinite(frac) and frac > 0) else None
+
+    def _can_enter(self, ts, dec: Decision | None, filled: bool, past_end: bool,
+                   frac: float | None = None) -> bool:
         if dec is None or not dec.entry_ok or filled or past_end:
+            return False
+        if self.atr_mode and frac is None:
             return False
         if self.start is not None and ts < self.start:
             return False
         return self.cooldown_until is None or ts >= self.cooldown_until
 
-    def _open(self, ts: pd.Timestamp, o: float) -> FillEvent:
+    def _open(self, ts: pd.Timestamp, o: float, frac: float | None = None) -> FillEvent:
         ref = o
+        if self.atr_mode:
+            d_sl, d_tp = self.sl_atr * frac, self.tp_atr * frac
+        else:
+            d_sl, d_tp = self.sl_pct / 100.0, self.tp_pct / 100.0
         self.position = Position(
             entry_time=ts, ref=ref, entry_price=self.cost.buy_fill(ref),
-            sl=ref * (1.0 - self.sl_pct / 100.0), tp=ref * (1.0 + self.tp_pct / 100.0),
+            sl=ref * (1.0 - d_sl), tp=ref * (1.0 + d_tp),
             expiry=ts + pd.Timedelta(minutes=int(self.max_hold_min)),
+            atr_frac=frac if self.atr_mode else None,
         )
         return FillEvent(ts, "buy", ref, self.position.entry_price, "entry")
 
@@ -160,8 +206,12 @@ class ReferenceEngine:
             "hold_min": int((t_eff - pos.entry_time) / ONE_MIN),
         })
         self.position = None
-        # 쿨다운: t_eff 이후 첫 5분 경계 결정은 건너뛴다 (= 완전한 5분봉 1개 관찰 후 진입)
-        self.cooldown_until = t_eff.ceil("5min") + FIVE_MIN
+        # 쿨다운: t_eff 이후 첫 B분 경계 결정은 건너뛴다 (= 완전한 봉 1개 관찰 후 진입)
+        b = int(self.timeframe_min)
+        if b == 5:
+            self.cooldown_until = t_eff.ceil("5min") + FIVE_MIN
+        else:
+            self.cooldown_until = t_eff.ceil(f"{b}min") + pd.Timedelta(minutes=b)
         return FillEvent(ts, "sell", ref_price, exit_fill, reason)
 
     def trades_frame(self) -> pd.DataFrame:
@@ -179,22 +229,36 @@ def daily_returns(trades: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp) 
 
 
 def run_reference_signals(m1: pd.DataFrame, entry_ok: pd.Series, exit_sig: pd.Series | None,
-                          sl_pct: float, tp_pct: float, max_hold_min: int, cost: CostModel,
-                          start, end, spec_id: str = "", logic_hash: str = "") -> BacktestResult:
-    """역사 데이터를 이벤트로 재생한다. entry_ok/exit_sig 는 5분봉 index의 신호."""
+                          sl_pct: float | None, tp_pct: float | None, max_hold_min: int,
+                          cost: CostModel, start, end, spec_id: str = "", logic_hash: str = "",
+                          *, timeframe: str = "5m", atr: pd.Series | None = None,
+                          sl_atr: float | None = None, tp_atr: float | None = None
+                          ) -> BacktestResult:
+    """역사 데이터를 이벤트로 재생한다. entry_ok/exit_sig(/atr) 는 결정 주기 봉 index의 값.
+
+    ATR 모드: sl_atr/tp_atr(배수)와 atr(봉별 ATR, `signals.atr_series`)를 함께 준다(sl_pct/tp_pct 무시)."""
+    if (sl_atr is None) != (tp_atr is None):
+        raise ValueError("sl_atr and tp_atr must be given together")
+    if sl_atr is not None and atr is None:
+        raise ValueError("ATR exits need the atr series")
+    b = tf_minutes(timeframe)
+    step = pd.Timedelta(minutes=b)
     s, e, start_idx, end_idx = period_bounds(m1.index, start, end)
-    eng = ReferenceEngine(sl_pct, tp_pct, max_hold_min, cost, s, e)
+    eng = ReferenceEngine(sl_pct, tp_pct, max_hold_min, cost, s, e, timeframe_min=b,
+                          sl_atr=sl_atr, tp_atr=tp_atr)
     entry_map = {t: bool(v) for t, v in entry_ok.items()}
     exit_map = {t: bool(v) for t, v in exit_sig.items()} if exit_sig is not None else {}
+    atr_map = {t: float(v) for t, v in atr.items()} if (atr is not None and sl_atr is not None) else {}
     o, h, l, c = (m1[k].tolist() for k in ("open", "high", "low", "close"))
     filled = (m1["filled"].fillna(False).astype(bool).tolist() if "filled" in m1
               else [False] * len(m1))
     last = min(end_idx, len(m1) - 1)
     for i in range(start_idx, last + 1):
         ts = m1.index[i]
-        if is_boundary(ts):
-            prev = ts - FIVE_MIN
-            eng.on_decision(ts, entry_map.get(prev, False), exit_map.get(prev, False))
+        if is_boundary(ts, b):
+            prev = ts - step
+            eng.on_decision(ts, entry_map.get(prev, False), exit_map.get(prev, False),
+                            atr_map.get(prev))
         eng.on_bar_1m(ts, o[i], h[i], l[i], c[i], filled[i])
         if eng.done:
             break
@@ -209,7 +273,10 @@ def run_reference_signals(m1: pd.DataFrame, entry_ok: pd.Series, exit_sig: pd.Se
 
 def run_reference(spec: StrategySpec, m1: pd.DataFrame, cost: CostModel, start, end,
                   ctx: Context | None = None, registry: Registry = REGISTRY) -> BacktestResult:
-    _, entry_ok, exit_sig = build_signals(spec, m1, ctx, registry)
+    bars, entry_ok, exit_sig = build_signals(spec, m1, ctx, registry)
     ex = spec.exit
+    atr = atr_series(bars, ex.atr_bars) if ex.is_atr else None
     return run_reference_signals(m1, entry_ok, exit_sig, ex.stop_loss_pct, ex.take_profit_pct,
-                                 ex.max_hold_min, cost, start, end, spec.id, spec.logic_hash())
+                                 ex.max_hold_min, cost, start, end, spec.id, spec.logic_hash(),
+                                 timeframe=spec.timeframe, atr=atr, sl_atr=ex.stop_loss_atr,
+                                 tp_atr=ex.take_profit_atr)

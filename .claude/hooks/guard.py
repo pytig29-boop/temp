@@ -8,7 +8,8 @@ immediately with no output, so the normal permission flow applies untouched.
 In research mode every evaluated tool call is appended to
 logs/research_tool_calls.jsonl and the call is denied when it:
   1. writes to a protected path (approved strategies, gates/splits/risk config,
-     the ledger, approval records, engine/evaluation/registry/data code,
+     the ledger, the lessons notebook records, approval records,
+     engine/evaluation/registry/data code,
      raw data, the Claude config itself, the audit log);
   2. runs the human-only admin CLI (approve-lockbox / activate / rollback) or
      `git push` / other tree-mutating git commands;
@@ -54,6 +55,11 @@ PROTECTED_WRITE = [
     (r"config/splits\.ya?ml", "data splits are human-only (PLAN §2.1)"),
     (r"config/risk[^/\s'\"]*\.ya?ml", "risk formulas are fixed (PLAN §7)"),
     (r"research/ledger(/|$)", "the ledger is append-only via the Python API (btc_quant.registry.ledger)"),
+    # 오답노트: 사실·해석·표시·사후분석·파생 JSONL, 잠금 파일, 생성된 LESSONS.md, 디렉터리 자체.
+    # README.md 만 편집 가능. 추가는 btc_quant.research.lessons Python API 로만.
+    (r"research/lessons(?:/+(?!README\.md(?![\w.]))|/*$|(?=[\s'\";|&)]))",
+     "lessons-notebook records are append-only via the Python API (btc_quant.research.lessons); "
+     "facts are immutable and interpretations are added with add_interpretation()"),
     (r"research/lockbox_approvals(/|$)", "lockbox approvals are human-only (PLAN §5.3)"),
     (r"research/activation_approvals(/|$)", "activation approvals are human-only (PLAN §6)"),
     (r"src/btc_quant/(backtest|evaluation|registry|data)(/|$)", "engine/gates/registry/data code is not AI-editable (PLAN §3.3)"),
