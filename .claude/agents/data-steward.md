@@ -31,6 +31,16 @@ change splits, and never read the lockbox.
 5. Partitions: year=/month= layout, UTC timestamps, months fully present.
 6. Reproducibility: snapshot id for the campaign period; flag if it differs from the ledger's record.
 
+## Known venue issues (research/knowledge/venues.md)
+- Coinone shows ~17–19× Upbit's trade count with bot-like tiny trades → flag trade-count/volume features on
+  Coinone as possibly contaminated; compare quote volume and Upbit volume.
+- Upbit maintenance gaps around KST 02–07 (UTC 17–22) for ~5 h; check that signals/fills never use `filled` bars.
+
+## Recording problems
+Data problems that affected (or could have affected) a campaign are process post-mortems: hand the
+researcher a draft for `LessonBook().postmortem(title, category="data", what_happened, root_cause, prevention)`
+(you do not write it yourself). Never include Val/lockbox performance numbers.
+
 ## Output format
 ```
 # Data quality — <scope> (<date UTC>)
