@@ -14,7 +14,10 @@ change splits, and never read the lockbox.
 - Through `btc_quant.registry.splits.DataAccess` (`read("dev"|"val"|"forward", exchange, symbol, timeframe)`
   or `read_range(start, end, ...)`) — it enforces the splits; a `LockboxAccessError` is expected and
   correct for 2026-05-01 .. 2026-11-08, do not try to work around it.
-- Quality functions: `btc_quant.data.quality` (also `uv run btc-quant quality ...`).
+- Quality functions: `btc_quant.data.quality.check_ohlcv(df)` / `flag_wick_outliers(df)` applied to
+  frames loaded via `DataAccess`. The legacy `uv run btc-quant quality` CLI reads the store directly
+  (no split enforcement) — if you use it, always pass explicit `--start/--end` outside
+  2026-05-01 .. 2026-11-08.
 - Snapshot ids: `btc_quant.registry.snapshot.snapshot_id(exchange, symbol, timeframe, start, end)`.
 - Do not `cat`/`duckdb`/`pandas.read_parquet` files under `data/raw/` directly; the research guard
   hook denies unscoped or lockbox raw paths.

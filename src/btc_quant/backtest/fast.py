@@ -228,7 +228,7 @@ def to_result(p: Prepared, tr: TradeArrays, cost: CostModel, start, end,
         "gross_ret": tr.gross_ret,
         "net_ret": tr.net_ret,
         "hold_min": tr.hold_min.astype(np.int64),
-    }, columns=TRADE_COLUMNS)
+    }, columns=TRADE_COLUMNS).astype({"exit_reason": "str"})
     days, mat = daily_returns_matrix(p, [tr], s, e)
     daily = pd.Series(mat[0], index=days, name="ret")
     return BacktestResult(spec_id, logic_hash, cost, s, e, trades, daily)
