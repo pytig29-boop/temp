@@ -228,8 +228,11 @@ docker compose -f deploy/docker-compose.yml up -d --build
   체결 없는 분은 `filled` 평탄 봉). 업비트 체결은 **참조가**(가격 괴리 판정)로만 쓴다. 원천 데이터는 기록하지 않는다.
 - 시작 시 첫 체결 다음 분(M0)부터 실시간 봉을 만들고, M0 + 4초에 코인원 REST 1분 캔들로 워밍업
   (기본 3일, 블록 파라미터가 더 요구하면 그만큼 — 예: `vol_regime` 7일, EMA 계열은 수렴 길이, 상한 120일).
-- 매 5분 경계 + 2초: 방금 닫힌 5분봉의 신호를 백테스트와 같은 블록 함수로 계산 → 리스크 게이트(`can_enter`)
-  → 다음 1분봉 시가에 모델 체결(시가 ± 비용 모델, 기본 `coinone_conservative`).
+- 결정 주기 B(스펙 `timeframe`: 5분 또는 1분) 경계 + 2초: 방금 닫힌 결정 봉의 신호(ATR 청산 모드면 ATR 포함)를
+  백테스트와 같은 블록 함수로 후행 창에서 계산 → 리스크 게이트(`can_enter`) → 다음 1분봉 시가에 모델 체결
+  (시가 ± 비용 모델, 기본 `coinone_conservative`).
+- 업비트 보조 데이터 블록(실험 블록 `upbit_lead_impulse`, `venue_gap_revert` 등)을 쓰는 전략이 있으면 업비트
+  체결로 업비트 1분봉도 같은 방식(REST 워밍업 + 실시간)으로 만들어 `ctx.aux["upbit"]` 로 넘긴다.
 - 실측 비교용 **호가 체결 추정**: 결정 시점의 코인원 호가에 실제 금액(기본 300,000원, 이후 복리 자산)을 대입.
   SL/TP 청산은 체결 스트림이 레벨에 닿는 순간의 호가를 쓴다. → G8 "실측 슬리피지 ≤ conservative 가정" 입력.
 - `RiskManager` 는 전략별. 킬스위치(`runtime/KILL`, `runtime/FLATTEN`)를 collector 와 공유한다.
@@ -242,14 +245,14 @@ docker compose -f deploy/docker-compose.yml up -d --build
 |---|---|
 | `service.heartbeat` | 서비스 하트비트(10초). 헬스체크 대상 |
 | `service_state.json` | 일일 요약 발송 기록 |
-| `<id>_v<ver>/decisions.jsonl` | 5분 경계마다 신호 값(진입·필터·complete·신호청산), 리스크 판단, 쿨다운/보유 여부 |
+| `<id>_v<ver>/decisions.jsonl` | 결정 경계마다 신호 값(진입·필터·complete·신호청산·ATR), 리스크 판단, 쿨다운/보유 여부 |
 | `<id>_v<ver>/fills.jsonl` | 모델 체결 + 호가 체결 추정(VWAP·단계·mid 대비 bp·모델 대비 bp) |
 | `<id>_v<ver>/trades.jsonl` | 왕복 거래(`TRADE_COLUMNS` + 호가 기준 순수익 `book_net_ret`, 자산) |
 | `<id>_v<ver>/risk.jsonl` | 리스크 이벤트(정지/플래그/해제), 시작·복원·공백 기록 |
 | `<id>_v<ver>/state.json`, `risk.json` | 엔진·자산 상태, 리스크 상태 (재시작 복원용) |
 | `<id>_v<ver>/heartbeat.json`, `spec.yaml`, `meta.json` | 전략별 상태 스냅샷, 운용 중 스펙 사본, 등급·한도·lookback |
 
-크기: 결정 288행/일 + 거래 수 → 전략당 하루 수백 KB. 월 1회 백업 후 오래된 jsonl 을 압축 보관.
+크기: 결정 288행/일(1분 주기 전략은 1,440행/일) + 거래 수 → 전략당 하루 수백 KB~수 MB. 월 1회 백업 후 오래된 jsonl 을 압축 보관.
 
 ### 리스크 한도·등급
 스펙 파일 옆 `<스펙 파일명>.risk.yaml` 에 둔다 (예: `strategies/challenger/foo_v2.risk.yaml`):

@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 
 from btc_quant.backtest.reference import run_reference
-from btc_quant.backtest.signals import build_signals
+from btc_quant.backtest.signals import atr_series, build_signals
 from btc_quant.backtest.types import CostModel
 from btc_quant.data import quality
 from btc_quant.live.risk import RiskLimits, RiskManager
@@ -52,19 +52,31 @@ def make_trader(spec, tmp_path, limits=LOOSE, kill_dir=None, cost=COST, **kw):
     return PaperTrader(spec, cost, risk, "B", out_dir=tmp_path / spec.id, clock=lambda: 0.0, **kw)
 
 
-def run_live(trader, hist, trades, start_minute, end_s, builder=None):
-    """체결 스트림 → 봉 → 트레이더 (실시간 경로 그대로). 호가는 직전 체결가 주변 합성."""
+def run_live(trader, hist, trades, start_minute, end_s, builder=None, aux=None):
+    """체결 스트림 → 봉 → 트레이더 (실시간 경로 그대로). 호가는 직전 체결가 주변 합성.
+    aux = (aux_hist, aux_trades): 업비트 체결 → 업비트 1분봉 (서비스처럼 대상 봉보다 먼저 닫는다)."""
     b = builder or MinuteBarBuilder(2.0, start_minute=start_minute)
+    ab = MinuteBarBuilder(2.0, start_minute=start_minute) if aux else None
     last_px = hist.last_close
     events = []
+    stream = [(t, p, q, 0) for t, p, q in trades]
+    if aux:
+        stream += [(t, p, q, 1) for t, p, q in aux[1]]
+        stream.sort(key=lambda x: (x[0], x[3]))
 
     def drain(now):
         nonlocal events
+        if ab is not None:
+            for bar in ab.on_time(now):
+                aux[0].append(bar)
         for bar in b.on_time(now):
             for nb in hist.append(bar):
                 events += trader.on_bar(nb, hist, book_at(last_px))
-    for ts_ms, p, q in trades:
+    for ts_ms, p, q, src in stream:
         drain(ts_ms / 1000)
+        if src == 1:
+            ab.on_trade(ts_ms, p, q)
+            continue
         b.on_trade(ts_ms, p, q)
         last_px = p
         trader.on_price(ts_ms, p, book_at(p))
@@ -164,20 +176,32 @@ def test_trailing_window_equals_full_history():
             else:
                 spec = StrategySpec("x", BlockRef("random_entry", {"p": 0.5}), ExitSpec(1, 1, 60, ref))
             cases.append(spec)
-    assert len(cases) >= 26
+    # 실험 블록(업비트 보조)은 별도 테스트(test_replay_identical_with_upbit_aux)에서
+    # 1분 결정 주기 + ATR 청산
+    for spec in list(cases[::3]):
+        cases.append(StrategySpec(spec.id, spec.entry, ExitSpec(stop_loss_atr=1.0, take_profit_atr=1.0,
+                                                                max_hold_min=60, atr_bars=21,
+                                                                signal_exit=spec.exit.signal_exit),
+                                  spec.filters, timeframe="1m"))
+    assert len(cases) >= 30
     rng2 = np.random.default_rng(0)
     for spec in cases:
         lb = required_lookback_bars(spec)
-        assert window_minutes(lb) < n - 3000, spec
+        tf = spec.tf_min
+        wm = window_minutes(lb, tf)
+        assert wm < n - 3000, spec
         bars, entry_ok, exit_sig = build_signals(spec, m1)
         full_entry = REGISTRY.evaluate(spec.entry, bars)
         full_f = [REGISTRY.evaluate(f, bars) for f in spec.filters]
-        lo = window_minutes(lb) // 5 + 12
-        picks = rng2.choice(np.arange(lo, len(bars)), size=25, replace=False)
+        full_atr = atr_series(bars, spec.exit.atr_bars) if spec.exit.is_atr else None
+        lo = wm // tf + 12
+        picks = rng2.choice(np.arange(lo, len(bars)), size=25 if tf == 5 else 10, replace=False)
         for i in picks:
             s = bars.index[i]
-            t = s + pd.Timedelta("5min")
-            got = evaluate_signals(spec, hist.window(t - pd.Timedelta("1min"), window_minutes(lb)), s)
+            t = s + pd.Timedelta(minutes=tf)
+            got = evaluate_signals(spec, hist.window(t - pd.Timedelta("1min"), wm), s)
+            if full_atr is not None:
+                assert got["atr"] == float(full_atr.iloc[i]), (spec, s)     # 비트 단위 동일
             assert got["entry"] == bool(full_entry.iloc[i]), (spec, s)
             assert got["filters"] == [bool(f.iloc[i]) for f in full_f], (spec, s)
             assert got["entry_ok"] == bool(entry_ok.iloc[i]), (spec, s)
@@ -359,3 +383,78 @@ def test_drawdown_halt_flattens(tmp_path):
     assert tl and tl[0]["exit_reason"] == "flatten"
     assert tr.risk.halt_level(pd.Timestamp.now(tz="UTC").to_pydatetime()).name in ("HUMAN",)
     assert tr.n_trades == 1                                  # HUMAN 정지 후 재진입 없음
+
+
+# ------------------------------------------------------------------------------- v4: 1분 결정·ATR·업비트 보조
+
+SPECS_V4 = [
+    StrategySpec("p_1m", BlockRef("random_entry", {"p": 0.15, "seed": 2}), ExitSpec(0.08, 0.08, 7),
+                 timeframe="1m"),
+    StrategySpec("p_atr", BlockRef("donchian_breakout", {"lookback": 12}),
+                 ExitSpec(stop_loss_atr=1.5, take_profit_atr=2.0, max_hold_min=30)),
+    StrategySpec("p_atr1m", BlockRef("ema_cross_up", {"fast": 5, "slow": 26}),
+                 ExitSpec(stop_loss_atr=2.0, take_profit_atr=2.0, max_hold_min=20, atr_bars=20,
+                          signal_exit=BlockRef("ema_cross_down", {"fast": 5, "slow": 26})),
+                 timeframe="1m"),
+]
+
+
+@pytest.mark.parametrize("spec", SPECS_V4, ids=lambda s: s.id)
+def test_replay_identical_v4_timeframe_and_atr(spec, tmp_path):
+    raw_seed, trades = _setup(31, live_minutes=1440, seed_days=8)
+    hist = M1History(max_rows=10 ** 6)
+    hist.seed(raw_seed)
+    tr = make_trader(spec, tmp_path)
+    tr.attach(hist, book_at(hist.last_close))
+    run_live(tr, hist, trades, ts_minute(T0), (T0 + pd.Timedelta(minutes=1441)).timestamp())
+    m1 = hist.frame()
+    ref = run_reference(spec, m1, COST, T0, m1.index[-1] + pd.Timedelta("1min")).trades
+    paper = paper_trades(tr)
+    assert len(paper) >= 5
+    assert_same_trades(paper, ref)
+    dec = read_jsonl(tr.path("decisions.jsonl"))
+    assert len(dec) == 1440 // spec.tf_min + 1
+    if spec.exit.is_atr:
+        assert all(d["atr"] is None or d["atr"] > 0 for d in dec) and any(d["atr"] for d in dec)
+        fills = read_jsonl(tr.path("fills.jsonl"))
+        buy = [f for f in fills if f["side"] == "buy"][0]
+        assert buy["sl"] < buy["ref_price"] < buy["tp"]
+
+
+def _upbit_from(trades, rng, shift_bp=15.0):
+    """코인원 체결과 상관된 업비트 체결 (가격 수준 차 + 잡음, 약간 다른 시각)."""
+    out = []
+    for ts_ms, p, q in trades:
+        if rng.random() < 0.6:
+            out.append((ts_ms + int(rng.integers(-3000, 3000)), round(p * (1 + shift_bp / 1e4)
+                                                                     * float(np.exp(rng.normal(0, 3e-4)))),
+                        q * 3))
+    out.sort()
+    return out
+
+
+def test_replay_identical_with_upbit_aux(tmp_path):
+    from btc_quant.strategy.blocks.base import Context
+    from btc_quant.strategy.features import to_tf
+    rng = np.random.default_rng(41)
+    raw_seed, trades = _setup(41, live_minutes=1440, seed_days=3)
+    up_seed = raw_seed * 1.0015
+    up_seed["volume"] = raw_seed["volume"] * 3
+    up_trades = _upbit_from(trades, rng)
+    hist, uh = M1History(max_rows=10 ** 6), M1History(max_rows=10 ** 6)
+    hist.seed(raw_seed)
+    uh.seed(up_seed)
+    spec = StrategySpec("p_upbit", BlockRef("venue_gap_revert", {"window": 60, "z": 1.0}),
+                        ExitSpec(0.1, 0.1, 15), (BlockRef("upbit_not_dumping", {"k": 1, "max_drop_bp": 20}),))
+    with pytest.raises(ValueError, match="not live-ready"):
+        make_trader(spec, tmp_path)                              # 업비트 이력 없이 시작 불가
+    tr = make_trader(spec, tmp_path, aux_hist={"upbit": uh})
+    tr.attach(hist, book_at(hist.last_close))
+    run_live(tr, hist, trades, ts_minute(T0), (T0 + pd.Timedelta(minutes=1441)).timestamp(),
+             aux=(uh, [x for x in up_trades if x[0] >= T0.value // 10 ** 6]))
+    m1 = hist.frame()
+    ctx = Context(aux={"upbit": to_tf(uh.frame(), 5)})
+    ref = run_reference(spec, m1, COST, T0, m1.index[-1] + pd.Timedelta("1min"), ctx=ctx).trades
+    paper = paper_trades(tr)
+    assert len(paper) >= 3
+    assert_same_trades(paper, ref)
