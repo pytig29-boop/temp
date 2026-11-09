@@ -9,3 +9,4 @@ __pycache__/
 research/ledger/.lock
 strategies/.lock
 runtime/
+research/campaigns/*/*.parquet
