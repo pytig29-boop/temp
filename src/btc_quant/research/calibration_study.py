@@ -512,7 +512,7 @@ def tables_markdown(result: dict) -> str:
                      f"{_pct(r['any_validated'])}{_ci(r['any_validated_ci'])} | "
                      f"{_pct(r['star_validated'])}{_ci(r['star_validated_ci'])} | {_pct(r['star_dev_passed'])} | "
                      f"{r['star_rank_median']:.0f} | {ff} |")
-        out += "\n".join(L)
+        out += "\n" + "\n".join(L)
     e = result["edge_map"]
     out += ("\n\n엣지 세기 보정(파일럿, S* 를 " + f"{e['pilot_years']:g}년 × {e['pilot_seeds']} seed 에서 실행):\n\n"
             "| k (σ 배수 드리프트) | S* 연 Sharpe (평균) |\n|---|---|\n"
@@ -525,6 +525,8 @@ def tables_markdown(result: dict) -> str:
 def write_report(result: dict, path: str | Path, interpretation: str = "") -> Path:
     cfg = result["config"]
     lay = cfg["layout"]
+    plb = cfg.get("plant_lookback", PLANT_LOOKBACK)
+    shape = "칼날: S* 의 lookback 48 돌파에만 엣지" if plb == PLANT_LOOKBACK else "완만: lookback 24 돌파 전체에 엣지"
     md = f"""# 파이프라인 자체 검증 (calibration study)
 
 생성: {result['created']} · 모드 `{cfg['mode']}` · 소요 {result['runtime_sec']:.0f}초 · 관문 설정 v{result['gate_config_version']}
@@ -539,7 +541,9 @@ def write_report(result: dict, path: str | Path, interpretation: str = "") -> Pa
   "엣지 세기" = S* 의 참 연 Sharpe (coinone_conservative 비용 후, 파일럿으로 보정).
 - 주 격자 `{cfg['grid']}`, 파이프라인 top_k={cfg['top_k']}, G2 귀무 {cfg['n_null']}회
   {'(config G2.null_runs 도 낮춤 — quick 전용)' if cfg['override_null_runs'] else '(config 그대로)'}, 기준 엔진 대조 생략.
-- 오탐 = 귀무 시장에서 validated(G0~G6) 후보 ≥ 1. 검정력 = S* 자체가 validated. [ ] = 95% Wilson 구간.
+- 오탐 = 귀무 시장에서 validated(G0~G6) 후보 ≥ 1. 검정력("S* validated") = S* 또는 S* 와 일간 수익 상관 ≥ 0.5 인
+  군집 대표 후보가 validated (파이프라인은 군집마다 대표 1개만 평가). [ ] = 95% Wilson 구간.
+- 엣지 형태: plant_lookback={plb} ({shape}).
 
 ## 결과
 
