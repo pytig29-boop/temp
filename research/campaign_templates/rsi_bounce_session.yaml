@@ -1,0 +1,19 @@
+# 예시 캠페인 템플릿 — 평균회귀 계열.
+name: rsi_bounce_v1
+hypothesis:
+  text: "RSI 과매도 반등(5분봉) 후 짧은 보유는 활발한 KST 시간대 또는 고변동성 국면에서 비용 차감 후 양의 기대수익을 낸다."
+  rationale: "Phase 0: KST 22~01·09시와 고변동성 국면에서 비용 대비 변동이 커서 평균회귀 반등 폭이 비용을 넘을 가능성."
+  success_criteria: "≥1 스펙이 G0~G6 통과. 실패 시 평균회귀 계열은 보유 시간을 늘린 새 캠페인으로."
+data: {exchange: coinone, symbol: BTC-KRW, timeframe: 1m, aux: []}
+entry:
+  block: rsi_oversold_bounce
+  grid: {period: [7, 14, 21], level: [25, 30, 35]}
+filters:
+  - []
+  - [{block: session_kst, grid: {session: [night, all_but_quiet]}}]
+  - [{block: vol_regime, grid: {window: [24], min_pct: [0.5, 0.67]}}]
+exits:
+  sl_pct: [0.4, 0.7, 1.0]
+  tp_pct: [0.4, 0.7, 1.0]
+  max_hold_min: [30, 60, 120]
+budget: 1300                    # 9 × (1+2+2) × 27 = 1,215 스펙

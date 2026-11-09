@@ -22,7 +22,9 @@ def _f(x, nd=3) -> str:
         return "✓" if x else "✗"
     if isinstance(x, float):
         if x != x:
-            return "nan"
+            return "–"
+        if x.is_integer() and 1 <= abs(x) < 1e6:
+            return str(int(x))
         return f"{x:.{nd}f}"
     return str(x)
 
@@ -118,7 +120,7 @@ def render(campaign_id: str, root: str | Path | None = None, env: ResearchEnv | 
         L.append(f"- Campaign specs N={st['n_campaign_specs']}, correlation clusters K={st['k_eff_clusters']} "
                  f"(threshold {st['cluster_threshold']}), eigen-entropy trials {_f(st['entropy_trials'], 1)}")
         L.append(f"- Ledger trials: family {st['n_family_trials']}, global {st['n_global_trials']} → "
-                 f"DSR trials N = max(K, N_family·K/N) = {_f(st['n_trials_dsr'], 1)}; V = {_f(st['var_trial_sr'], 6)}")
+                 f"DSR trials N = max(K, N_family·K/N) = {_f(st['n_trials_dsr'], 1)}; V = {_f(st['var_trial_sr'], 6)} ({st.get('var_source', '')})")
         L.append(f"- PBO (CSCV, 16 splits) = {_f(st.get('pbo'))}\n")
 
         L.append("## Candidates — per-gate results\n")

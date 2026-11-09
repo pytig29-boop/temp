@@ -45,7 +45,8 @@ def test_template_defaults_and_enumeration():
     (lambda d: d["entry"].update(grid={"nope": [1]}), "unknown params"),
     (lambda d: d.update(filters=[[{"block": "vol_regime"}, {"block": "volume_z"},
                                   {"block": "session_kst"}]]), "filters > 2"),
-    (lambda d: d.update(filters=[[{"block": "vol_regime"}, {"block": "volume_z"}]]), "params"),  # 4+2+2+3 > 8
+    (lambda d: d.update(entry={"block": "atr_channel_breakout"},
+                        filters=[[{"block": "vol_regime"}, {"block": "volume_z"}]]), "params 9 > 8"),
     (lambda d: d["exits"].update(max_hold_min=[62]), "multiples of 5"),
     (lambda d: d["exits"].update(sl_pct=[0.5, 0.5]), "duplicate"),
     (lambda d: d.update(data={"exchange": "coinone", "symbol": "BTC-KRW", "aux": ["binance"]}), "aux"),
@@ -61,7 +62,7 @@ def test_template_validation(mutate, msg):
 
 
 def test_budget_enforced_before_any_ledger_write(tmp_path):
-    env = ResearchEnv.at(make_root(tmp_path, planted=False, seed=3) if False else tmp_path)
+    env = ResearchEnv.at(tmp_path)
     tpl = CampaignTemplate.from_dict(template_dict(budget=10))   # 24 specs
     with pytest.raises(CampaignBudgetError, match="24 specs > budget 10"):
         run_campaign(tpl, env=env)

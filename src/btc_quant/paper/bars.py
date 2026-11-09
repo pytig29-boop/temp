@@ -223,6 +223,17 @@ class MinuteBarBuilder:
         return out
 
 
+def wick_clean(o: float, h: float, l: float, c: float, prev_closes: list[float],
+               k: float = 0.03) -> tuple[float, float]:
+    """`quality.clean_wicks` 의 한 봉 버전 (같은 식): 기준가 = 직전 최대 15개 실제 봉 종가 중앙값
+    (없으면 시가). 고가/저가가 기준·몸통에서 k 이상 벗어나면 몸통으로 자른다. (high, low) 반환."""
+    ref = float(np.median(prev_closes)) if prev_closes else o
+    body_hi, body_lo = max(o, c), min(o, c)
+    if h > max(ref, body_hi) * (1 + k) or l < min(ref, body_lo) * (1 - k):
+        return body_hi, body_lo
+    return h, l
+
+
 # --------------------------------------------------------------------------------------------
 # 1분봉 이력
 # --------------------------------------------------------------------------------------------
@@ -312,12 +323,8 @@ class M1History:
 
     def _push_real(self, m: int, bar: Bar) -> Bar:
         row = (m, float(bar.open), float(bar.high), float(bar.low), float(bar.close), float(bar.volume))
-        tail = self._raw_tail[-WICK_WINDOW:] + [row]
-        df = pd.DataFrame([r[1:] for r in tail], columns=list(self.COLS),
-                          index=pd.DatetimeIndex([minute_ts(r[0]) for r in tail]))
-        cl = quality.clean_wicks(df).iloc[-1]
-        h, l = float(cl["high"]), float(cl["low"])
-        self._raw_tail = tail[-WICK_WINDOW:]
+        h, l = wick_clean(row[1], row[2], row[3], row[4], [r[4] for r in self._raw_tail[-WICK_WINDOW:]])
+        self._raw_tail = (self._raw_tail + [row])[-WICK_WINDOW:]
         self._m.append(m)
         self._o.append(row[1]); self._h.append(h); self._l.append(l); self._c.append(row[4])
         self._v.append(row[5]); self._f.append(False)

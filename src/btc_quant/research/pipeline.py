@@ -18,7 +18,8 @@
     N_family  = Ledger.trials_count(family=…)  (원장 누적 시도, 이전 캠페인·기여도 재실행 포함)
     K         = 이 캠페인 수익 행렬의 상관 군집 수 (selection.effective_trials_cluster)
     N_campaign= 이 캠페인 스펙 수  → 누적 시도 수를 이 캠페인에서 관측한 '군집 압축률'로 실질화.
-  V = 군집 대표(군집 평균 수익) Sharpe 분산 (selection.trial_sharpe_variance(R, labels)).
+  V = 군집 대표(군집 평균 수익) Sharpe 분산 (selection.trial_sharpe_variance(R, labels)); 군집이 1개라
+  V=0 이면 열 단위 SR 분산으로 대체(누적 시도가 많은데 DSR 이 무력화되는 것을 막음).
   DSR 은 비가중 일간 Sharpe(관측 단위) 기준(selection 모듈 규약). PBO = CSCV(16분할) on 캠페인 행렬.
 - 기여도: 필터 i 제거 스펙 S_-i 와 S 의 primary 일간 수익을 **같은 인덱스로 짝지은 정상 블록
   부트스트랩**(B=500) → Δ = SR_w(S) − SR_w(S_-i) 의 표준오차 se. Δ < 1·se 이면 "제거 가능"
@@ -218,6 +219,10 @@ class Pipeline:
         labels = selection.correlation_clusters(R, thr)
         k_eff = int(np.unique(labels).size)
         V = selection.trial_sharpe_variance(R, labels)
+        v_source = "cluster representatives"
+        if not V > 0:     # 군집 1개 → 군집 분산 0: 누적 시도가 있어도 DSR 이 무력화되지 않게 열 단위 분산 사용
+            V = selection.trial_sharpe_variance(R)
+            v_source = "all campaign columns (single cluster fallback)"
         fam = self.cr.template.family
         n_family = self.env.ledger.trials_count(family=fam)
         n_global = self.env.ledger.trials_count()
@@ -231,7 +236,8 @@ class Pipeline:
         return {"n_campaign_specs": n_camp, "k_eff_clusters": k_eff, "entropy_trials":
                 selection.effective_trials_entropy(R) if n_camp > 1 else 1.0,
                 "n_family_trials": n_family, "n_global_trials": n_global,
-                "n_trials_dsr": n_trials, "var_trial_sr": V, "cluster_threshold": thr, **pbo_d}
+                "n_trials_dsr": n_trials, "var_trial_sr": V, "var_source": v_source,
+                "cluster_threshold": thr, **pbo_d}
 
     def funnel_all(self) -> dict:
         """모든 스펙의 지표만으로 판정 가능한 관문(G1, G2 양수 조건, G4) 통과 수."""
@@ -370,9 +376,10 @@ class Pipeline:
         if self.reference_check:
             ref = run_reference(spec, m1v, get_cost(cost_name), vs, ve)
             a, b = res.trades, ref.trades
-            match = (len(a) == len(b) and (a["entry_time"].values == b["entry_time"].values).all()
-                     and (a["exit_time"].values == b["exit_time"].values).all()
-                     and (a["exit_reason"].values == b["exit_reason"].values).all()
+            match = (len(a) == len(b)
+                     and pd.DatetimeIndex(a["entry_time"]).equals(pd.DatetimeIndex(b["entry_time"]))
+                     and pd.DatetimeIndex(a["exit_time"]).equals(pd.DatetimeIndex(b["exit_time"]))
+                     and (a["exit_reason"].astype(str).to_numpy() == b["exit_reason"].astype(str).to_numpy()).all()
                      and np.allclose(a["net_ret"].to_numpy(float), b["net_ret"].to_numpy(float),
                                      rtol=0, atol=1e-12))
             d["reference_engine_match"] = bool(match)
@@ -445,7 +452,6 @@ class Pipeline:
             spec = cr.specs[c["logic_hash"]]
             g6, vres, vmet, mc = self.g6(spec, m1v, vs, ve, self.costs["primary"], self.costs["stress"])
             c["gates"]["G6"] = g6
-            c["val_yearly"] = None
             if not g6["passed"]:
                 c["grade"] = None
                 c["status"] = "failed G6 (ledger only)"

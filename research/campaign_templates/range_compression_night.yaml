@@ -1,0 +1,18 @@
+# 예시 캠페인 템플릿 — 수축 후 돌파 + 야간 세션 (필터 2개, 파라미터 8개 상한 사용).
+name: range_compression_night_v1
+hypothesis:
+  text: "변동폭 수축 후 상향 돌파는 KST 22~01시(고변동 시간대)에 1~2시간 지속된다."
+  rationale: "Phase 0: KST 22~01시 비용 부담 절반, 1~2시간 보유가 비용 대비 유리. 수축 후 돌파는 변동성 확대 초입을 포착."
+  success_criteria: "≥1 스펙이 G0~G6 통과하고 기여도 분석에서 세션 필터가 유의하게 기여."
+data: {exchange: coinone, symbol: BTC-KRW, timeframe: 1m, aux: []}
+entry:
+  block: range_compression_break
+  grid: {lookback: [12, 24, 48], squeeze_pct: [0.1, 0.2, 0.3]}
+filters:
+  - [{block: session_kst, grid: {session: [night]}}]
+  - [{block: session_kst, grid: {session: [night]}}, {block: volume_z, grid: {window: [96], min_z: [0.5, 1.0]}}]
+exits:
+  sl_pct: [0.5, 0.8, 1.2]
+  tp_pct: [0.8, 1.2, 1.8]
+  max_hold_min: [60, 120]
+budget: 500                     # 9 × (1+2) × 18 = 486 스펙

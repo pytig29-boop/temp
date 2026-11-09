@@ -122,7 +122,7 @@ def test_replay_identical_to_run_reference(spec, tmp_path):
     hist = M1History(max_rows=10 ** 6)
     hist.seed(raw_seed)
     tr = make_trader(spec, tmp_path)
-    tr.attach(hist)
+    tr.attach(hist, book_at(hist.last_close))
     end_s = (T0 + pd.Timedelta(minutes=2 * 1440 + 1)).timestamp()
     run_live(tr, hist, trades, ts_minute(T0), end_s)
     m1 = hist.frame()

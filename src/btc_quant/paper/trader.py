@@ -189,6 +189,7 @@ class PaperTrader:
           백테스트와 같은 규칙으로 반영한다."""
         if hist.last_ts is None:
             return []
+        self.book_open = book
         if self.last_ts is None:
             self.last_ts = hist.last_ts
             if self.engine.start is None:
