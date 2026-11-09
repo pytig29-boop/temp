@@ -1,0 +1,13 @@
+"""연구 캠페인 통합 계층 (PLAN §5): 템플릿 → 사전등록 → Dev 전수 실행 → 관문 G0~G6 → 리포트.
+
+공개 API
+- campaign: CampaignTemplate, run_campaign, load_campaign, list_campaigns, ResearchEnv, COST_MODELS
+- pipeline: run_pipeline, Pipeline, neighbor_specs
+- nulls: null_distribution, calibrated_rate, RandomEntryNull, weighted_sharpe_rows
+- report: render, write_report
+- cli: main
+"""
+from .campaign import (COST_MODELS, CampaignBudgetError, CampaignError, CampaignResult,  # noqa: F401
+                       CampaignTemplate, ResearchEnv, list_campaigns, load_campaign, run_campaign)
+from .pipeline import Pipeline, neighbor_specs, run_pipeline  # noqa: F401
+from .report import render, write_report  # noqa: F401

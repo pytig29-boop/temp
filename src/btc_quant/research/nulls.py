@@ -27,7 +27,7 @@ from btc_quant.backtest import fast
 from btc_quant.backtest.signals import FIVE_MIN, period_bounds
 from btc_quant.backtest.types import CostModel
 from btc_quant.evaluation.metrics import ANN, exp_weights
-from btc_quant.strategy.blocks.null import hash_uniform
+from btc_quant.strategy.blocks.null import _splitmix64
 
 
 def weighted_sharpe_rows(mat: np.ndarray, days: pd.DatetimeIndex, half_life_days: float = 365,
@@ -64,12 +64,20 @@ class RandomEntryNull:
         base5 = pd.Series(np.asarray(filter_ok, bool), index=bars_index)
         self.prepared = fast.prepare(m1, base5, None)     # cand = 필터 통과 결정 위치
         self.pos = self.prepared.cand
-        self.bar_times = pd.DatetimeIndex(m1.index[self.pos] - FIVE_MIN)
+        bar_times = pd.DatetimeIndex(m1.index[self.pos] - FIVE_MIN)
+        self._ns = np.asarray(bar_times.as_unit("ns").asi8, dtype=np.int64).view(np.uint64)
+
+    def uniform(self, seed: int) -> np.ndarray:
+        """null.hash_uniform(bar_times, seed) 와 같은 값 (pandas 변환 없이)."""
+        with np.errstate(over="ignore"):
+            h = _splitmix64(np.full(1, int(seed), dtype=np.uint64))
+            x = _splitmix64(self._ns ^ h)
+        return (x >> np.uint64(11)).astype(np.float64) / float(1 << 53)
 
     def candidates(self, p: float, seed: int) -> np.ndarray:
         if p <= 0 or self.pos.size == 0:
             return self.pos[:0]
-        return self.pos[hash_uniform(self.bar_times, int(seed)) < p]
+        return self.pos[self.uniform(seed) < p]
 
     def simulate(self, p: float, seed: int, sl: float, tp: float, hold: int, cost: CostModel,
                  si: int, ei: int) -> fast.TradeArrays:
