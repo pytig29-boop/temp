@@ -62,7 +62,7 @@ def cmd_cost_floor(a):
     raw = store.read_ohlcv(a.exchange, a.symbol, "1m", a.start, a.end)
     q = quality.check_ohlcv(raw)
     m1 = quality.regularize(raw)
-    scen = cost_floor.default_scenarios(a.spread_bps)
+    scen = cost_floor.default_scenarios(a.spread_bps, a.bithumb_spread_bps)
     title = f"{a.exchange} {a.symbol} ({m1.index[0]:%Y-%m-%d} ~ {m1.index[-1]:%Y-%m-%d})"
     md = cost_floor.build_report(m1, title, scen, quality_md=q.to_markdown())
     REPORTS.mkdir(parents=True, exist_ok=True)
@@ -113,7 +113,8 @@ def main(argv=None):
         s.add_argument("--timeframe", default="1m")
         s.add_argument("--start")
         s.add_argument("--end")
-        s.add_argument("--spread-bps", type=float, default=1.0)
+        s.add_argument("--spread-bps", type=float, default=1.4)
+        s.add_argument("--bithumb-spread-bps", type=float, default=3.3)
         s.set_defaults(fn=fn)
 
     s = sp.add_parser("lead-lag", help="두 시장 1분 수익률 선후행")

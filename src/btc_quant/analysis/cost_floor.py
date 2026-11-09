@@ -32,15 +32,16 @@ class CostScenario:
         return 2 * self.fee + self.spread_bps / 1e4 + 2 * self.slip_bps / 1e4
 
 
-def default_scenarios(spread_bps: float = 1.0) -> list[CostScenario]:
-    """수수료 값은 config/exchanges.yaml과 동일(미검증)."""
+def default_scenarios(spread_bps: float = 1.4, bithumb_spread_bps: float = 3.3,
+                      binance_spread_bps: float = 0.1) -> list[CostScenario]:
+    """수수료 값은 config/exchanges.yaml과 동일(미검증). 스프레드 기본값은 2026-11-09 15분 호가 샘플 평균."""
     return [
-        CostScenario("bithumb_coupon(0.04%)", 0.0004, spread_bps, 1.0),
+        CostScenario("bithumb_coupon(0.04%)", 0.0004, bithumb_spread_bps, 1.0),
         CostScenario("upbit_base(0.05%)", 0.0005, spread_bps, 1.0),
         CostScenario("upbit_conservative", 0.0005, spread_bps, 3.0),
         CostScenario("upbit_stress", 0.0005, spread_bps * 2, 8.0),
-        CostScenario("binance_retail(0.10%)", 0.0010, spread_bps, 1.0),
-        CostScenario("bithumb_standard(0.25%)", 0.0025, spread_bps, 1.0),
+        CostScenario("binance_retail(0.10%)", 0.0010, binance_spread_bps, 1.0),
+        CostScenario("bithumb_standard(0.25%)", 0.0025, bithumb_spread_bps, 1.0),
     ]
 
 
