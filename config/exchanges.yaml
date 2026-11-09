@@ -1,0 +1,21 @@
+# 수수료는 출처 간 불일치가 있어 반드시 공식 페이지로 재확인할 것 (확인 전 값은 verified: false)
+upbit:
+  base_url: https://api.upbit.com
+  market: KRW-BTC
+  taker_fee: 0.0005      # KRW 마켓 0.05% (메이커=테이커로 알려짐)
+  maker_fee: 0.0005
+  min_order_krw: 5000
+  verified: false
+bithumb:
+  base_url: https://api.bithumb.com
+  market: KRW-BTC
+  taker_fee: 0.0025      # 기본 0.25%, 쿠폰 적용 시 0.04%로 알려짐
+  maker_fee: 0.0025
+  coupon_fee: 0.0004
+  verified: false
+binance:
+  # 한국 거주자 거래용이 아니라 연구 데이터 소스로만 사용
+  symbol: BTCUSDT
+  taker_fee: 0.001
+  maker_fee: 0.001
+  verified: false
