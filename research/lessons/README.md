@@ -34,7 +34,7 @@
 | G0 실패(검증·인과성·live_ready), G6 엔진 불일치, 파이프라인 오류 | `IMPL_OR_DATA_ISSUE` |
 | G1 실패 | `LOW_SAMPLE` |
 | G2 실패, 신호 선별 실패, 전체 스펙 중 SR_w>0 없음 | `NO_SIGNAL` |
-| G2 실패인데 비용 전 수익 양(+)(gross 지표/zero-cost 견고성), 비용 +50% 견고성 실패, 업비트 비용 G2/G4 실패 | `COST_EATEN` |
+| G2 실패인데 비용 전 수익 양(+)(캠페인 `gross_sharpe_w` = 같은 거래의 zero-cost 가중 Sharpe / zero-cost 견고성), G3 실패인데 비용 후 인접 중앙값(또는 선택 Sharpe) ≤ 0 < 비용 전 인접 중앙값(`neighbor_median_gross`), 깔때기 비용 후 양수 0개인데 비용 전 양수 > 0, 비용 +50% 견고성 실패, 업비트 비용 G2/G4 실패 | `COST_EATEN` |
 | G3 실패 | `PARAM_SPIKE` |
 | G4 실패 | `UNSTABLE` |
 | G5 실패 | `SELECTION_BIAS` |

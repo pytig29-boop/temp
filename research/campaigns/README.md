@@ -25,7 +25,7 @@ hypothesis:                         # 모두 필수, 원장 hypotheses 에 그�
   rationale: "..."
   success_criteria: "..."
 data: {exchange: coinone, symbol: BTC-KRW, timeframe: 1m, aux: []}   # 원천 데이터(항상 1분봉). aux: [] | [upbit]
-timeframe: 5m                       # (v4) 결정 주기 5m(기본) | 1m — StrategySpec.timeframe (D10)
+timeframe: 5m                       # (v4) 결정 주기 5m(기본) | 1m — StrategySpec.timeframe (D10) | 15m · 1h · 4h (스윙, max_hold_min 은 B 배수; 4h 에서 session_kst·trend_regime_1h·range_compression_break 거부 — docs/BLOCKS.md)
 entry:
   block: donchian_breakout
   grid: {lookback: [48, 96, 144]}   # 생략한 파라미터는 블록 기본 격자(docs/BLOCKS.md)

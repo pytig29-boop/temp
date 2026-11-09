@@ -5,7 +5,7 @@
 True@t = 봉 t가 닫힌 시점(t+봉길이)까지의 정보로 조건 성립. 모든 블록은 미래 변조·절단 테스트(`tests/test_blocks.py`,
 5분봉과 1분봉 모두)로 인과성 검증.
 
-**봉 길이 (D10: 5분 또는 1분)**: 격자·룩백은 모두 **봉 개수** 단위다 (1분봉에서 `lookback=12` = 12분).
+**봉 길이 (D10: 5분 또는 1분; 스윙 연구 15m/1h/4h — 아래 "결정 주기 호환성")**: 격자·룩백은 모두 **봉 개수** 단위다 (1분봉에서 `lookback=12` = 12분).
 벽시계 시간에 묶인 블록만 봉 길이를 `bar_delta(bars.index, ctx)` 로 구해 환산한다 — 우선순위 `ctx.bar` > index 인접 간격 최빈값
 (앞쪽 1만 개) > 5분. 해당 블록: `session_kst`(판정 시각 = t+봉길이), `trend_regime_1h`(마지막 완료 시간봉), `vol_regime`(7일 창 =
 5분 2016봉 / 1분 10080봉, 최소 1일), `range_compression_break`(1일 백분위 창 = 288 / 1440봉). 5분봉에서는 기존과 동일.
@@ -37,6 +37,23 @@ True@t = 봉 t가 닫힌 시점(t+봉길이)까지의 정보로 조건 성립. �
 | `venue_gap_revert` | entry · 교차거래소 | `g=log close - log upbit_close`; `z=(g_t-mean(g_{t-W..t-1}))/std(…)` (최소 W/2 개) `≤ -z` | window=240, z=2.5 | window [60,120,240,480]; z [1.5,2,2.5,3] | ✓ (requires `upbit`) | experimental |
 | `upbit_not_dumping` | filter | `r_k(upbit)·1e4 > -max_drop_bp` | k=3, max_drop_bp=40 | k [1,3,6]; max_drop_bp [20,40,60,100] | ✓ (requires `upbit`) | experimental |
 | `venue_gap_closed` | exit_signal | `venue_gap_revert` 와 같은 z `≥ exit_z` | window=240, exit_z=0 | window [60,120,240,480]; exit_z [-0.5,0,0.5,1] | ✓ (requires `upbit`) | experimental |
+
+## 결정 주기 호환성 (15m / 1h / 4h, PLAN §10 스윙 연구 — 2026-11-09 추가)
+격자는 봉 개수 단위라 긴 봉에서는 같은 파라미터가 훨씬 긴 벽시계 창이 된다(4h 에서 `lookback=48` = 8일).
+무의미한 조합은 `BlockDef.max_tf_min` 으로 표시하고 `StrategySpec.validate(registry)`(→ 캠페인·선별 템플릿 검증, G0,
+페이퍼)가 **거부**한다. MCP `list_blocks` 는 블록별 `timeframes`(허용 주기)·`timeframe_note` 를 보여 준다.
+
+| 블록 | 1m·5m | 15m | 1h | 4h | 비고 |
+|---|---|---|---|---|---|
+| `session_kst` | ✓ | ✓ | ✓ (판정 시 = 봉 종료 KST 시) | **거부** | 4h 결정 시각은 KST 01/05/09/13/17/21시 6개뿐 → `us_open` 은 항상 False, 나머지는 하루 1회 결정 = 봉 선택기 |
+| `trend_regime_1h` | ✓ | ✓ | ✓ = `close_t > EMA(span 봉)` (결정 봉 자신) | **거부** | 4h 봉을 1h 로 리샘플하면 4시간마다 종가 1개, '마지막 완료 시간봉'(t+3h)이 없어 항상 False |
+| `range_compression_break` | ✓ | ✓ | ✓ (1일 = 24봉) | **거부** | 1일 백분위 창 = 6봉(해상도 1/6, `squeeze_pct=0.1` 불가), lookback 12–48봉(2–8일) ≫ 1일 창 |
+| `vol_regime` | ✓ | ✓ | ✓ (7일 = 168봉) | 허용 (거침) | 7일 순위 창 = 42봉(최소 6), `window=48`(8일) > 순위 창 → 느린 변동성 추세 지표 |
+| `volume_z`, `donchian_breakout`, `atr_channel_breakout`, `ema_*`, `roc_threshold`, `bollinger_z_revert`, `rsi_oversold_bounce`, `random_entry`, `ema_cross_down` | ✓ | ✓ | ✓ | ✓ | 봉 개수 단위 그대로 (4h `donchian 288` = 48일). `ema_slope`·`roc_threshold` 의 bp 문턱은 봉당 값 — 긴 봉에서 더 자주 충족 |
+| `binance_*`, `upbit_*`, `venue_gap_*` (aux) | ✓ | ✓ | ✓ | ✓ (기대 정보 없음) | aux 는 같은 B 로 `to_tf` — 선행 메커니즘(수 초~1분)이 봉보다 훨씬 짧아 4h 에서는 정보가 거의 없을 것으로 예상(거부는 안 함) |
+
+새 블록은 벽시계 의존이 있으면 `register(..., max_tf_min=, tf_note=)` 로 표시한다(`tests/test_long_tf_research.py` 가 위
+거부 집합을 강제).
 
 ## 참고
 - 진입 비율(격자 중앙값, 업비트 2026-08~11 5분봉 약 2.9만 개): 대부분 1–3%, `atr_channel_breakout` ~5%(상태형: 채널 위에 있는 동안 계속 True).

@@ -118,7 +118,8 @@ def _regular_m1(m1: pd.DataFrame) -> pd.DataFrame:
 def decision_bars(m1: pd.DataFrame, bar_minutes: int) -> pd.DataFrame:
     """1분봉 → 결정 봉 (index = 봉 시작, complete = 구성 1분봉이 모두 실제 봉).
 
-    bar_minutes=5 는 features.to_5m 과 동일. 그 외는 같은 규약의 일반 리샘플.
+    bar_minutes=5 는 features.to_5m, ≥ 15 는 features.to_tf 와 동일(엔진과 같은 complete 규칙).
+    그 외(1 등)는 같은 규약의 일반 리샘플.
     """
     bar_minutes = int(bar_minutes)
     if bar_minutes < 1:
@@ -126,6 +127,9 @@ def decision_bars(m1: pd.DataFrame, bar_minutes: int) -> pd.DataFrame:
     if bar_minutes == 5:
         from btc_quant.strategy.features import to_5m
         return to_5m(m1)
+    from btc_quant.strategy.features import LONG_BAR_MIN, to_tf
+    if bar_minutes >= LONG_BAR_MIN:     # 15m/1h/4h: 엔진과 같은 봉·complete 규칙 (데이터 공백만 배제)
+        return to_tf(m1, bar_minutes)
     cols = [c for c in ("open", "high", "low", "close", "volume", "quote_volume") if c in m1]
     if bar_minutes == 1:
         b = m1[cols].copy()

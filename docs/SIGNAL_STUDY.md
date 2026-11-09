@@ -9,10 +9,23 @@ PLAN §10b-1, §10b-3. 코드: `src/btc_quant/research/signal_study.py`, `src/bt
 신호 구성 하나당 **시도 1회**로 값싸게 판정한다. 통과한 신호만 전략화(원칙적 청산, §10b-2)로 넘긴다.
 
 ## 1. 이벤트 정의
-- 결정 봉 크기 `bar_minutes` (D10: 5 또는 1). 결정 봉 s 가 닫히는 시각 t = s + bar_minutes 에 결정.
+- 결정 봉 크기 `bar_minutes` (D10: 5 또는 1; 스윙 연구 15·60·240). 결정 봉 s 가 닫히는 시각 t = s + bar_minutes 에 결정.
+  15 이상은 엔진과 같은 `to_tf` 봉(UTC epoch 정렬, complete = 데이터 공백(연속 filled ≥ 30분) 없음, ENGINE_SPEC).
 - 트리거 = `entry[s] & AND(filters[s]) & complete[s]` (엔진과 동일한 entry_ok).
 - 진입 기준가 = 1분봉 t 의 **시가** (ENGINE_SPEC과 동일). 1분봉 t 가 없거나 filled 면 이벤트가 아니다.
-- 지평 H 분(기본 5·15·30·60·120·240):
+- 지평 H 분 — 기본값은 결정 봉 길이별(`signal_study.HORIZON_PRESETS`, 템플릿 `study` 에서 덮어쓸 수 있음):
+
+  | bar_minutes | horizons (분) | primary_horizons | min_gap_min |
+  |---|---|---|---|
+  | 1, 5 | 5·15·30·60·120·240 | 30·60·120 | 60 |
+  | 15 | 15·30·60·120·240·480 | 60·120·240 | 60 |
+  | 60 | 60·120·240·480·1440 | 240·480·1440 | 120 |
+  | 240 | 240·480·1440·2880 | 480·1440·2880 | 480 |
+
+  군집 제거 간격 = max(60분, 2·B): 상태형 진입이 연속 봉에서 같은 움직임을 거듭 세지 않게(남은 겹침은 HAC).
+  매칭 귀무 층(KST 시 × 추적 변동성)은 그대로 유효하다 — 4h 결정 시각은 KST 01/05/09/13/17/21시 6개뿐이지만 신호와
+  귀무가 같은 적격 집합(같은 결정 시각들)에서 뽑히므로 층 구성이 정확히 일치한다. 최대보유 제안·자리표시 청산은
+  B 의 배수로 올림(1m/5m 는 기존처럼 5분 단위).
   - 수익 r_H = close(1분봉 t+H−1) / open_t − 1 (t+H 시각의 종가)
   - MFE_H = max(high[t … t+H−1]) / open_t − 1, MAE_H = min(low[…]) / open_t − 1
   - 비용 차감: (1+r)(1−c) − 1, c = 왕복 비용(`coinone_conservative` 10bp, `upbit_conservative` 18bp 등)
@@ -88,7 +101,7 @@ z_H = (신호 평균 − 귀무 중심) / max(SE_HAC, 귀무 표준편차), p_H 
 - **신호 구성 하나 = 시도 1회** (지평별이 아님). `runs` 에 primary 비용 이름으로 한 줄, metrics =
   `{kind: "signal_screen", p_signal, n_events, 지평별 요약, info_horizon, suggestion, decision, correction}`.
 - 원장 스펙: 진입·필터는 실제 값, 청산은 자리표시(SL = TP = 999%, 최대보유 = 최장 지평) → logic_hash 는
-  진입·필터(·결정 봉)로만 갈린다. StrategySpec 에 `timeframe` 필드가 있으면 `"5m"/"1m"` 을 넣는다.
+  진입·필터(·결정 봉)로만 갈린다. StrategySpec `timeframe` = `tf_name(bar_minutes)` ("1m"/"5m"/"15m"/"1h"/"4h").
 - family: 템플릿 `family`, 없으면 진입 블록 이름 → **같은 계열의 전략 캠페인 시도 수에 누적**되어 이후
   G5 의 n_family 를 (조금) 키운다. 선별 결과를 보고 고른 신호이므로 정직한 계산이다.
 - 결과 파일: `research/campaigns/<campaign_id>/signal_screen.{json,csv,md}`, `template.yaml`.
@@ -98,7 +111,7 @@ z_H = (신호 평균 − 귀무 중심) / max(SE_HAC, 귀무 표준편차), p_H 
 name: momentum_screen
 hypothesis: {text: "...", rationale: "...", success_criteria: "BH q=0.10 통과 & 순평균>0"}
 data: {exchange: upbit, symbol: BTC-KRW, timeframe: 1m}
-bar_minutes: 5                      # 1 또는 5 (D10)
+bar_minutes: 5                      # 1 또는 5 (D10) | 15 · 60 · 240 (스윙, 지평 기본값이 바뀜 — §1 표)
 signals:                            # 진입 격자 × 필터 세트 (캠페인 템플릿과 같은 블록 문법, params 로 단일값 가능)
   - entry: {block: donchian_breakout, grid: {lookback: [48, 96]}}
     filters: [[], [{block: vol_regime, params: {window: 24, min_pct: 0.67}}]]

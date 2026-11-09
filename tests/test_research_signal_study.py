@@ -212,7 +212,7 @@ def test_screen_template_validation():
     with pytest.raises(CampaignError, match="primary_horizons"):
         S.ScreenTemplate.from_dict(screen_dict(study={"horizons": [5, 15, 30, 60], "primary_horizons": [5, 15, 30, 60]}))
     with pytest.raises(CampaignError, match="bar_minutes"):
-        S.ScreenTemplate.from_dict(screen_dict(bar_minutes=15))
+        S.ScreenTemplate.from_dict(screen_dict(bar_minutes=30))
     with pytest.raises(CampaignError, match="dev segment"):
         S.ScreenTemplate.from_dict(screen_dict(segment="val"))
     tpl = S.ScreenTemplate.from_dict(screen_dict())

@@ -60,7 +60,7 @@ def run_5m(env):
 
 # ------------------------------------------------------------------ 템플릿
 @pytest.mark.parametrize("mutate,msg", [
-    (lambda d: d.update(timeframe="15m"), "timeframe must be one of"),
+    (lambda d: d.update(timeframe="30m"), "timeframe must be one of"),
     (lambda d: d["exits"].update(max_hold_min=[62]), "multiples of 5"),
     (lambda d: d["exits"].update(sl_pct=[1.0]), "atr mode"),
     (lambda d: d["exits"].update(atr_bars=[14, 20]), "atr_bars"),

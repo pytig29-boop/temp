@@ -3,7 +3,7 @@
 블록 함수 시그니처:
     fn(bars: pd.DataFrame, ctx: Context, **params) -> pd.Series[bool]
 
-- bars: 결정 시간축의 봉 (5분 또는 1분, PLAN D10). index = 봉 시작 시각 UTC,
+- bars: 결정 시간축의 봉 (5분 또는 1분, PLAN D10; 스윙 연구 15m/1h/4h). index = 봉 시작 시각 UTC,
   컬럼 open/high/low/close/volume/quote_volume.
 - 반환: bars와 같은 index의 bool Series. 값 True@t 는 "봉 t가 닫힌 시점(t+봉길이)까지의 정보로 조건 성립".
   NaN 금지(워밍업 구간은 False).
@@ -11,6 +11,8 @@
   봉 길이를 `momentum.bar_delta(bars.index, ctx)` 로 구한다 (ctx.bar 지정 > index 최빈 간격 > 5분).
 - 인과성: t 이후 데이터를 바꿔도 t까지의 값은 변하지 않아야 한다 (tests의 미래 변조 테스트로 강제).
 - kind: "entry" | "filter" | "exit_signal"
+- 결정 주기 호환성: 긴 봉에서 무의미한 블록은 `max_tf_min`(+ `tf_note`)로 표시 → `check(..., tf_min=)` 가 거부
+  (docs/BLOCKS.md "결정 주기 호환성").
 
 등급 (PLAN D11, "B안"):
 - "official": 사람이 검토·병합한 블록 (blocks/ 의 일반 모듈).

@@ -156,7 +156,7 @@ PLAN §10b-9 "Val/잠금은 결과 코드만"을 파일 수준에서 강제한�
 |---|---|
 | 사실과 해석 분리 | 사실 = pipeline.json·신호 선별 결과에서 자동 추출, 수정 API 없음, 줄마다 내용 해시(`verify()`), 연구 모드에서 파일 직접 쓰기 차단. 해석 = AI 작성, 항상 `unverified`로 시작, 신뢰도·근거 필수 |
 | 검증 표시 | `mark(int_id, verified/refuted, by_campaign)` — 사실이 기록된 **후속 캠페인**(원 캠페인과 다르고 해석보다 나중)만 근거 |
-| 자동 실패 분류 | G0→IMPL_OR_DATA_ISSUE, G1→LOW_SAMPLE, G2→NO_SIGNAL(비용 전 +·비용 후 −면 COST_EATEN), G3→PARAM_SPIKE, G4→UNSTABLE, G5→SELECTION_BIAS, G6→VAL_FAIL(엔진 불일치는 IMPL_OR_DATA_ISSUE 추가), 견고성: 상위 거래→OUTLIER_DEPENDENT, 연도·국면·거래소→REGIME_DEPENDENT, 지연→LATENCY_SENSITIVE, 비용→COST_EATEN, 알파→NO_SIGNAL, 그 밖→UNCLASSIFIED |
+| 자동 실패 분류 | G0→IMPL_OR_DATA_ISSUE, G1→LOW_SAMPLE, G2→NO_SIGNAL(비용 전 +·비용 후 −면 COST_EATEN), G3→PARAM_SPIKE(비용 후 인접 ≤ 0 < 비용 전 인접이면 COST_EATEN; 비용 전 = 캠페인 `gross_sharpe_w`), G4→UNSTABLE, G5→SELECTION_BIAS, G6→VAL_FAIL(엔진 불일치는 IMPL_OR_DATA_ISSUE 추가), 견고성: 상위 거래→OUTLIER_DEPENDENT, 연도·국면·거래소→REGIME_DEPENDENT, 지연→LATENCY_SENSITIVE, 비용→COST_EATEN, 알파→NO_SIGNAL, 그 밖→UNCLASSIFIED |
 | 파생 가설 시도 비용 상속 | `derive_hypothesis(parent, …)` 는 부모 계열을 강제(`FamilyInheritanceError`). 새 계열 이름은 `human_override=True` + 사유, **연구 모드에서는 거부**. 템플릿에 `[derived-from drv-…]` 태그 → `check_template`·사실 기록 때 계열 일치 점검(`family_check`) |
 | Val/잠금은 결과 코드만 | 사실 기록기는 G6/G7·grade_checks·risk_limits·val_* 필드를 제거하고 `val_outcome`·`val_aggregate`(정수)·`lockbox_outcome` 만 남김. AI 입력(해석·근거·사후분석)은 Val/잠금 수치 문장을 거부(`RestrictedInfoError`, 휴리스틱) |
 | 범위·만료 | 사실마다 scope(거래소·시간축·구간·블록·스냅샷·커밋), `review_after`(180일), `reexamine_if` |

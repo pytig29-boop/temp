@@ -48,6 +48,9 @@ research mode; everything under `src/btc_quant/{backtest,evaluation,registry,dat
   centered windows, `bfill`, full-sample normalisation (z-scores/percentiles over the whole series),
   or resampling labelled at the right edge without shifting.
 - Higher timeframes: use only **completed** higher-TF bars at decision time (see `trend_regime_1h`).
+- Decision bars can also be 15m/1h/4h (swing research). If the block depends on wall-clock time
+  (KST sessions, hourly resample, 1-day/7-day windows) and is meaningless on long bars, register it with
+  `max_tf_min=` and `tf_note=` so validation rejects it there (docs/BLOCKS.md "결정 주기 호환성").
 - Percentile/regime thresholds: rolling windows over prior bars only.
 
 ## Required deliverables

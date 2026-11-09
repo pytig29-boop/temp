@@ -225,7 +225,7 @@ class CampaignTemplate:
     family: str
     segment: str = "dev"
     raw: dict = field(default_factory=dict)
-    decision_tf: str = DEFAULT_TIMEFRAME   # 결정 주기 "5m" | "1m" (StrategySpec.timeframe, D10)
+    decision_tf: str = DEFAULT_TIMEFRAME   # 결정 주기 TIMEFRAMES 키 "5m" | "1m" | "15m" | "1h" | "4h" (D10, §10 스윙)
     exit_mode: str = "pct"                 # "pct" | "atr"
     atr_bars: int = DEFAULT_ATR_BARS       # ATR 모드 ATR 창 (결정 주기 봉 수)
     from_screen: str | None = None         # 선별 캠페인 id (원장) — 이 선별에서 통과한 구성만 허용
@@ -492,7 +492,7 @@ def _block_grid(d, kind: str, registry: Registry) -> BlockGrid:
 class SignalCache:
     """결정 주기 봉(`to_tf(m1, B)`)과 블록 평가 결과를 (블록, 파라미터)마다 한 번만 계산한다.
 
-    ctx: 보조 데이터(`aux_context`). tf_min: 결정 주기 B (5 또는 1). atr_bars: ATR 청산 창(있으면 prepare 에서
+    ctx: 보조 데이터(`aux_context`). tf_min: 결정 주기 B (분: 1/5/15/60/240). atr_bars: ATR 청산 창(있으면 prepare 에서
     결정 행 ATR 비율을 함께 만든다)."""
 
     def __init__(self, m1: pd.DataFrame, ctx: Context | None = None, registry: Registry = REGISTRY,
