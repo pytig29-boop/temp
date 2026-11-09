@@ -189,3 +189,23 @@ def test_wick_outlier_flag_and_clean():
     c = quality.clean_wicks(df)
     assert c["high"].iloc[0] == 71392000.0 and c["low"].iloc[0] == 71211000.0
     assert df["high"].iloc[0] == 9999990000.0  # 원본 불변
+
+
+# --- Coinone ---
+from btc_quant.data import coinone
+
+
+def test_coinone_parse_chart_and_pair():
+    payload = {"result": "success", "error_code": "0", "chart": [
+        {"timestamp": 1609459260000, "open": "2", "high": "3", "low": "1", "close": "2.5",
+         "target_volume": "0.1", "quote_volume": "0.25"},
+        {"timestamp": 1609459200000, "open": "1", "high": "2", "low": "1", "close": "2",
+         "target_volume": "0.2", "quote_volume": "0.4"}]}
+    df = coinone.parse_chart(payload)
+    assert df.index.is_monotonic_increasing and df["close"].tolist() == [2.0, 2.5]
+    assert coinone._pair("KRW-BTC") == ("KRW", "BTC") == coinone._pair("BTC-KRW")
+
+
+def test_coinone_error_raises():
+    with pytest.raises(RuntimeError):
+        coinone.parse_chart({"result": "error", "error_code": "317"})

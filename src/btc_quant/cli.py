@@ -17,9 +17,9 @@ from pathlib import Path
 import pandas as pd
 
 from .analysis import cost_floor, lead_lag
-from .data import binance_vision, korbit, orderbook, quality, store, upbit
+from .data import binance_vision, coinone, korbit, orderbook, quality, store, upbit
 
-EXCHANGES = list(upbit.BASE_URLS) + ["korbit"]
+EXCHANGES = list(upbit.BASE_URLS) + ["korbit", "coinone"]
 
 REPORTS = Path("research/reports")
 
@@ -36,6 +36,8 @@ def _symbol(market: str) -> str:
 def cmd_fetch_candles(a):
     if a.exchange == "korbit":
         df = korbit.fetch_candles(a.market, a.unit, _dt(a.start), _dt(a.end))
+    elif a.exchange == "coinone":
+        df = coinone.fetch_candles(a.market, a.unit, _dt(a.start), _dt(a.end))
     else:
         df = upbit.fetch_candles(a.exchange, a.market, a.unit, _dt(a.start), _dt(a.end))
     files = store.write_ohlcv(df, a.exchange, _symbol(a.market), f"{a.unit}m")
@@ -67,7 +69,7 @@ def cmd_cost_floor(a):
     raw = store.read_ohlcv(a.exchange, a.symbol, "1m", a.start, a.end)
     q = quality.check_ohlcv(raw)
     m1 = quality.regularize(quality.clean_wicks(raw))
-    scen = (cost_floor.korbit_scenarios() if a.scenarios == "korbit"
+    scen = (cost_floor.zero_fee_scenarios(a.scenarios) if a.scenarios in ("coinone", "korbit")
             else cost_floor.default_scenarios(a.spread_bps, a.bithumb_spread_bps))
     title = f"{a.exchange} {a.symbol} ({m1.index[0]:%Y-%m-%d} ~ {m1.index[-1]:%Y-%m-%d})"
     md = cost_floor.build_report(m1, title, scen, quality_md=q.to_markdown())
@@ -121,7 +123,7 @@ def main(argv=None):
         s.add_argument("--end")
         s.add_argument("--spread-bps", type=float, default=1.4)
         s.add_argument("--bithumb-spread-bps", type=float, default=3.3)
-        s.add_argument("--scenarios", choices=["default", "korbit"], default="default")
+        s.add_argument("--scenarios", choices=["default", "coinone", "korbit"], default="default")
         s.set_defaults(fn=fn)
 
     s = sp.add_parser("lead-lag", help="두 시장 1분 수익률 선후행")

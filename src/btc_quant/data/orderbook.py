@@ -6,12 +6,14 @@ from datetime import datetime, timezone
 
 import pandas as pd
 
-from . import korbit, upbit
+from . import coinone, korbit, upbit
 
 
 def fetch_any(exchange: str, market: str) -> dict:
     if exchange == "korbit":
         return korbit.fetch_orderbook(market)
+    if exchange == "coinone":
+        return coinone.fetch_orderbook(market)
     return upbit.fetch_orderbook(exchange, market)
 
 

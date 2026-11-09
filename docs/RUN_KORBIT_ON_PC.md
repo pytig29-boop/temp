@@ -1,3 +1,5 @@
+> 보류: 거래소를 코인원으로 결정(2026-11-09). 코빗 재검토 시 사용.
+
 # 코빗 데이터 수집 — 사용자 PC(Windows)에서 실행
 
 코빗 API(`api.digitalx.miraeasset.com`)는 Claude 클라우드 IP를 Cloudflare로 차단하므로,

@@ -45,15 +45,15 @@ def default_scenarios(spread_bps: float = 1.4, bithumb_spread_bps: float = 3.3,
     ]
 
 
-def korbit_scenarios(spreads=(2.0, 5.0, 10.0), slip_bps: float = 1.0,
-                     normal_taker_fee: float = 0.0015) -> list[CostScenario]:
-    """코빗 무료 이벤트(2027-08-23까지) 기준 + 이벤트 종료 후 대비.
+def zero_fee_scenarios(exchange: str = "coinone", spreads=(1.0, 2.0, 5.0),
+                       slip_bps: float = 1.0) -> list[CostScenario]:
+    """수수료 0% 이벤트 거래소 기준 + 이벤트 종료 시 대체 경로(업비트) 비교.
 
-    스프레드는 미측정 → 2/5/10bp 민감도. 정상 테이커 수수료 0.15%는 API 문서 예시값(미확인).
+    첫 시나리오가 리포트의 시간대·국면 표 기준이 된다.
     """
-    out = [CostScenario(f"korbit_0fee_spread{int(sp)}", 0.0, sp, slip_bps) for sp in spreads]
+    out = [CostScenario(f"{exchange}_0fee_spread{sp:g}", 0.0, sp, slip_bps) for sp in spreads]
+    out.append(CostScenario(f"{exchange}_0fee_conservative", 0.0, spreads[-1], 3.0))
     out.append(CostScenario("upbit_base(0.05%)", 0.0005, 1.4, slip_bps))
-    out.append(CostScenario("korbit_after_promo(0.15%?)", normal_taker_fee, spreads[1], slip_bps))
     return out
 
 
