@@ -3,7 +3,7 @@
 두 엔진은 같은 입력에 대해 **같은 거래 목록**을 내야 한다(차등 테스트로 강제).
 
 ## 입력
-- `m1`: 1분봉 DataFrame, `quality.regularize(quality.clean_wicks(raw))` 결과. 연속 1분 index(UTC), 컬럼 open/high/low/close/volume, `filled`(bool).
+- `m1`: 1분봉 DataFrame, `quality.prepare_venue_m1(raw, exchange)` 결과 (= 거래소별 `clean_wicks`(코인원 k=0.01, 그 밖 0.03, `quality.wick_params`) → `regularize`(거래량 0 평탄 봉도 filled) → 30분 이상 filled 구간 직후 첫 실제 봉 filled(가격 유지, `gap_warmup_mask`); 연구 `campaign.prepare_m1` 과 페이퍼 `M1History(exchange=…)` 가 같은 함수·같은 값). 연속 1분 index(UTC), 컬럼 open/high/low/close/volume, `filled`(bool).
 - `spec`: `StrategySpec`
 - `cost`: `CostModel`
 - `ctx`: `Context` (보조 데이터)

@@ -100,6 +100,121 @@ def clean_wicks(df: pd.DataFrame, k: float = 0.03, window: int = 15) -> pd.DataF
     return out
 
 
+# ---------------------------------------------------------------------------------------------
+# 거래소별 꼬리 정리 (class ① 데이터 품질 임계값, config/params.yaml `quality.clean_wicks.coinone.*`)
+# 근거: research/reports/data_audit_20261109.md Issue 3 — 코인원 1분봉의 비정상 꼬리는 거의 모두 거래소 고유의
+# 얇은 호가 오체결(k=1% 에서 106건 중 103건이 업비트 같은 분 범위 밖)이라 k=0.03 으로는 대부분 남는다.
+# 업비트·바이낸스는 k=1% 에서 실제 시장 움직임을 잘라내므로 k=0.03 유지. 더 엄격한(더 많이 자르는) 변경 =
+# 더 보수적(도달 불가능한 TP/SL 터치 제거) → class ① 비대칭 규칙상 자동 적용 허용.
+# 연구 m1 준비(research.campaign.prepare_m1)와 페이퍼 M1History 가 **같은** 값을 쓴다 (wick_params).
+COINONE_WICK_K = 0.01
+COINONE_WICK_WINDOW = 15
+WICK_PARAMS_BY_VENUE = {"coinone": ("COINONE_WICK_K", "COINONE_WICK_WINDOW")}
+
+# 긴 공백 직후 워밍업 (데이터 점검 권고: "the first bar after each gap of ≥30 min"). filled 연속 구간(수집
+# 공백 + 거래량 0 평탄 봉 = 점검 시간)이 GAP_WARMUP_MIN_GAP 분 이상이면, 그 뒤 첫 GAP_WARMUP_BARS 개의 실제 봉도
+# filled 로 표시한다(가격은 그대로 → 청산 계산은 그대로, 그 봉 시가 진입·그 봉을 포함한 결정 봉 신호만 막음).
+GAP_WARMUP_MIN_GAP = 30
+GAP_WARMUP_BARS = 1
+
+
+def wick_params(exchange: str | None = None) -> tuple[float, int]:
+    """거래소별 (k, window). 모르는 거래소·None = clean_wicks 기본값(0.03, 15)."""
+    names = WICK_PARAMS_BY_VENUE.get(str(exchange or "").lower())
+    if names is None:
+        import inspect
+        sig = inspect.signature(clean_wicks).parameters
+        return float(sig["k"].default), int(sig["window"].default)
+    g = globals()
+    return float(g[names[0]]), int(g[names[1]])
+
+
+def clean_wicks_for(df: pd.DataFrame, exchange: str | None) -> pd.DataFrame:
+    """거래소별 꼬리 정리 (`wick_params`)."""
+    k, w = wick_params(exchange)
+    return clean_wicks(df, k=k, window=w)
+
+
+def gap_warmup_mask(filled, min_gap: int = GAP_WARMUP_MIN_GAP, warmup_bars: int = GAP_WARMUP_BARS) -> np.ndarray:
+    """filled 연속 구간 길이 ≥ min_gap 이 끝난 뒤 첫 warmup_bars 개의 **실제(filled 아님)** 봉 = True.
+
+    짧은 filled 구간은 워밍업 계수를 리셋하지도 소모하지도 않는다(실제 봉만 센다). 페이퍼 M1History 의
+    증분 계산과 같은 정의 (paper/bars.py)."""
+    f = np.asarray(filled, dtype=bool)
+    n = len(f)
+    out = np.zeros(n, dtype=bool)
+    if n == 0 or warmup_bars <= 0 or min_gap <= 0:
+        return out
+    real_cum = np.cumsum(~f)
+    # filled 구간의 끝 위치와 길이
+    d = np.diff(np.concatenate([[0], f.astype(np.int8), [0]]))
+    starts, ends = np.flatnonzero(d == 1), np.flatnonzero(d == -1) - 1
+    long_ends = ends[(ends - starts + 1) >= min_gap]
+    if len(long_ends) == 0:
+        return out
+    base = np.full(n, -1, dtype=np.int64)
+    base[long_ends] = real_cum[long_ends]
+    base = np.maximum.accumulate(base)
+    k = real_cum - base
+    out = (~f) & (base >= 0) & (k >= 1) & (k <= warmup_bars)
+    return out
+
+
+def mark_gap_warmup(m1: pd.DataFrame, min_gap: int = GAP_WARMUP_MIN_GAP,
+                    warmup_bars: int = GAP_WARMUP_BARS, flag_column: bool = False) -> pd.DataFrame:
+    """regularize 결과에 긴 공백 직후 워밍업 봉을 filled 로 추가 표시한 사본
+    (flag_column=True 면 `gap_warmup` 열 = 추가된 봉)."""
+    out = m1.copy()
+    w = gap_warmup_mask(out["filled"].to_numpy(bool), min_gap, warmup_bars)
+    if flag_column:
+        out["gap_warmup"] = w
+    out["filled"] = out["filled"].to_numpy(bool) | w
+    return out
+
+
+def prepare_venue_m1(raw: pd.DataFrame, exchange: str | None = None) -> pd.DataFrame:
+    """연구·페이퍼 공통 1분봉 준비: 거래소별 clean_wicks → regularize(거래량 0 평탄 봉 = filled)
+    → 긴 공백 직후 워밍업 봉 filled. 페이퍼 `M1History(exchange=…)` 와 비트 단위로 같다(tests/test_paper_bars.py)."""
+    return mark_gap_warmup(regularize(clean_wicks_for(raw, exchange)))
+
+
+# 데이터 점검(2026-11-09)이 권고한 고정 제외 구간 — **선택** 마스크 (기본 미적용). UTC, 양끝 포함 분.
+# 실제 데이터이므로 지우지 않고, 교차 거래소 모델 적합·꼬리 통계에서 제외하거나 "포함/제외" 두 결과를 보고한다.
+# (코인원 점검 = 거래량 0 평탄 봉 → regularize 가 이미 filled, 바이낸스 거래 정지 구간도 같은 규칙으로 filled.)
+AUDIT_EXCLUSION_WINDOWS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
+    ("2024-12-03 13:20", "2024-12-03 15:30", "martial-law cross-venue dislocation (real data; tail-dominating)",
+     ("*",)),
+    ("2021-02-11 02:20", "2021-02-11 04:59", "binance frozen trading + gap", ("binance",)),
+    ("2023-03-24 11:28", "2023-03-24 13:59", "binance frozen trading + gap", ("binance",)),
+)
+
+
+def exclusion_mask(index: pd.DatetimeIndex, exchange: str | None = None,
+                   windows=AUDIT_EXCLUSION_WINDOWS) -> np.ndarray:
+    """index 중 제외 구간(start..end 분, 양끝 포함)에 드는 봉 = True. windows 의 거래소 목록에 exchange 또는
+    '*' 가 있는 구간만."""
+    idx = pd.DatetimeIndex(index)
+    out = np.zeros(len(idx), dtype=bool)
+    ex = str(exchange or "").lower()
+    for start, end, _why, venues in windows:
+        if "*" not in venues and ex not in venues:
+            continue
+        a = pd.Timestamp(start, tz="UTC")
+        b = pd.Timestamp(end, tz="UTC")
+        out |= np.asarray((idx >= a) & (idx <= b))
+    return out
+
+
+def apply_exclusions(m1: pd.DataFrame, exchange: str | None = None, windows=AUDIT_EXCLUSION_WINDOWS
+                     ) -> pd.DataFrame:
+    """선택 적용: 제외 구간의 봉을 filled 로 표시한 사본 (`excluded` 열). 진입·신호만 막고 가격은 그대로."""
+    out = m1.copy()
+    m = exclusion_mask(out.index, exchange, windows)
+    out["excluded"] = m
+    out["filled"] = out["filled"].to_numpy(bool) | m
+    return out
+
+
 def regularize(df: pd.DataFrame, freq: str = "1min", zero_volume_as_filled: bool = True) -> pd.DataFrame:
     """빈 봉을 직전 종가로 채운 평탄 봉으로 메우고 `filled` 플래그를 남긴다.
 

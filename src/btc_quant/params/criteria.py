@@ -34,8 +34,80 @@ ALLOWED_REF_PREFIXES = ("synthetic:", "docs/", "literature:", "research/reports/
 LEDGER_ID_RE = re.compile(r"\b(camp|run|hyp|val|lbx|fwd|trn)-\d{3,}\b", re.IGNORECASE)
 REAL_PATH_RE = re.compile(r"(research/(campaigns|ledger|lessons|lockbox_approvals)|strategies/(active|review|retired|"
                           r"candidates)|runtime/paper)", re.IGNORECASE)
-# pipeline_calibration 에서 측정한 full 레이아웃 k (재보정 비용 절약; mode=bounded 기본값)
+# pipeline_calibration 에서 측정한 full 레이아웃 k (재보정 비용 절약; mode=bounded 기본값).
+# k(엣지 세기) ↦ 심은 스펙의 비용후 Sharpe 는 primary 비용 모델과 합성 시장의 1분봉 준비(코인원 꼬리 정리 폭)에
+# 의존한다. 저장된 k 는 아래 FULL_K_CALIBRATED_UNDER 조건에서만 유효하고, 현재 조건이 다르면(예: 비용 v2 승인,
+# 코인원 꼬리 k 0.03→0.01) **현재 비용 레지스트리로 다시 유도**하거나(derive_full_k: pilot_edge_map, 같은 seed)
+# 호출자가 k_for 를 명시해야 한다(`full_k_for`). 오래된 상수가 조용히 쓰이면 검정력 표가 틀린 참 Sharpe 를 가리킨다.
 FULL_K_FOR = {0.5: 0.0239, 1.0: 0.0257, 2.0: 0.0292, 3.0: 0.0327}
+FULL_K_CALIBRATED_UNDER = {
+    "cost_model": "coinone_conservative",
+    "cost": {"fee_rate": 0.0, "spread_bps": 2.0, "slip_bps": 3.0},     # costs.yaml coinone_conservative v1
+    "coinone_wick_k": 0.03,                                            # 2026-11-09 데이터 점검 이전 기본값
+    "scenario": "5m",
+}
+
+
+class StaleCalibrationError(ValueError):
+    """저장된 k 가 현재 비용·데이터 준비 조건과 다르게 보정됨 → 유도하거나 k_for 를 명시해야 한다."""
+
+
+def current_k_conditions() -> dict:
+    """합성 보정 실행이 실제로 쓰는 조건: primary 비용(현재 버전, research.campaign.get_cost — 코드 저장소
+    config/costs.yaml) + 코인원 꼬리 정리 폭 + 시나리오."""
+    from btc_quant.data.quality import wick_params
+    from btc_quant.research import calibration_study as CS
+    m = CS.primary_cost()
+    return {"cost_model": CS.PRIMARY_COST,
+            "cost": {"fee_rate": float(m.fee_rate), "spread_bps": float(m.spread_bps), "slip_bps": float(m.slip_bps)},
+            "coinone_wick_k": float(wick_params("coinone")[0]), "scenario": "5m"}
+
+
+def k_conditions_match(cur: dict | None = None) -> bool:
+    cur = cur or current_k_conditions()
+    ref = FULL_K_CALIBRATED_UNDER
+    return (cur["cost_model"] == ref["cost_model"] and cur["scenario"] == ref["scenario"]
+            and abs(cur["coinone_wick_k"] - ref["coinone_wick_k"]) < 1e-12
+            and all(abs(float(cur["cost"][k]) - float(v)) < 1e-9 for k, v in ref["cost"].items()))
+
+
+def derive_full_k(power_sharpe: float, jobs: int = 1, progress: Callable = print) -> dict:
+    """현재 비용 레지스트리·데이터 준비로 full 레이아웃 k 를 다시 유도 (calibration_study.pilot_edge_map, 같은
+    seed·파일럿 격자). 수 분~수십 분. 반환 {power_sharpe: k}."""
+    from dataclasses import replace
+
+    from btc_quant.research import calibration_study as CS
+    cfg = replace(CS.full_config(jobs=jobs), strengths=(float(power_sharpe),))
+    progress(f"[criteria] deriving k for Sharpe {power_sharpe} under current costs "
+             f"({current_k_conditions()['cost']}) — pilot {len(cfg.pilot_ks)} ks × {cfg.pilot_seeds} seeds")
+    if jobs > 1:
+        from concurrent.futures import ProcessPoolExecutor
+        from multiprocessing import get_context
+        with ProcessPoolExecutor(max_workers=jobs, mp_context=get_context("spawn")) as pool:
+            res = CS.pilot_edge_map(cfg, pool)
+    else:
+        res = CS.pilot_edge_map(cfg)
+    return {float(power_sharpe): float(res["k_for_strength"][float(power_sharpe)])}
+
+
+def full_k_for(power_sharpe: float, derive: bool | Callable = False, jobs: int = 1,
+               progress: Callable = print) -> tuple[dict, str]:
+    """full 레이아웃 k 결정 → ({power_sharpe: k}, 출처). 저장 조건 = 현재 조건이면 저장값('stored'),
+    아니면 derive(True 또는 유도 함수) 로 다시 유도('derived'), derive=False 면 StaleCalibrationError."""
+    cur = current_k_conditions()
+    if k_conditions_match(cur):
+        if power_sharpe not in FULL_K_FOR:
+            if not derive:
+                raise ValueError(f"no stored k for Sharpe {power_sharpe}; pass k_for "
+                                 f"(calibration_study.pilot_edge_map) — known {sorted(FULL_K_FOR)}")
+        else:
+            return {power_sharpe: FULL_K_FOR[power_sharpe]}, "stored"
+    elif not derive:
+        raise StaleCalibrationError(
+            f"FULL_K_FOR was calibrated under {FULL_K_CALIBRATED_UNDER} but the current conditions are {cur}; "
+            "derive k under the current cost registry (derive=True / derive_full_k) or pass k_for explicitly")
+    fn = derive if callable(derive) else (lambda s: derive_full_k(s, jobs=jobs, progress=progress))
+    return {float(k): float(v) for k, v in fn(power_sharpe).items()}, "derived"
 
 
 class GoalpostError(ValueError):
@@ -123,7 +195,8 @@ def check_anti_goalpost(key: str, motivation: str, references: list[str] | tuple
 # ============================================================== 실행
 def build_tasks(dotted: str, values: list, mode: str, power_sharpe: float, n_null_markets: int,
                 n_planted_markets: int, k_for: dict | None = None, seed0: int = 9000,
-                n_null_runs: int | None = None, grid: str = "g12") -> tuple[list[dict], dict]:
+                n_null_runs: int | None = None, grid: str = "g12", derive_k: bool | Callable = False,
+                jobs: int = 1, progress: Callable = print) -> tuple[list[dict], dict]:
     from btc_quant.research import calibration_study as CS
     if mode == "quick":
         cfg = CS.quick_config()
@@ -136,11 +209,9 @@ def build_tasks(dotted: str, values: list, mode: str, power_sharpe: float, n_nul
     else:
         layout = CS.FULL_LAYOUT
         n_null, top_k, override = n_null_runs or 1000, CS.TOP_K, n_null_runs is not None
+        k_source = "explicit"
         if k_for is None:
-            if power_sharpe not in FULL_K_FOR:
-                raise ValueError(f"no stored k for Sharpe {power_sharpe}; pass k_for "
-                                 f"(calibration_study.pilot_edge_map) — known {sorted(FULL_K_FOR)}")
-            k_for = {power_sharpe: FULL_K_FOR[power_sharpe]}
+            k_for, k_source = full_k_for(power_sharpe, derive=derive_k, jobs=jobs, progress=progress)
     base = {"layout": asdict(layout), "n_null": n_null, "top_k": top_k, "override_null_runs": override,
             "plant_lookback": CS.PLANT_LOOKBACK, "grid": grid}
     tasks = []
@@ -154,7 +225,11 @@ def build_tasks(dotted: str, values: list, mode: str, power_sharpe: float, n_nul
             tasks.append({**base, "kind": "planted", "strength": float(power_sharpe), "k": float(k_for[power_sharpe]),
                           "seed": seed, "study": "criteria", "gate_overrides": {dotted: v}, "value": v})
             seed += 1
-    return tasks, {"layout": asdict(layout), "n_null_runs": n_null, "top_k": top_k, "k_for": k_for, "grid": grid}
+    meta = {"layout": asdict(layout), "n_null_runs": n_null, "top_k": top_k, "k_for": k_for, "grid": grid}
+    if mode != "quick":
+        meta["k_source"] = k_source
+        meta["k_conditions"] = current_k_conditions()
+    return tasks, meta
 
 
 def default_runner(tasks: list[dict], jobs: int = 1, progress: Callable = print) -> list[dict]:
@@ -211,7 +286,9 @@ def propose_criterion(key: str, candidates: list, targets: Targets, motivation: 
                       n_planted_markets: int = 10, jobs: int = 1, root=None,
                       runner: Callable[[list[dict]], list[dict]] | None = None, k_for: dict | None = None,
                       n_null_runs: int | None = None, allow_smoke: bool = False,
-                      progress: Callable = print) -> CriterionStudy:
+                      progress: Callable = print, derive_k: bool | Callable = True) -> CriterionStudy:
+    """derive_k: 저장된 k 의 보정 조건(비용·꼬리 정리)이 현재와 다르면 현재 비용 레지스트리로 k 를 다시 유도
+    (True = derive_full_k, 함수 = 그 함수, False = StaleCalibrationError). k_for 를 주면 그대로 쓴다."""
     root = repo_root(root)
     check_anti_goalpost(key, motivation, references, root)           # 먼저: 거부면 아무것도 돌리지 않음
     reg = load_registry(root, validate_=False)
@@ -221,7 +298,8 @@ def propose_criterion(key: str, candidates: list, targets: Targets, motivation: 
     values = list(dict.fromkeys([current, *candidates]))
     st = CriterionStudy(key, dotted, current, values, targets, mode)
     tasks, meta = build_tasks(dotted, values, mode, targets.power_sharpe, n_null_markets, n_planted_markets,
-                              k_for=k_for, n_null_runs=n_null_runs)
+                              k_for=k_for, n_null_runs=n_null_runs, derive_k=derive_k, jobs=jobs,
+                              progress=progress)
     progress(f"[criteria] {key}: {len(values)} values × {n_null_markets + n_planted_markets} markets "
              f"= {len(tasks)} runs ({mode})")
     runs = (runner or (lambda t: default_runner(t, jobs, progress)))(tasks)
@@ -260,7 +338,8 @@ def report_markdown(st: CriterionStudy, meta: dict) -> str:
          f"- 목표: 오탐률 ≤ {t.max_fpr:.0%} (귀무 시장에서 validated 후보 ≥ 1), "
          f"검정력 ≥ {t.min_power:.0%} (참 연 Sharpe {t.power_sharpe:g} 의 심은 스펙 S* validated)",
          f"- 합성 설정: {meta.get('layout')}, 격자 {meta.get('grid')}, G2 귀무 {meta.get('n_null_runs')}회, "
-         f"top_k {meta.get('top_k')}, k {meta.get('k_for')}. 후보 값마다 같은 seed(공통 난수).",
+         f"top_k {meta.get('top_k')}, k {meta.get('k_for')} ({meta.get('k_source', 'quick pilot')}; 조건 "
+         f"{meta.get('k_conditions', '-')}). 후보 값마다 같은 seed(공통 난수).",
          "- 실제 캠페인·후보 결과는 쓰지 않았다(anti-goalpost 검사 통과). 승인 시 **다음 캠페인부터** 적용.", "",
          "| 값 | 귀무 시장 | 오탐률 [95%] | 심은 시장 | 검정력 [95%] | S* Dev 생존 | 목표 충족 |",
          "|---|---|---|---|---|---|---|"]

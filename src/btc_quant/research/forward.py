@@ -224,7 +224,7 @@ def forward_aux_context(env: ResearchEnv, spec, fwd_start: pd.Timestamp, window_
             raw = pd.DataFrame()
         if raw.empty:
             raise CampaignError(f"no {a} aux data in the forward segment")
-        aux_m1[a] = prepare_m1(raw)
+        aux_m1[a] = prepare_m1(raw, a)
         rows[a] = len(raw)
     return aux_context(aux_m1, spec.tf_min), rows
 
@@ -242,7 +242,7 @@ def evaluate(env: ResearchEnv, fs: ForwardStrategy, fwd_start: pd.Timestamp, win
                 "days_until_eval": math.ceil((eval_start - window_end) / pd.Timedelta(days=1))}
     try:
         raw = env.data.read_range(fwd_start, window_end, fs.exchange, SYMBOL, TIMEFRAME)
-        m1 = prepare_m1(raw)
+        m1 = prepare_m1(raw, fs.exchange)
     except (*_NO_DATA, CampaignError):
         return {**base, "status": "no_data"}
     if m1.index.max() < eval_start:

@@ -19,7 +19,7 @@
 | ② 증거 기준 | "얼마나 확실해야 믿는가" | 유의수준, DSR/PBO 문턱, Holm α, 최소 거래 수, 관문 통과선, 견고성 기준 | **합성 보정만**(calibration_study: 귀무 시장 오탐률, 참 Sharpe 별 검정력)과 명시한 목표 | 실제 연구 결과로 조정 금지(골대 이동). 다음 캠페인부터만 적용. 특정 후보·캠페인을 근거로 한 제안은 거부. 사람 승인 | human |
 | ③ 위험 선호 | 사람이 감내할 손실 | 최대 낙폭 허용(G6.max_mdd), 손실 한도 하한(§7), 자본 비중, 주문 금액 | 사람의 가치 판단 | AI 는 결과(정지 빈도·최악 손실·회복 기간)를 표로만 제시, 사람이 고른다 | human |
 
-등급별 개수(2026-11-09): ① 20 · ② 61 · ③ 12 (총 93). `python -m btc_quant.params status` 로 확인.
+등급별 개수(2026-11-09): ① 24 · ② 61 · ③ 12 (총 97). ① 추가(같은 날, 데이터 점검 `research/reports/data_audit_20261109.md` 근거, 엄격 방향이라 자동 적용): 코인원 꼬리 정리 `quality.clean_wicks.coinone.k` 0.03→**0.01**·`.window` 15, 긴 공백 워밍업 `quality.gap_warmup.min_gap_minutes` 30·`quality.gap_warmup.bars` 0→**1** — 연구 `prepare_m1`·페이퍼 `M1History` 공통(`quality.wick_params`, `prepare_venue_m1`). `python -m btc_quant.params status` 로 확인.
 
 ### 왜 ①은 비대칭인가
 비용을 올리는 실수는 좋은 전략을 놓치게 할 뿐이지만(기회 손실), 내리는 실수는 나쁜 전략을 실거래로 보낸다(실제 손실).

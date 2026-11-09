@@ -212,7 +212,7 @@ Draft → Candidate → Validated → Challenger(페이퍼) → Promotion Review
 | **MCP 서버** | ✅ 구현됨 (2026-11-09) — 도구 20종, 실제 목록·안전 속성은 `docs/MCP.md`. 승인·활성화·롤백·잠금 열기·설정 수정·주문·키 관련 도구는 존재하지 않음(테스트로 강제) |
 | **Skills** | `research-campaign`(가설→격자→실행→관문→리포트), `candidate-review`(반대 논리 심사), `block-authoring`(새 블록 + 테스트), `daily-report` |
 | **Subagents** | `researcher`, `skeptic`(후보를 깨뜨리려 시도), `data-steward` |
-| **Hooks** | 승인 전략·관문·리스크·데이터 분할 설정 쓰기 차단, 잠금 데이터 경로 읽기 차단, MCP 호출 로그 |
+| **Hooks** | 승인 전략·관문·리스크·데이터 분할 설정 쓰기 차단, 잠금 데이터 경로 읽기 차단, 사람 전용 Val 세부(사람용 리포트 `research/reports/human/`, `pipeline.json`, Val 원장 표) 읽기 차단, MCP 우회(원장 쓰는 연구 진입점 Bash 직접 실행) 차단, MCP 호출 로그 (docs/AI_RESEARCH.md §4) |
 | **예약 실행** | 야간 캠페인 → 아침 리포트 |
 | **대시보드** | 원장·전략 풀·관문 현황 |
 

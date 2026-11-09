@@ -33,28 +33,30 @@ ledger and the lessons notebook, not for producing a winner.
 - **Counterparty**: who loses money to us and why they keep doing it; why it has not been arbitraged away.
 - **What kills it** (cost regime, venue, regime, latency) and the scope (venue, timeframe, cost model).
 - Lockbox/Val exposure of every piece of evidence used (copy the knowledge-base tags).
-- If it follows from a lesson or a failed campaign: create it with
-  `LessonBook().derive_hypothesis(parent, …)` → `apply_derivation(template, drv_id)`. It **inherits the parent
+- If it follows from a lesson or a failed campaign: create it with MCP `lessons_derive_hypothesis(parent, …,
+  template=…)` (= `derive_hypothesis` → `apply_derivation`). It **inherits the parent
   family** so trials accumulate. Never rename the family to reset trial counts; a new family name needs a
   human override (refused in research mode).
 
 ## Workflow (v4 — follow the `research-campaign` skill step by step)
 1. Weekly budget: `LessonBook().trial_budget(family)` — do not exceed `remaining`; a frozen family (0) stays
    frozen until a re-examine condition is met or a human releases it.
-2. **Signal screening first** (`btc_quant.research.signal_study.screen`, docs/SIGNAL_STUDY.md): event study of
+2. **Signal screening first** (MCP `screen_signals`, docs/SIGNAL_STUDY.md): event study of
    entry(+filter) configs vs a matched null on Dev, no exits. Only passing signals go to a strategy campaign.
-   Record facts: `LessonBook().record_facts_from_screen(result)`.
+   Facts are recorded automatically.
 3. **Power check** (`btc_quant.research.power.budget_report` or
    `uv run python -m btc_quant.research.power --days … --grid … --family …`): if the Sharpe the signal can
    plausibly deliver is below the required Sharpe, shrink the grid or stop.
 4. **Strategy campaign with principled exits**: entry/filters fixed to the screened values; exits = ATR
    multiples (`stop_loss_atr`, `take_profit_atr`) and max hold from the signal's information horizon,
    **≤ 6 exit variants** in total. No exit grids ×80.
-5. Gates G0–G6 via the pipeline; robustness suite (`btc_quant.research.robustness.robustness_for_spec`) on Dev
+5. Gates G0–G6 via the pipeline (MCP `create_and_run_campaign`; running `research.cli run`/`run_campaign`/
+   `run_pipeline` from Bash is denied in research mode); robustness suite (`btc_quant.research.robustness.robustness_for_spec`) on Dev
    survivors; skeptic review for anything that survives.
-6. **Lessons**: `record_facts_from_pipeline(<campaign dir>/pipeline.json)` (if the pipeline did not already),
-   then add at most a few interpretations with `add_interpretation(fact_id, text, confidence, evidence,
-   proposed_test=…)` — each must cite evidence and propose a falsifying test. Use the `lessons-review` skill.
+6. **Lessons**: facts are recorded by the pipeline (`record_facts_from_pipeline(<campaign dir>)` re-runs it,
+   idempotent), then add at most a few interpretations with MCP `lessons_add_interpretation(fact_id, text,
+   confidence, evidence, proposed_test=…)` — each must cite evidence and propose a falsifying test. Use the
+   `lessons-review` skill.
 
 ## Tools
 - **MCP server `btcq` first** (docs/MCP.md, `mcp__btcq__*`): `lessons_view`, `find_similar`, `list_blocks`,
@@ -98,5 +100,6 @@ ledger and the lessons notebook, not for producing a winner.
 - Verdict: PASS-TO-SKEPTIC | NO CANDIDATE
 - Next hypothesis (derive_hypothesis from <fact id>, same family) — never based on lockbox/Val details
 ```
-Write the full report to `research/reports/campaign_<campaign_id>.md`. If a candidate survives,
+Write the full report into the agent-safe `research/reports/campaign_<campaign_id>.md` (Val/lockbox = outcome
+codes only; `research/reports/human/` and `pipeline.json` are human-only and unreadable in research mode). If a candidate survives,
 recommend a `skeptic` review before any lockbox request.

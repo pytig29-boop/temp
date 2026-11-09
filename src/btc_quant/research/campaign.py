@@ -12,7 +12,8 @@ PLAN §5.1 ①~③. 관문(④~⑥)은 `pipeline.py`, 리포트는 `report.py`.
    (v4) 검정력 점검(`power.budget_report`): 격자의 실질 시도 수 → G5 통과 최소 연 Sharpe. 기본은 경고만,
    `strict_power=True` 면 목표 Sharpe(`power.target_sharpe`) 미달·미선언 시 `PowerCheckError` (원장 쓰기 전).
 3. 데이터 스냅샷 id 계산(파일 해시만, 백테스트 아님) → 가설·캠페인을 원장에 등록(**실행 전**).
-4. Dev 데이터는 `DataAccess.read("dev", …)` 로만 읽고 `regularize(clean_wicks(…))`.
+4. Dev 데이터는 `DataAccess.read("dev", …)` 로만 읽고 `prepare_m1(raw, exchange)` = 거래소별 clean_wicks →
+   regularize → 긴 공백 직후 워밍업 봉 filled (`data.quality.prepare_venue_m1`, 페이퍼 M1History 와 동일).
    보조 데이터(`data.aux: [upbit]`)는 같은 구간을 같은 방식으로 읽어 결정 주기 봉(`to_tf`)으로 만든다 —
    페이퍼(`paper.trader.evaluate_signals`)와 같은 구성 (`aux_context`).
 5. 진입·필터 블록 신호는 (블록, 파라미터)마다 한 번씩만 계산·캐시(결정 주기 봉 `to_tf(m1, B)`),
@@ -40,7 +41,7 @@ import yaml
 
 from btc_quant.backtest import fast
 from btc_quant.backtest.types import CostModel
-from btc_quant.data.quality import clean_wicks, regularize
+from btc_quant.data.quality import prepare_venue_m1
 from btc_quant.evaluation import metrics as M
 from btc_quant.registry.ledger import Ledger, repo_root, utcnow
 from btc_quant.registry.snapshot import snapshot_id
@@ -520,15 +521,18 @@ class SignalCache:
 
 def load_segment(env: ResearchEnv, segment: str, exchange: str, symbol: str, timeframe: str
                  ) -> pd.DataFrame:
-    """DataAccess 로 분할 구간을 읽어 엔진 입력 형태로 (clean_wicks → regularize)."""
+    """DataAccess 로 분할 구간을 읽어 엔진 입력 형태로 (`prepare_m1(raw, exchange)`)."""
     raw = env.data.read(segment, exchange, symbol, timeframe)
-    return prepare_m1(raw)
+    return prepare_m1(raw, exchange)
 
 
-def prepare_m1(raw: pd.DataFrame) -> pd.DataFrame:
+def prepare_m1(raw: pd.DataFrame, exchange: str | None = None) -> pd.DataFrame:
+    """원천 1분봉 → 엔진 입력: 거래소별 clean_wicks(k: 코인원 0.01, 그 밖 0.03) → regularize(거래량 0 평탄 봉
+    = filled) → 30분 이상 공백 직후 첫 실제 봉 filled. 페이퍼 `M1History(exchange=…)` 와 같은 함수
+    (`data.quality.prepare_venue_m1`). exchange=None 은 기본 꼬리 폭(0.03)."""
     if raw.empty:
         raise CampaignError("no data")
-    return regularize(clean_wicks(raw))
+    return prepare_venue_m1(raw, exchange)
 
 
 def aux_context(aux_m1: dict[str, pd.DataFrame], tf_min: int) -> Context:
@@ -551,7 +555,7 @@ def load_aux_m1(env: ResearchEnv, tpl: "CampaignTemplate", start=None, end=None,
                else env.data.read_range(start, end, a, tpl.symbol, tpl.timeframe))
         if raw.empty:
             raise CampaignError(f"no {a} aux data for {segment or (start, end)}")
-        out[a] = prepare_m1(raw)
+        out[a] = prepare_m1(raw, a)
     return out
 
 

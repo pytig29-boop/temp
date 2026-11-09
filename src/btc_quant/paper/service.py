@@ -227,13 +227,13 @@ class PaperService:
         self.aux_hist: dict[str, M1History] = {}
         if self.need_upbit:
             self.aux_builders["upbit"] = MinuteBarBuilder(self.cfg.grace_seconds)
-            self.aux_hist["upbit"] = M1History(max_rows=1)   # 크기는 아래에서 재설정
+            self.aux_hist["upbit"] = M1History(max_rows=1, exchange="upbit")   # 크기는 아래에서 재설정
         self.traders: dict[str, PaperTrader] = {}
         for s in slots:
             self.traders[s.key] = self._make_trader(s)
         self.lookback_min = max(t.window_min for t in self.traders.values())
         self.builder = MinuteBarBuilder(self.cfg.grace_seconds)
-        self.hist = M1History(max_rows=self.lookback_min + 2 * 1440)
+        self.hist = M1History(max_rows=self.lookback_min + 2 * 1440, exchange="coinone")   # 체결 venue
         for h in self.aux_hist.values():
             h.max_rows = self.hist.max_rows
         self.ready = False
@@ -704,14 +704,14 @@ def build_report(key_dir: Path, start=None, end=None, m1: pd.DataFrame | None = 
     fetch_end = end + pd.Timedelta(minutes=spec.exit.max_hold_min + 5)
     if m1 is None:
         raw = fetch_warmup(fetch_end, minutes, fetch=fetch)
-        m1 = quality.regularize(quality.clean_wicks(raw))
+        m1 = quality.prepare_venue_m1(raw, "coinone")
     ctx = None
     keys = spec_aux(spec)
     if keys:
         aux_m1 = dict(aux_m1 or {})
         for k in keys:
             if k not in aux_m1:
-                aux_m1[k] = quality.regularize(quality.clean_wicks(fetch_warmup(fetch_end, minutes, exchange=k)))
+                aux_m1[k] = quality.prepare_venue_m1(fetch_warmup(fetch_end, minutes, exchange=k), k)
         ctx = Context(aux={k: to_tf(aux_m1[k], spec.tf_min) for k in keys})
     bt = run_reference(spec, m1, cost, start, end, ctx=ctx).trades
     trades = [t for t in read_jsonl(key_dir / "trades.jsonl")

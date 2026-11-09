@@ -101,6 +101,45 @@ def test_planted_edge_passes(planted):
     assert json.loads((cr.dir / "pipeline.json").read_text())["n_validated"] >= 1
 
 
+VAL_LEAKS = ("val_p_value", "val_holm", "stress_sharpe", "mc_mdd95", "stress_mdd", "daily_loss_limit",
+             "drawdown_limit", "ok_sharpe", "ok_mdd", "rule=b")
+
+
+def test_human_and_agent_reports_split(planted):
+    """사람용 리포트(전체, research/reports/human/)와 에이전트용(Val 결과 코드만)이 분리된다."""
+    env, cr, out, report, _ = planted
+    assert report == env.reports_dir / "human" / f"campaign_{cr.campaign_id}.md"
+    human = report.read_text()
+    agent_p = env.reports_dir / f"campaign_{cr.campaign_id}.md"
+    agent = agent_p.read_text()
+    assert "val_holm_passed" in human and "Risk limits (§7, from Val): daily" in human
+    for leak in VAL_LEAKS:
+        assert leak not in agent, leak
+    assert "**G6 (Val) PASS** — outcome code only" in agent and "Agent-safe report" in agent
+    assert "Risk limits (§7, from Val): withheld" in agent
+    # Dev 세부는 둘 다
+    for s in ("G2 PASS", "Ablation", "Yearly", "Selection-bias inputs", "candidate(s) passed G0–G6"):
+        assert s in agent and s in human, s
+
+
+def test_pipeline_public_json_redacted(planted):
+    env, cr, out, *_ = planted
+    from btc_quant.research.pipeline import PIPELINE_PUBLIC, public_pipeline
+    pub = json.loads((cr.dir / PIPELINE_PUBLIC).read_text())
+    assert pub == json.loads(json.dumps(public_pipeline(json.loads((cr.dir / "pipeline.json").read_text()))))
+    blob = json.dumps(pub)
+    for leak in ("val_p_value", "val_holm_passed", "stress_sharpe", "mc_mdd95", "daily_loss_limit"):
+        assert leak not in blob, leak
+    top = pub["candidates"][0]
+    assert top["gates"]["G6"]["outcome"] == "pass" and top["gates"]["G6"]["passed"] is True
+    assert set(top["gates"]["G6"]) == {"passed", "outcome", "val_budget", "withheld"}
+    assert top["risk_limits"] == "withheld (Val-derived)"
+    assert set(top["grade_checks"]["G2"]) == {"passed"} and top["grade_checks"]["G6"]["outcome"] in ("pass", "fail")
+    assert set(pub["val_status"]) == {"val_id", "cap", "used", "remaining"}
+    # Dev 게이트는 그대로
+    assert top["gates"]["G2"] == json.loads((cr.dir / "pipeline.json").read_text())["candidates"][0]["gates"]["G2"]
+
+
 def test_random_walk_fails(randomwalk):
     env, cr, out, report, _ = randomwalk
     assert out["n_validated"] == 0 and out["verdict"] == "no candidate passed"

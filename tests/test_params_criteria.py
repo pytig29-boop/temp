@@ -121,3 +121,37 @@ def test_quick_mode_is_smoke_only(tmp_path):
                              runner=fake_runner({0.95: 0.0, 0.9: 0.0}, {0.95: 0.0, 0.9: 1.0}),
                              progress=lambda *a: None)
     assert st.recommended == 0.9 and st.status == "smoke_only" and st.proposal_id is None
+
+
+# ---- 저장된 k(FULL_K_FOR) 의 보정 조건 = 현재 비용 레지스트리·데이터 준비여야 함 -------------------------
+def test_stale_k_requires_derivation_or_explicit_k(monkeypatch):
+    monkeypatch.setattr(Q, "current_k_conditions", lambda: {**Q.FULL_K_CALIBRATED_UNDER})
+    k, src = Q.full_k_for(2.0)                               # 보정 조건 그대로 → 저장값
+    assert k == {2.0: Q.FULL_K_FOR[2.0]} and src == "stored"
+    # 비용이 바뀌면(예: 승인된 v2) 저장 k 는 낡음 → 유도하지 않으면 거부
+    changed = {**Q.FULL_K_CALIBRATED_UNDER, "cost": {"fee_rate": 0.0, "spread_bps": 2.0, "slip_bps": 1.0}}
+    monkeypatch.setattr(Q, "current_k_conditions", lambda: changed)
+    assert not Q.k_conditions_match()
+    with pytest.raises(Q.StaleCalibrationError, match="derive"):
+        Q.full_k_for(2.0)
+    with pytest.raises(Q.StaleCalibrationError):
+        Q.build_tasks("G5.min_dsr", [0.95], "bounded", 2.0, 1, 1)
+    calls = []
+    k, src = Q.full_k_for(2.0, derive=lambda s: calls.append(s) or {s: 0.0199})
+    assert k == {2.0: 0.0199} and src == "derived" and calls == [2.0]
+    tasks, meta = Q.build_tasks("G5.min_dsr", [0.95], "bounded", 2.0, 1, 1, derive_k=lambda s: {s: 0.0199})
+    assert meta["k_source"] == "derived" and [t["k"] for t in tasks if t["kind"] == "planted"] == [0.0199]
+    tasks, meta = Q.build_tasks("G5.min_dsr", [0.95], "bounded", 2.0, 1, 1, k_for={2.0: 0.05})
+    assert meta["k_source"] == "explicit"                   # 명시 k 는 그대로
+    # 꼬리 정리 폭이 바뀌어도 낡음
+    monkeypatch.setattr(Q, "current_k_conditions", lambda: {**Q.FULL_K_CALIBRATED_UNDER, "coinone_wick_k": 0.01})
+    assert not Q.k_conditions_match()
+
+
+def test_current_k_conditions_read_cost_registry():
+    from btc_quant.params.costs import cost_model
+    cur = Q.current_k_conditions()
+    m = cost_model("coinone_conservative")
+    assert cur["cost"] == {"fee_rate": m.fee_rate, "spread_bps": m.spread_bps, "slip_bps": m.slip_bps}
+    from btc_quant.data.quality import wick_params
+    assert cur["coinone_wick_k"] == wick_params("coinone")[0]

@@ -1,13 +1,16 @@
 """실시간 1분봉 생성 + 1분봉 이력(워밍업 포함) + 블록별 필요 lookback 계산.
 
-파이프라인은 백테스트 입력과 같다: `regularize(clean_wicks(raw))` (docs/ENGINE_SPEC.md §입력).
+파이프라인은 백테스트 입력과 같다: `quality.prepare_venue_m1(raw, exchange)` = 거래소별 clean_wicks(코인원 k=0.01,
+그 밖 0.03, `quality.wick_params`) → regularize → 30분 이상 공백 직후 첫 실제 봉 filled (docs/ENGINE_SPEC.md §입력,
+research.campaign.prepare_m1 과 같은 함수).
 
 - `MinuteBarBuilder`: 체결 스트림(거래소 시각 ms)을 UTC 분 단위로 모아 1분봉을 만든다.
   분 M 은 벽시계가 M+60초+grace 를 지나면 닫힌다(늦게 도착한 체결 대비). 이미 닫힌 분의 체결은
   `late_trades` 로 세고 버린다. 체결이 없던 분은 `filled=True` 봉으로 내보낸다(가격은 이력이 채움).
-- `M1History`: 백테스트와 같은 정규화 1분봉 이력. REST 캔들로 seed 한 뒤 실시간 봉을 append.
-  실제 봉은 `quality.clean_wicks` 를 직전 15개 실제 봉과 함께 적용(그 함수의 창 길이 = 15 → 전체
-  이력에 적용한 결과와 동일), 빈 분은 직전 종가 평탄 봉(`quality.regularize` 와 동일).
+- `M1History(exchange=…)`: 백테스트와 같은 정규화 1분봉 이력. REST 캔들로 seed 한 뒤 실시간 봉을 append.
+  실제 봉은 `quality.clean_wicks` 를 직전 window(=거래소별 창, 15)개 실제 봉과 함께 적용(그 함수의 창 길이와
+  같으므로 전체 이력에 적용한 결과와 동일), 빈 분은 직전 종가 평탄 봉(`quality.regularize` 와 동일), 긴 공백 직후
+  워밍업 봉은 `quality.gap_warmup_mask` 와 같은 정의로 증분 표시.
 - `required_lookback_bars(spec)`: 블록 파라미터로부터 "후행 창 평가 = 전체 이력 평가"가 성립하는 데
   필요한 결정 주기 봉 수(스펙 timeframe: 5분/1분). 유한 창(rolling/shift) 블록은 정확히, EMA 계열은 초기값
   영향이 EMA_TOL 이하가 되는 길이로 계산한다. 블록이 `lookback_bars` 를 제공하면 그것을 쓴다.
@@ -251,7 +254,7 @@ class MinuteBarBuilder:
 
 
 def wick_clean(o: float, h: float, l: float, c: float, prev_closes: list[float],
-               k: float = 0.03) -> tuple[float, float]:
+               k: float = 0.03) -> tuple[float, float]:   # k: 거래소별 값은 quality.wick_params
     """`quality.clean_wicks` 의 한 봉 버전 (같은 식): 기준가 = 직전 최대 15개 실제 봉 종가 중앙값
     (없으면 시가). 고가/저가가 기준·몸통에서 k 이상 벗어나면 몸통으로 자른다. (high, low) 반환."""
     ref = float(np.median(prev_closes)) if prev_closes else o
@@ -270,8 +273,13 @@ class M1History:
 
     COLS = ("open", "high", "low", "close", "volume")
 
-    def __init__(self, max_rows: int = 200_000):
+    def __init__(self, max_rows: int = 200_000, exchange: str | None = None):
         self.max_rows = int(max_rows)
+        self.exchange = exchange
+        self.wick_k, self.wick_window = quality.wick_params(exchange)     # 연구 prepare_m1 과 같은 값
+        self.gap_min, self.gap_warmup = quality.GAP_WARMUP_MIN_GAP, quality.GAP_WARMUP_BARS
+        self._run = 0           # 끝에서부터 연속된 (원래) filled 봉 수
+        self._warm_left = 0     # 긴 공백 뒤 남은 워밍업 실제 봉 수
         self._m: list[int] = []
         self._o: list[float] = []
         self._h: list[float] = []
@@ -304,18 +312,20 @@ class M1History:
     # ---- 적재 ----
     def seed(self, raw: pd.DataFrame) -> int:
         """REST 원본 캔들(실제 봉만, UTC index)로 초기화. 기존 내용은 버린다. 행 수 반환."""
-        self.__init__(self.max_rows)
+        self.__init__(self.max_rows, self.exchange)
         if raw is None or raw.empty:
             return 0
         raw = raw[~raw.index.duplicated(keep="last")].sort_index()
         raw = raw[list(self.COLS)].astype(float)
-        m1 = quality.regularize(quality.clean_wicks(raw))
+        base = quality.regularize(quality.clean_wicks(raw, k=self.wick_k, window=self.wick_window))
+        m1 = quality.mark_gap_warmup(base, self.gap_min, self.gap_warmup)   # = prepare_venue_m1(raw, exchange)
+        self._seed_gap_state(base["filled"].to_numpy(bool))
         mins = (m1.index.as_unit("ns").asi8 // NS_PER_MIN).tolist()
         self._m = [int(x) for x in mins]
         self._o, self._h, self._l, self._c = (m1[k].astype(float).tolist() for k in ("open", "high", "low", "close"))
         self._v = m1["volume"].astype(float).tolist()
         self._f = m1["filled"].astype(bool).tolist()
-        tail = raw.iloc[-WICK_WINDOW:]
+        tail = raw.iloc[-self.wick_window:]
         tm = (tail.index.as_unit("ns").asi8 // NS_PER_MIN).tolist()
         self._raw_tail = [(int(m), *map(float, r)) for m, r in zip(tm, tail.to_numpy())]
         self._trim()
@@ -341,7 +351,24 @@ class M1History:
         self._trim()
         return out
 
+    def _seed_gap_state(self, filled: np.ndarray) -> None:
+        """seed 끝의 워밍업 상태 (quality.gap_warmup_mask 와 같은 정의)."""
+        f = np.asarray(filled, bool)
+        nz = np.flatnonzero(~f)
+        self._run = int(len(f) - (nz[-1] + 1)) if len(nz) else len(f)
+        self._warm_left = 0
+        if self.gap_warmup <= 0 or self.gap_min <= 0:
+            return
+        if self._run >= self.gap_min:
+            self._warm_left = self.gap_warmup
+            return
+        w = quality.gap_warmup_mask(np.concatenate([f, [False] * self.gap_warmup]), self.gap_min, self.gap_warmup)
+        self._warm_left = int(w[len(f):].sum())       # 다음 실제 봉들 중 워밍업으로 남은 수
+
     def _push_filled(self, m: int) -> Bar:
+        self._run += 1
+        if self.gap_warmup > 0 and self.gap_min > 0 and self._run == self.gap_min:
+            self._warm_left = self.gap_warmup
         c = self._c[-1]
         self._m.append(m)
         self._o.append(c); self._h.append(c); self._l.append(c); self._c.append(c)
@@ -350,12 +377,17 @@ class M1History:
 
     def _push_real(self, m: int, bar: Bar) -> Bar:
         row = (m, float(bar.open), float(bar.high), float(bar.low), float(bar.close), float(bar.volume))
-        h, l = wick_clean(row[1], row[2], row[3], row[4], [r[4] for r in self._raw_tail[-WICK_WINDOW:]])
-        self._raw_tail = (self._raw_tail + [row])[-WICK_WINDOW:]
+        w = self.wick_window
+        h, l = wick_clean(row[1], row[2], row[3], row[4], [r[4] for r in self._raw_tail[-w:]], k=self.wick_k)
+        self._raw_tail = (self._raw_tail + [row])[-w:]
+        self._run = 0
+        warm = self._warm_left > 0          # 긴 공백 직후 워밍업: 가격은 실제, filled 표시(진입·신호만 차단)
+        if warm:
+            self._warm_left -= 1
         self._m.append(m)
         self._o.append(row[1]); self._h.append(h); self._l.append(l); self._c.append(row[4])
-        self._v.append(row[5]); self._f.append(False)
-        return Bar(minute_ts(m), row[1], h, l, row[4], row[5], False, bar.n_trades)
+        self._v.append(row[5]); self._f.append(warm)
+        return Bar(minute_ts(m), row[1], h, l, row[4], row[5], warm, bar.n_trades)
 
     def _trim(self) -> None:
         extra = len(self._m) - self.max_rows

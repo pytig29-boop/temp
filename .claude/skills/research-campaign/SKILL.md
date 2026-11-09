@@ -26,9 +26,8 @@ fail — goes into the ledger, the lessons notebook and the report unchanged.
    kills it) + scope (venue, timeframe, cost model) + exposure of each cited evidence item. No mechanism ⇒
    do not register.
 3. Repeat check: `LessonBook().find_similar(template=tpl, text=hypothesis_text)`. `exact` ⇒ stop or justify.
-   If the idea comes from a lesson/failed campaign: `d = LessonBook().derive_hypothesis(parent, …)` then
-   `tpl = LessonBook().apply_derivation(tpl, d["id"])` — family is inherited. `LessonBook().check_template(tpl)`
-   must not raise.
+   If the idea comes from a lesson/failed campaign: MCP `lessons_derive_hypothesis(parent, …, template=tpl)`
+   (derives + applies + checks; family is inherited). `LessonBook().check_template(tpl)` (read-only) must not raise.
 4. **Weekly trial budget**: `LessonBook().trial_budget(family)`; the planned trials (screen configs + strategy
    specs + expected ablation reruns) must fit in `remaining`.
    Rule: global ≤ 2,000 new trials / 7 days; per family 600 (default), 300 (new family — screen first),
@@ -39,7 +38,8 @@ fail — goes into the ledger, the lessons notebook and the report unchanged.
 - Template per docs/SIGNAL_STUDY.md §7 (entry grid × filter sets, primary horizons ≤ 3, BH q=0.10, budget).
 - MCP `screen_signals(template="research/campaign_templates/<x>_screen.yaml")` (pre-registers itself, Dev only,
   one trial per signal config, family-wide multiple-testing correction, records lessons facts; refuses when the
-  weekly budget is exhausted). Fallback: `campaign.run_screen(path)` (records facts too).
+  weekly budget is exhausted). No fallback in research mode: the guard hook denies running
+  `run_screen` / `signal_study.screen` / `research.cli screen` directly (they bypass the budget checks).
 - Only configs with `passed=True` continue. None ⇒ report NO CANDIDATE (taxonomy NO_SIGNAL / COST_EATEN /
   LOW_SAMPLE is recorded automatically) and stop.
 - Take from the passing config: information horizon → `max_hold_min`; MFE/MAE in ATR units → centre of
@@ -58,10 +58,11 @@ frequency) is below the required Sharpe at the estimated effective trials, shrin
 - Template format: `research/campaigns/README.md`. Budget = grid size.
 - Run: MCP `create_and_run_campaign(template=…, max_candidates=5)` — template must set `from_screen` and
   `power.target_sharpe`; registers hypothesis+campaign before running, records every run, runs the pipeline and
-  the base report, returns the summary (fallback: `uv run python -m btc_quant.research.cli run <template.yaml>`).
+  the reports, returns the summary. No fallback in research mode: the guard hook denies `research.cli run|gates`
+  and Python `run_campaign` / `run_pipeline` (they bypass the weekly budget, screen gate and strict power).
 
 ## Stage 4 — Gates, ablation, robustness, Val
-- Pipeline (`btc_quant.research.pipeline.run_pipeline`): G0 → G1 → G2 (trade-count-matched random-entry null)
+- Pipeline (runs inside `create_and_run_campaign`): G0 → G1 → G2 (trade-count-matched random-entry null)
   → G3 → G4 → G5 (DSR with family effective trials, PBO) → ablation → G6 on Val (budgeted, outcome only) → grade.
 - Robustness on Dev survivors: `btc_quant.research.robustness.robustness_for_spec(spec)` (latency, outliers,
   leave-year-out, cost ×1.5, regime share, alpha vs BTC, cross-venue). Attach the result to the candidate
@@ -72,12 +73,15 @@ frequency) is below the required Sharpe at the estimated effective trials, shrin
   review_report="research/reports/review_<id>.md")`; a human approves. Never open it yourself.
 
 ## Stage 5 — Lessons & report
-1. `LessonBook().record_facts_from_pipeline("research/campaigns/<cmp>/pipeline.json")` (idempotent).
-2. `lessons-review` skill §A: 0–3 interpretations (unverified, evidence, falsifying test); mark earlier
-   interpretations that this campaign verifies/refutes (`mark(..., by_campaign=<this cmp>)`); post-mortem any
-   process mistake.
+1. Facts are recorded by the pipeline automatically (re-run if needed:
+   `LessonBook().record_facts_from_pipeline("research/campaigns/<cmp>")` — pass the folder; idempotent).
+2. `lessons-review` skill §A: 0–3 interpretations via MCP `lessons_add_interpretation` (unverified, evidence,
+   falsifying test); mark earlier interpretations that this campaign verifies/refutes via MCP `lessons_mark`
+   (`by_campaign=<this cmp>`); post-mortem any process mistake (`LessonBook().postmortem`).
 3. `LessonBook().render_markdown()`.
-4. Report `research/reports/campaign_<cmp>.md` (the CLI writes the base report; add the sections below).
+4. Report `research/reports/campaign_<cmp>.md` — the **agent-safe** base report (Dev detail + Val/lockbox outcome
+   codes only); add the sections below to it. The full human report `research/reports/human/campaign_<cmp>.md`
+   and `research/campaigns/<cmp>/pipeline.json` contain Val detail and are not readable in research mode.
 
 ## Interface map (MCP server `btcq`, docs/MCP.md — use the tools first)
 Tool names in Claude Code are `mcp__btcq__<tool>`. Every result is JSON `{"ok": true, …}` or
@@ -87,15 +91,15 @@ Tool names in Claude Code are `mcp__btcq__<tool>`. Every result is JSON `{"ok": 
 | knowledge / lessons | `lessons_view`, `find_similar` | `research/knowledge/*.md`, `LessonBook().facts/find_similar/trial_budget` |
 | data coverage | `get_data_summary` | `DataAccess().read("dev"|"val", …)` |
 | list blocks | `list_blocks` | `REGISTRY.all(kind, include_experimental=True)`, docs/BLOCKS.md |
-| ① hypothesis | `register_hypothesis` (standalone pre-registration); screens/campaigns register their template hypothesis themselves | `Ledger().register_hypothesis` |
-| derived hypothesis | `lessons_derive_hypothesis` (with `template=` → applied + checked) | `derive_hypothesis` → `apply_derivation` → `check_template` |
-| ② screen | `screen_signals` (weekly budget enforced) | `campaign.run_screen` / `research.cli screen` |
+| ① hypothesis | `register_hypothesis` (standalone pre-registration); screens/campaigns register their template hypothesis themselves | – (ledger writes via Bash are denied in research mode) |
+| derived hypothesis | `lessons_derive_hypothesis` (with `template=` → applied + checked) | `check_template` (read-only) |
+| ② screen | `screen_signals` (weekly budget enforced) | – (denied in research mode); `signal_study.study_signal` for a side calculation (no ledger) |
 | ③ power | `power_check` | `power.budget_report`, `research.power` CLI |
-| ④ campaign + gates + robustness + base report | `create_and_run_campaign` (screen-gated, budget, strict power, repeat check enforced) | `research.cli run <template>` |
-| results | `get_campaign_report`, `list_campaigns` (G6 = pass/fail only) | `research/campaigns/<id>/pipeline.json` |
+| ④ campaign + gates + robustness + base report | `create_and_run_campaign` (screen-gated, budget, strict power, repeat check enforced) | – (denied in research mode; humans: `research.cli run <template>`) |
+| results | `get_campaign_report`, `list_campaigns` (G6 = outcome code only) | `research/campaigns/<id>/pipeline_public.json`, `research/reports/campaign_<id>.md` (agent-safe) |
 | extra robustness on a spec | – | `robustness.robustness_for_spec(spec)` |
-| ledger query | `query_ledger` (whitelisted; `table="trials"` for counts) | `Ledger().records(...)`, `trials_count(family=…)` |
-| lessons | `lessons_add_interpretation`, `lessons_mark` | `LessonBook().add_interpretation/mark/postmortem/render_markdown` |
+| ledger query | `query_ledger` (whitelisted; `table="trials"` for counts) | `trials_count(family=…)` (the runs / val_evaluations / lockbox / transitions jsonl files are human-only) |
+| lessons | `lessons_add_interpretation`, `lessons_mark` | `LessonBook().postmortem/render_markdown` |
 | lockbox | `request_lockbox_eval` (files a request; never opens) | a **human** runs `admin_cli approve-lockbox` |
 | registry / Val budget | `registry_status`, `forward_status` | `StrategyRegistry().status()`, `DataAccess().lockbox_status()` |
 

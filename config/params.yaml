@@ -174,6 +174,71 @@ params:
   last_updated: '2026-11-09'
   owner: auto
   history: []
+- key: quality.clean_wicks.coinone.k
+  class: 1
+  source: py:btc_quant.data.quality:COINONE_WICK_K
+  value: 0.01
+  rationale: 코인원 1분봉 꼬리 정리 폭 — 거래소 고유 얇은 호가 오체결 제거 (연구 prepare_m1·페이퍼 M1History 공통, quality.wick_params)
+  evidence: research/reports/data_audit_20261109.md
+  version: 2
+  last_updated: '2026-11-09'
+  owner: auto
+  history:
+  - version: 2
+    previous: 0.03
+    value: 0.01
+    date: '2026-11-09'
+    at: '2026-11-09T16:04:36+00:00'
+    by: auto (class ① stricter = more conservative; asymmetric rule, no approval needed) — recorded by Claude
+    proposal_id: null
+    reason: 'data audit 2026-11-09 Issue 3 / Recommended action 2: 103 of 106 Coinone k=1% wick outliers (Dev) are
+      venue-specific bad prints outside Upbit''s same-minute range; k=0.03 misses most. Stricter cleaning removes
+      unfillable TP/SL touches (more conservative).'
+    applies_from_campaign: null
+  note: v1 = 기존 동작(코인원도 기본 k=0.03 사용). 다른 거래소는 quality.clean_wicks.k(0.03) 유지
+- key: quality.clean_wicks.coinone.window
+  class: 1
+  source: py:btc_quant.data.quality:COINONE_WICK_WINDOW
+  value: 15
+  rationale: 코인원 꼬리 정리 기준가 창(직전 종가 15개 중앙값) — 데이터 점검 권고 window=15
+  evidence: research/reports/data_audit_20261109.md
+  version: 1
+  last_updated: '2026-11-09'
+  owner: auto
+  history: []
+- key: quality.gap_warmup.min_gap_minutes
+  class: 1
+  source: py:btc_quant.data.quality:GAP_WARMUP_MIN_GAP
+  value: 30
+  rationale: 이 길이(분) 이상의 filled 연속 구간(수집 공백·거래량 0 점검 시간) 뒤를 워밍업으로 본다
+  evidence: 'research/reports/data_audit_20261109.md (Windows to exclude from trading: gaps of >=30 min)'
+  version: 1
+  last_updated: '2026-11-09'
+  owner: auto
+  history: []
+- key: quality.gap_warmup.bars
+  class: 1
+  source: py:btc_quant.data.quality:GAP_WARMUP_BARS
+  value: 1
+  rationale: 긴 공백 직후 filled 로 표시할 첫 실제 봉 수(진입·신호 차단, 가격·청산은 그대로)
+  evidence: research/reports/data_audit_20261109.md
+  version: 2
+  last_updated: '2026-11-09'
+  owner: auto
+  history:
+  - version: 2
+    previous: 0
+    value: 1
+    date: '2026-11-09'
+    at: '2026-11-09T16:04:36+00:00'
+    by: auto (class ① stricter = more conservative; asymmetric rule, no approval needed) — recorded by Claude
+    proposal_id: null
+    reason: 'data audit 2026-11-09 ''Windows to exclude from trading'': first bar after each gap of >=30 min (warm-up).
+      Verified not covered before: regularize marks zero-volume flat bars and missing bars filled, but the first
+      real bar after a long gap was tradable; cooldown is post-exit only. Marking it filled blocks entries/signals
+      only (more conservative).'
+    applies_from_campaign: null
+  note: v1 = 기존 동작(워밍업 없음)
 - key: quality.check_ohlcv.extreme_logret
   class: 1
   source: pydefault:btc_quant.data.quality:check_ohlcv.extreme_logret

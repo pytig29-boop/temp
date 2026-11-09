@@ -8,7 +8,10 @@ argument-hint: "[campaign_id | family | weekly]"
 
 MCP tools (`btcq`): `lessons_view` (facts, interpretations + status, `verify()`, weekly budget),
 `lessons_add_interpretation`, `lessons_mark`, `lessons_derive_hypothesis`, `find_similar`. Screens/campaigns run via
-MCP record facts automatically. Postmortems and the rest use the Python API below.
+MCP record facts automatically. **In research mode, interpretations / marks / derived hypotheses go through the
+MCP tools** — the guard hook denies `add_interpretation`, `mark`, `derive_hypothesis`, `apply_derivation` via Bash
+(same checks, but one audited path). Postmortems, `find_similar`, `check_template`, `render_markdown`, `verify` and
+fact recording use the Python API below; the code samples for the MCP-covered calls show the arguments.
 API: `from btc_quant.research.lessons import LessonBook; B = LessonBook()` (stores in `research/lessons/`,
 reads `research/ledger/`). Human-readable view: `research/lessons/LESSONS.md` (regenerate with
 `B.render_markdown()`). The JSONL files and LESSONS.md are **never edited directly** (research guard denies it);
@@ -32,11 +35,12 @@ everything goes through the API. `B.verify()` must return `[]`.
 
 ## A. After a campaign / screen
 1. Facts (idempotent; the pipeline may already have done it):
-   - strategy campaign: `f = B.record_facts_from_pipeline("research/campaigns/<cmp>/pipeline.json")`
+   - strategy campaign: `f = B.record_facts_from_pipeline("research/campaigns/<cmp>")` (pass the folder;
+     `pipeline.json` itself is human-only — the fact keeps Val as an outcome code)
    - signal screen: `fs = B.record_facts_from_screen("research/campaigns/<cmp>")` (one fact per family)
    - single study dict: `B.record_facts_from_signal_study(study, family=…)`
 2. Read the fact: outcome, `taxonomy.primary`, per-candidate codes and `taxonomy_reasons`, funnel, DSR inputs.
-3. Add **0–3 interpretations** per fact:
+3. Add **0–3 interpretations** per fact (MCP `lessons_add_interpretation`, same arguments as):
    ```python
    B.add_interpretation(f["id"],
        "Breakouts in the low-vol tercile carry no information; edge (if any) is confined to high-vol hours.",
@@ -47,10 +51,10 @@ everything goes through the API. `B.verify()` must return `[]`.
    ```
    Good interpretations are falsifiable, name the mechanism, and say which campaign would refute them.
    Lockbox/Val-exposed knowledge may be cited only with its exposure tag.
-4. If the interpretation suggests a next test: `d = B.derive_hypothesis(f["id"], text, rationale, success)`,
-   then `tpl = B.apply_derivation(template_dict, d["id"])` and `B.check_template(tpl)` before running.
-5. When a follow-up campaign has run and its facts are recorded: `B.mark(int_id, "refuted", by_campaign=…,
-   note=…)` (or `verified`). One follow-up never "proves" a mechanism — say what it showed.
+4. If the interpretation suggests a next test: MCP `lessons_derive_hypothesis(parent=f["id"], text, rationale,
+   success_criteria, template=template_dict)` (= `derive_hypothesis` → `apply_derivation` → `check_template`).
+5. When a follow-up campaign has run and its facts are recorded: MCP `lessons_mark(int_id, "refuted",
+   by_campaign=…, note=…)` (or `verified`). One follow-up never "proves" a mechanism — say what it showed.
 6. Process mistakes (bugs, data problems, procedure violations, design flaws):
    `B.postmortem(title, category="bug"|"data"|"procedure"|"design", what_happened, root_cause, prevention=[…],
    impact=…, detected_by=…, refs=[…], key="<slug>")`.

@@ -157,13 +157,15 @@ class ResearchTools:
 
     root: 연구 저장소 루트 (기본: BTC_QUANT_ROOT 또는 저장소). 다음 인자는 **테스트 전용**(도구 인자로
     노출하지 않음): gate_cfg / n_null (합성 시장에서 빠르게), blocks_dir / docs_path (임시 실험 블록),
-    load_accepted_blocks (수용 통과 블록을 이 프로세스 REGISTRY 에 적재할지), criteria_runner (가짜 합성 보정).
+    load_accepted_blocks (수용 통과 블록을 이 프로세스 REGISTRY 에 적재할지), criteria_runner (가짜 합성 보정),
+    criteria_k_deriver (가짜 k 유도 — 저장 k 의 보정 조건이 현재 비용과 다를 때).
     """
 
     def __init__(self, root: str | Path | None = None, *, gate_cfg: dict | None = None, n_null: int | None = None,
                  blocks_dir: str | Path | None = None, docs_path: str | Path | None = None,
                  load_accepted_blocks: bool = True, progress: Callable[[str], None] | None = None,
-                 criteria_runner: Callable[[list[dict]], list[dict]] | None = None):
+                 criteria_runner: Callable[[list[dict]], list[dict]] | None = None,
+                 criteria_k_deriver: Callable[[float], dict] | None = None):
         self.root = Path(root) if root is not None else repo_root()
         here = Path(__file__).resolve().parents[3]          # src/btc_quant/mcp/tools.py → 저장소
         self.code_root = here if (here / "pyproject.toml").exists() else repo_root()
@@ -173,6 +175,7 @@ class ResearchTools:
         self.docs_path = Path(docs_path) if docs_path is not None else None
         self.load_accepted_blocks = load_accepted_blocks
         self._criteria_runner = criteria_runner
+        self._criteria_k_deriver = criteria_k_deriver
         self.log = progress or (lambda s: print(s, file=sys.stderr, flush=True))
 
     # ---------------------------------------------------------- 공용
@@ -409,7 +412,7 @@ class ResearchTools:
                                 repeat_justification: str = "") -> dict[str, Any]:
         from btc_quant.research.campaign import CampaignTemplate, run_campaign
         from btc_quant.research.pipeline import run_pipeline
-        from btc_quant.research.report import write_report
+        from btc_quant.research.report import write_reports
         d = self._template_dict(template)
         tpl = CampaignTemplate.from_dict(d)
         n_specs = tpl.check_budget()                           # 격자 > 템플릿 예산 → 거부
@@ -436,7 +439,7 @@ class ResearchTools:
         if self._n_null is not None:
             kw["n_null"] = self._n_null
         run_pipeline(cr, env=env, **kw)
-        rp = write_report(cr.campaign_id, env=env)
+        rp = write_reports(cr.campaign_id, env=env)["agent"]     # 사람용 전체 리포트는 human/ (읽기 금지)
         rep = self._campaign_summary(cr.campaign_id, env, book)
         rep.update(weekly_budget_before=budget,
                    repeat_justification=repeat_justification or None,
@@ -468,7 +471,7 @@ class ResearchTools:
                            decision=_scalars(json.loads(p.read_text(encoding="utf-8")).get("decision"), 1000),
                            report_path=str(d / "signal_screen.md"))
             return out
-        man_p, pj = d / "manifest.json", d / "pipeline.json"
+        man_p = d / "manifest.json"
         if man_p.exists():
             man = json.loads(man_p.read_text(encoding="utf-8"))
             pw = man.get("power") or {}
@@ -481,10 +484,10 @@ class ResearchTools:
                                "screen_gate": ({k: (man.get("screen") or {}).get(k)
                                                 for k in ("from_screen", "requires_screen_pass", "n_configs")}
                                                if man.get("screen") else None)}
-        if not pj.exists():
+        p = self._public_pipeline(d)
+        if p is None:
             out["pipeline"] = None
             return out
-        p = json.loads(pj.read_text(encoding="utf-8"))
         st = p.get("campaign_stats") or {}
         out["pipeline"] = {
             "verdict": p.get("verdict"), "n_dev_survivors": p.get("n_dev_survivors"),
@@ -500,9 +503,22 @@ class ResearchTools:
         }
         rp = env.reports_dir / f"campaign_{campaign_id}.md"
         out["report_path"] = str(rp) if rp.exists() else None
-        out["val_policy"] = ("Val (G6) is returned as an outcome code only. The human-facing report file also "
-                             "contains Val detail lines: do not quote Val numbers in reports, lessons or hypotheses.")
+        out["val_policy"] = ("Val (G6) is returned as an outcome code only (source: pipeline_public.json). "
+                             "report_path is the agent-safe report (Dev detail + Val/lockbox outcome codes); the "
+                             "full human report under research/reports/human/ and pipeline.json are human-only.")
         return out
+
+    @staticmethod
+    def _public_pipeline(d: Path) -> dict | None:
+        """에이전트 안전 파이프라인 결과: pipeline_public.json (없으면 — 이전 캠페인 — pipeline.json 을 서버
+        안에서 같은 규칙으로 정제). 전체 pipeline.json 을 그대로 반환하는 경로는 없다."""
+        from btc_quant.research.pipeline import PIPELINE_FULL, PIPELINE_PUBLIC, public_pipeline
+        pub, full = d / PIPELINE_PUBLIC, d / PIPELINE_FULL
+        if pub.exists():
+            return json.loads(pub.read_text(encoding="utf-8"))
+        if full.exists():
+            return public_pipeline(json.loads(full.read_text(encoding="utf-8")))
+        return None
 
     @staticmethod
     def _candidate_summary(c: dict) -> dict[str, Any]:
@@ -520,6 +536,8 @@ class ResearchTools:
             "gates_dev": {g: _scalars(gates[g]) for g in GATES_DEV if g in gates},
             "dev_passed": c.get("dev_passed"), "first_failed": c.get("first_failed"),
             "G6_val": _outcome(g6.get("passed")) if isinstance(g6, dict) else "not evaluated",
+            "G6_outcome": (g6.get("outcome") or _outcome(g6.get("passed"))) if isinstance(g6, dict)
+            else "not evaluated",      # pass | fail | budget_exhausted | engine_mismatch (pipeline_public.json)
             "val_budget_exhausted": bool(((g6 or {}).get("val_budget") or {}).get("exhausted"))
             if isinstance(g6, dict) else False,
             "grade": c.get("grade"), "status": c.get("status"), "human_review": c.get("human_review"),
@@ -849,7 +867,8 @@ class ResearchTools:
         st = propose_criterion(key, list(candidates), Targets(max_fpr, min_power, power_sharpe), motivation,
                                references=list(references or []), mode=mode, n_null_markets=int(n_null_markets),
                                n_planted_markets=int(n_planted_markets), jobs=max(1, int(jobs)),
-                               root=config_root(self.env()), progress=self.log, runner=self._criteria_runner)
+                               root=config_root(self.env()), progress=self.log, runner=self._criteria_runner,
+                               derive_k=self._criteria_k_deriver or True)   # 비용이 바뀌었으면 k 재유도
         return {"key": st.key, "current": st.current, "candidates": st.candidates, "status": st.status,
                 "recommended": st.recommended, "rows": [_scalars(r) for r in st.rows],
                 "proposal_id": st.proposal_id, "report_path": st.report_path,

@@ -131,6 +131,15 @@ def test_campaign_round_trip_val_outcome_only(tools, screened, campaign):
     for leak in ("val_p_value", "risk_limits", "grade_checks", "mc_mdd95", "stress_sharpe", "val_holm"):
         assert leak not in blob, leak
     assert r["facts"] and r["report_path"] and Path(r["report_path"]).exists()
+    # 에이전트에게 주는 경로 = 안전 리포트 (사람용 전체 리포트는 research/reports/human/)
+    rp = Path(r["report_path"])
+    assert rp.parent.name == "reports" and r["base_report"] == r["report_path"]
+    assert (rp.parent / "human" / rp.name).exists()
+    text = rp.read_text()
+    for leak in ("val_p_value", "val_holm", "mc_mdd95", "stress_sharpe", "daily_loss_limit"):
+        assert leak not in text, leak
+    cdir = Path(r["report_path"]).parents[1] / "campaigns" / r["campaign_id"]
+    assert (cdir / "pipeline_public.json").exists() and (cdir / "pipeline.json").exists()
     again = call(tools, "get_campaign_report", campaign_id=r["campaign_id"])
     assert again["pipeline"]["verdict"] == p["verdict"]
     lst = call(tools, "list_campaigns")
@@ -348,7 +357,9 @@ def test_params_status_and_propose_criterion(tmp_path):
     def runner(tasks):     # 가짜 합성 보정: 0.9 가 목표 충족
         return [{**t, "any_validated": False, "star_validated": t["value"] == 0.9,
                  "star_dev_passed": True} for t in tasks]
-    t = ResearchTools(tmp_path, progress=lambda s: None, criteria_runner=runner)
+    derived = []
+    t = ResearchTools(tmp_path, progress=lambda s: None, criteria_runner=runner,
+                      criteria_k_deriver=lambda s: derived.append(s) or {s: 0.031})
     s = call(t, "params_status")
     assert s["ok"] and s["validation"] == "OK" and "coinone_conservative" in s["cost_models"]
     r = call(t, "propose_criterion", key="gates.G5.min_dsr", candidates=[0.9],
@@ -363,3 +374,6 @@ def test_params_status_and_propose_criterion(tmp_path):
     assert (tmp_path / "research" / "param_proposals" / f"{r['proposal_id']}.yaml").exists()
     assert call(t, "params_status")["pending_proposals"][0]["id"] == r["proposal_id"]
     assert not (tmp_path / "research" / "param_approvals").exists()      # 승인은 사람만
+    # 저장된 k 는 비용 v1·코인원 꼬리 0.03 에서 보정됨 → 현재 조건(비용 v2, k 0.01)이면 다시 유도
+    from btc_quant.params.criteria import k_conditions_match
+    assert derived == ([] if k_conditions_match() else [2.0])

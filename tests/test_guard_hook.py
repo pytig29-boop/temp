@@ -297,3 +297,123 @@ def test_param_research_commands_allowed(tmp_path, cmd):
 def test_param_proposals_writable(tmp_path):
     assert run("Write", {"file_path": abs_(tmp_path, "research/param_proposals/pp-x.yaml"), "content": "x"},
                tmp_path=tmp_path) is None
+
+
+# ---- human-only Val/lockbox detail (agent-safe reports, pipeline_public.json) ----------
+@pytest.mark.parametrize("rel", [
+    "research/reports/human/campaign_camp-000001.md",
+    "research/reports/human",
+    "research/campaigns/camp-000001/pipeline.json",
+    "research/ledger/runs.jsonl",
+    "research/ledger/val_evaluations.jsonl",
+    "research/ledger/lockbox.jsonl",
+    "research/ledger/transitions.jsonl",
+    "strategies/validated/brk_v1.risk.yaml",
+])
+def test_human_only_reads_denied(tmp_path, rel):
+    assert denied(run("Read", {"file_path": abs_(tmp_path, rel)}, tmp_path=tmp_path)), rel
+    assert denied(run("Read", {"file_path": rel}, tmp_path=tmp_path)), rel
+    assert run("Read", {"file_path": rel}, research=False, tmp_path=tmp_path) is None
+
+
+@pytest.mark.parametrize("tool,ti", [
+    ("Read", {"file_path": "research/reports/campaign_camp-000001.md"}),
+    ("Read", {"file_path": "research/campaigns/camp-000001/pipeline_public.json"}),
+    ("Read", {"file_path": "research/campaigns/camp-000001/manifest.json"}),
+    ("Read", {"file_path": "research/ledger/hypotheses.jsonl"}),
+    ("Grep", {"pattern": "sharpe", "path": "src"}),
+    ("Grep", {"pattern": "sharpe", "glob": "*.py"}),
+    ("Grep", {"pattern": "sharpe", "type": "py"}),
+    ("Grep", {"pattern": "sharpe", "path": "research/knowledge"}),
+    ("Grep", {"pattern": "sharpe", "path": "research/campaigns", "glob": "**/pipeline_public.json"}),
+    ("Glob", {"pattern": "research/reports/*.md"}),
+    ("Glob", {"pattern": "**/*.md"}),
+    ("Bash", {"command": "cat research/reports/campaign_camp-000001.md"}),
+    ("Bash", {"command": "jq .verdict research/campaigns/camp-000001/pipeline_public.json"}),
+    ("Bash", {"command": "ls research/reports/*.md"}),
+    ("Bash", {"command": "rg -n sharpe src tests"}),
+    ("Bash", {"command": "grep -rn sharpe --include=*.py ."}),
+    ("Bash", {"command": "grep -n G6 docs/MCP.md"}),
+])
+def test_agent_safe_reads_allowed(tmp_path, tool, ti):
+    assert run(tool, ti, tmp_path=tmp_path) is None, (tool, ti)
+
+
+@pytest.mark.parametrize("tool,ti", [
+    ("Grep", {"pattern": "sharpe"}),                                   # 저장소 전체
+    ("Grep", {"pattern": "sharpe", "path": "research"}),
+    ("Grep", {"pattern": "sharpe", "path": "research/reports"}),
+    ("Grep", {"pattern": "sharpe", "path": "research/campaigns", "glob": "*.json"}),
+    ("Grep", {"pattern": "sharpe", "path": "research/reports/human"}),
+    ("Grep", {"pattern": "sharpe", "type": "md"}),
+    ("Glob", {"pattern": "research/reports/human/*.md"}),
+    ("Glob", {"pattern": "research/campaigns/**/pipeline.json"}),
+    ("Bash", {"command": "cat research/reports/human/campaign_camp-000001.md"}),
+    ("Bash", {"command": "cat research/reports/*/campaign_*.md"}),
+    ("Bash", {"command": "jq '.candidates[0].gates.G6' research/campaigns/camp-000001/pipeline.json"}),
+    ("Bash", {"command": "python -c \"import json; print(json.load(open('research/campaigns/c/pipeline.json')))\""}),
+    ("Bash", {"command": "tail -3 research/ledger/val_evaluations.jsonl"}),
+    ("Bash", {"command": "cat strategies/validated/x_v1.risk.yaml"}),
+    ("Bash", {"command": "rg sharpe"}),
+    ("Bash", {"command": "grep -rn sharpe research/"}),
+    ("Bash", {"command": "grep -R G6 ."}),
+    ("Bash", {"command": "git grep -n val_p_value"}),
+])
+def test_human_only_searches_denied(tmp_path, tool, ti):
+    assert denied(run(tool, ti, tmp_path=tmp_path)), (tool, ti)
+
+
+# ---- MCP bypass: research entry points that write the ledger directly -------------------
+@pytest.mark.parametrize("cmd", [
+    "uv run python -m btc_quant.research.cli run research/campaign_templates/x.yaml",
+    "uv run python -m btc_quant.research.cli --root . screen research/campaign_templates/s.yaml",
+    "uv run python -m btc_quant.research.cli gates camp-000001",
+    "uv run btc-quant-research run t.yaml",
+    "python -c 'from btc_quant.research.campaign import run_campaign; run_campaign(\"t.yaml\")'",
+    "python -c 'from btc_quant.research import run_pipeline; run_pipeline(\"camp-000001\")'",
+    "python -c 'from btc_quant.research.campaign import run_screen as r; r(\"s.yaml\")'",
+    "python -c 'from btc_quant.research.signal_study import screen; screen(\"s.yaml\")'",
+    "python -c 'import btc_quant.research.signal_study as S; S.signal_study.screen(\"s.yaml\")'",
+    "python -c 'from btc_quant.research.forward import run_forward; run_forward()'",
+    "python -c 'from btc_quant.registry.ledger import Ledger; Ledger().register_hypothesis(\"t\",\"r\",\"s\")'",
+    "python -c 'from btc_quant.registry.ledger import Ledger; L=Ledger(); L.record_run(\"c\", s, \"x\", p, \"s\", \"c\", {})'",
+    "python -c 'from btc_quant.registry.ledger import Ledger; Ledger().append(\"runs\", {})'",
+    "python -c 'from btc_quant.research.lessons import LessonBook; LessonBook().add_interpretation(\"f\",\"t\",0.5,[])'",
+    "python -c 'from btc_quant.research.lessons import LessonBook as B; B().mark(\"int-000001\",\"verified\",\"c\")'",
+    "python -c 'from btc_quant.research.lessons import LessonBook; LessonBook().derive_hypothesis(\"f\",\"t\",\"r\",\"s\")'",
+    "uv run python - <<'EOF'\nfrom btc_quant.research.campaign import run_campaign\nrun_campaign('t.yaml')\nEOF",
+])
+def test_research_bypass_denied(tmp_path, cmd):
+    assert denied(run("Bash", {"command": cmd}, tmp_path=tmp_path)), cmd
+    assert run("Bash", {"command": cmd}, research=False, tmp_path=tmp_path) is None
+
+
+def test_research_bypass_script_file_scanned(tmp_path):
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "go.py").write_text("from btc_quant.research.pipeline import run_pipeline\n"
+                                               "run_pipeline('camp-000001')\n")
+    (tmp_path / "scripts" / "ok.py").write_text("print('hello')\n")
+    (tmp_path / "mymod").mkdir()
+    (tmp_path / "mymod" / "camp.py").write_text("from btc_quant.research import campaign\ncampaign.run_campaign('t')\n")
+    assert denied(run("Bash", {"command": "uv run python scripts/go.py"}, tmp_path=tmp_path))
+    assert denied(run("Bash", {"command": f"python {tmp_path / 'scripts' / 'go.py'} --x 1"}, tmp_path=tmp_path))
+    assert denied(run("Bash", {"command": "uv run python -m mymod.camp"}, tmp_path=tmp_path))
+    assert run("Bash", {"command": "uv run python scripts/ok.py"}, tmp_path=tmp_path) is None
+
+
+@pytest.mark.parametrize("cmd", [
+    "uv run python -m btc_quant.research.cli list",
+    "uv run python -m btc_quant.research.cli report camp-000001",
+    "uv run pytest -q tests/test_research_campaign.py",
+    "uv run python -m btc_quant.research.power --days 1765 --grid 6 --family x --target 2",
+    "uv run python -c 'from btc_quant.research.signal_study import study_signal'",
+    "uv run python -c 'from btc_quant.registry.ledger import Ledger; print(len(Ledger().records(\"campaigns\")))'",
+    "uv run python -c 'from btc_quant.research.lessons import LessonBook; b=LessonBook(); "
+    "print(b.find_similar(text=\"x\")); b.postmortem(title=\"t\", category=\"process\", what_happened=\"w\", "
+    "root_cause=\"r\", prevention=\"p\")'",
+    "uv run python -c 'from btc_quant.research.lessons import LessonBook; "
+    "LessonBook().record_facts_from_pipeline(\"research/campaigns/camp-000001\")'",
+    "uv run python -m btc_quant.research.calibration_study --mode quick",
+])
+def test_research_readonly_and_mcp_uncovered_api_allowed(tmp_path, cmd):
+    assert run("Bash", {"command": cmd}, tmp_path=tmp_path) is None, cmd

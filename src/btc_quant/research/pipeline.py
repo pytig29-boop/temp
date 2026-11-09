@@ -89,6 +89,61 @@ VAL_SUMMARY_KEYS = ("n_days", "sharpe", "sharpe_w", "mean_daily", "std_daily", "
                     "n_trades", "expectancy", "win_rate", "trades_per_day")
 
 
+PIPELINE_FULL = "pipeline.json"            # 사람용 전체 (G6 세부 포함) — 연구 모드 guard 가 직접 읽기를 거부
+PIPELINE_PUBLIC = "pipeline_public.json"   # 에이전트용 (Val/잠금 = 결과 코드만) — MCP get_campaign_report 가 읽음
+VAL_STATUS_PUBLIC_KEYS = ("val_id", "cap", "used", "remaining")
+
+
+def _val_outcome(g6) -> str:
+    if not isinstance(g6, dict):
+        return "not evaluated"
+    if g6.get("val_status") == "exhausted" or (g6.get("val_budget") or {}).get("exhausted"):
+        return "budget_exhausted"
+    if g6.get("reference_engine_match") is False:
+        return "engine_mismatch"
+    return "pass" if g6.get("passed") else "fail"
+
+
+def _public_gate(g) -> dict | None:
+    if not isinstance(g, dict):
+        return None
+    return {"passed": g.get("passed"), "outcome": _val_outcome(g),
+            "val_budget": {"exhausted": bool((g.get("val_budget") or {}).get("exhausted")
+                                             or g.get("val_status") == "exhausted")},
+            "withheld": "Val detail is human-only (pipeline.json / research/reports/human/)"}
+
+
+def public_pipeline(out: dict) -> dict:
+    """pipeline.json → 에이전트 안전 사본: G6(Val) 세부·등급 비용 G6 세부·Val 기반 risk_limits 제거,
+    Val 예산은 횟수만. Dev(G0~G5)·견고성·기여도는 그대로 (PLAN §10b-9, docs/MCP.md §4.2)."""
+    pub = copy.deepcopy(jsonable(out))
+    for c in pub.get("candidates") or []:
+        gates = c.get("gates") or {}
+        if "G6" in gates:
+            gates["G6"] = _public_gate(gates["G6"])
+        c.pop("G6", None)
+        if "grade_checks" in c:
+            gc = c["grade_checks"] or {}
+            c["grade_checks"] = {g: ({"passed": (v or {}).get("passed")} if g != "G6" else _public_gate(v))
+                                 for g, v in gc.items()}
+        if "risk_limits" in c:
+            c["risk_limits"] = "withheld (Val-derived)"
+    if isinstance(pub.get("val_status"), dict):
+        pub["val_status"] = {k: pub["val_status"].get(k) for k in VAL_STATUS_PUBLIC_KEYS}
+    pub["redacted"] = ("agent-safe copy of pipeline.json: Val (G6) / lockbox as outcome codes only; "
+                       "full file is human-only")
+    return pub
+
+
+def write_pipeline_files(cdir: Path, out: dict) -> Path:
+    """pipeline.json(전체) + pipeline_public.json(에이전트 안전) 을 함께 쓴다. 전체 파일 경로 반환."""
+    full = Path(cdir) / PIPELINE_FULL
+    full.write_text(json.dumps(jsonable(out), indent=2, ensure_ascii=False), encoding="utf-8")
+    (Path(cdir) / PIPELINE_PUBLIC).write_text(json.dumps(public_pipeline(out), indent=2, ensure_ascii=False),
+                                              encoding="utf-8")
+    return full
+
+
 def val_holm_decision(ledger, val_id: str, k: int, p_value: float, vb_cfg: dict) -> dict:
     """k번째 Val 사용의 누적 Holm 결정 (PLAN §10b-4; 정의는 inference.lockbox_holm_decision 과 동일).
     prior = 같은 val_id 의 k 이전 사용 p 값(결과 없는 사용은 p=1)."""
@@ -473,7 +528,7 @@ class Pipeline:
         w0 = vs - pd.Timedelta(days=VAL_WARMUP_DAYS)
         raw = self.env.data.read_range(w0, ve, tpl.exchange, tpl.symbol, tpl.timeframe)
         self._ctx_val = aux_context(load_aux_m1(self.env, tpl, w0, ve), tpl.tf_min)
-        return prepare_m1(raw), vs, ve
+        return prepare_m1(raw, tpl.exchange), vs, ve
 
     def val_id(self, vs: pd.Timestamp, ve: pd.Timestamp) -> str:
         """Val 구간 식별자: splits.yaml 의 val_id, 없으면 구간 경계 (경계가 바뀌면 = 새 Val, 예산 초기화)."""
@@ -710,7 +765,7 @@ class Pipeline:
                                                            int(self.cfg["G6"]["val_budget"]["cap"]))
         out["lockbox"] = "not accessed (G7 requires human approval: admin_cli approve-lockbox)"
         path = cr.dir / "pipeline.json"
-        path.write_text(json.dumps(jsonable(out), indent=2, ensure_ascii=False), encoding="utf-8")
+        write_pipeline_files(cr.dir, out)
         if self.lessons:      # 오답노트 사실 (멱등). 실패해도 파이프라인 결과는 남긴다.
             from . import lessons as LS
             try:
@@ -720,7 +775,7 @@ class Pipeline:
                 out["lessons_fact"] = None
                 out["lessons_error"] = f"{type(e).__name__}: {e}"
                 self.log(f"lessons: {out['lessons_error']}")
-            path.write_text(json.dumps(jsonable(out), indent=2, ensure_ascii=False), encoding="utf-8")
+            write_pipeline_files(cr.dir, out)
         self.log(f"pipeline done: {out['verdict']} ({out['runtime_sec']}s) → {path}")
         return out
 

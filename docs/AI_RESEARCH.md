@@ -8,7 +8,7 @@
 
 | 장치 | 파일 | 역할 |
 |---|---|---|
-| Hook (PreToolUse) | `.claude/hooks/guard.py` | 연구 모드에서 보호 경로 쓰기·사람 전용 명령·잠금 데이터 읽기 차단, 모든 도구 호출 로그 |
+| Hook (PreToolUse) | `.claude/hooks/guard.py` | 연구 모드에서 보호 경로 쓰기·사람 전용 명령·잠금 데이터 읽기·사람 전용 Val 세부 읽기·MCP 우회(원장 쓰는 연구 진입점 직접 실행) 차단, 모든 도구 호출 로그 |
 | 권한 규칙 | `.claude/settings.json` `permissions.deny` | 모드와 무관하게 항상: `.env`, `runtime/secrets/**`, 키 파일, `~/.ssh` 읽기 금지, 강제 push 금지 등 |
 | Subagent | `researcher` | 지식 베이스·오답노트·유사 탐색 → 메커니즘·반대편 → 신호 선별 → 검정력 → 원칙적 청산 캠페인 → 관문 → 견고성 → 오답노트 → 리포트 |
 | | `skeptic` | **결과를 보기 전에 예상 실패 유형을 먼저 기록**, 자동 견고성 묶음을 증거로 판정(수치 인용 필수). 파일 쓰기 도구 없음 |
@@ -20,8 +20,8 @@
 | | `daily-report` | 아침 리포트 (오답노트·주간 예산 포함) |
 | MCP 서버 | `.mcp.json` → `btc_quant.mcp` (`btcq`, docs/MCP.md) | 연구 도구 20개: `list_blocks`, `get_data_summary`, `register_hypothesis`, `find_similar`, `screen_signals`, `power_check`, `create_and_run_campaign`, `list_campaigns`, `get_campaign_report`, `query_ledger`, `lessons_view`, `lessons_add_interpretation`, `lessons_mark`, `lessons_derive_hypothesis`, `propose_block`, `request_lockbox_eval`, `registry_status`, `params_status`, `propose_criterion`, `forward_status`. 승인·활성화·롤백·잠금 개봉·설정/원장 편집·주문·키 도구는 없음 |
 
-에이전트는 MCP 도구를 먼저 쓰고(주간 예산·선별 연결·엄격 검정력·중복 점검을 원장 쓰기 전에 강제, Val/잠금은
-결과 코드만), MCP 가 다루지 않는 일(사후분석, 개별 스펙 견고성 재계산 등)만 skill 문서의 Python API
+에이전트는 MCP 도구를 쓰고(주간 예산·선별 연결·엄격 검정력·중복 점검을 원장 쓰기 전에 강제, Val/잠금은
+결과 코드만 — 원장에 쓰는 연구 진입점의 Bash 직접 실행은 연구 모드 hook 이 거부, §4.2), MCP 가 다루지 않는 일(사후분석, 개별 스펙 견고성 재계산 등)만 skill 문서의 Python API
 (`btc_quant.research.lessons`, `btc_quant.research.robustness`, `btc_quant.registry.ledger.Ledger` 읽기,
 `btc_quant.registry.splits.DataAccess`)로 한다. MCP 도구 호출(`mcp__*`)도 hook 로그 대상이며, 연구 모드에서
 사람 전용 기능처럼 보이는 이름의 MCP 도구(approve/activate/rollback/open_lockbox/order/key 등)는 hook 이 거부한다.
@@ -85,6 +85,34 @@ claude -p "daily-report skill로 오늘 아침 리포트 작성"
 - `git push`, 그리고 작업 트리를 덮어쓰거나 이력을 바꾸는 git 명령(checkout, restore, reset, stash,
   clean, rebase, merge, pull 등). 허용: status/log/diff/show/blame/ls-files/branch/fetch 등 읽기 + add/commit.
 - `.env`, `runtime/secrets`를 언급하는 명령.
+- **MCP 우회 차단** (2026-11-09): 원장·오답노트에 쓰는 연구 진입점의 직접 실행 — `btc_quant.research.cli run|screen|gates`
+  (`btc-quant-research` 포함), Python 의 `run_campaign`/`run_pipeline`/`run_screen`/`run_forward`/`record_runs_batch`/
+  `signal_study.screen`, `Ledger` 쓰기(`register_hypothesis`, `create_campaign`, `record_*`, `open_val_evaluation`,
+  `append`), `LessonBook` 의 `add_interpretation`/`mark`/`derive_hypothesis`/`apply_derivation`. 명령 문자열(`python -c`,
+  heredoc)과 `python <script.py>`·`python -m <btc_quant 밖 모듈>` 대상 파일 내용을 검사한다. 이 일들은 MCP 도구
+  (`screen_signals`, `create_and_run_campaign`, `register_hypothesis`, `lessons_*`)로만 한다 — 주간 예산·선별 필수·
+  엄격 검정력·중복 점검이 원장 쓰기 전에 강제되는 경로다(docs/MCP.md §4.3). 허용으로 남는 것: 원장·오답노트 읽기,
+  `find_similar`/`check_template`/`trial_budget`, `study_signal`(순수 계산), `robustness_for_spec`, `postmortem`,
+  `render_markdown`, `record_facts_from_*`(멱등), `research.cli list|report`, `calibration_study`(임시 저장소).
+
+### 4.2b 사람 전용 Val/잠금 세부 읽기 차단 (Read/Grep/Glob/Bash)
+PLAN §10b-9 "Val/잠금은 결과 코드만"을 파일 수준에서 강제한다.
+
+| 경로 | 대신 쓸 것 |
+|---|---|
+| `research/reports/human/**` (사람용 전체 캠페인 리포트: G6 세부·리스크 한도) | `research/reports/campaign_<id>.md` (에이전트 안전), MCP `get_campaign_report` |
+| `research/campaigns/<id>/pipeline.json` | `research/campaigns/<id>/pipeline_public.json` |
+| `research/ledger/{runs,val_evaluations,lockbox,transitions}.jsonl` | MCP `query_ledger` (dev 지표, 결과 코드만) |
+| `strategies/**/*.risk.yaml` (Val 기반 §7 한도) | – (사람 전용) |
+
+- 그 파일을 덮을 수 있는 **넓은 검색**도 거부한다: `Grep` 의 `path` 가 저장소 루트·`research`·`research/reports`·
+  `research/campaigns`·`research/ledger`·`strategies` 이고 `glob`/`type` 이 *.md/*.json/*.jsonl/*.yaml 을 배제하지
+  않으면 거부(예: `path: src`, `glob: "*.py"`, `type: py`, `path: research/knowledge` 는 허용). Bash 의 재귀 검색
+  (`grep -r/-R`, `rg`, `ag`, `ack`, `git grep`)도 같은 규칙(경로 없음 = `.`; `--include`/`-g`/`-t` 로 좁히면 허용),
+  그런 파일로 펼쳐질 수 있는 셸 글롭(`research/reports/*/campaign_*.md`)과 파일 이름 언급(`pipeline.json`,
+  `reports/human`, `runs.jsonl` …)도 거부한다. `Glob` 은 그 경로를 직접 겨냥할 때만 거부(이름만 나열하므로).
+- Python 으로 같은 파일을 여는 것(`LessonBook.record_facts_from_pipeline(<캠페인 폴더>)`, `power` 압축비 등)은 코드
+  내부 경로라 막지 않는다 — 결과 코드만 남기는 정제는 그 API 들이 이미 한다.
 
 ### 4.3 잠금 구간 읽기 차단 (Read/Grep/Glob/Bash, MCP 인자)
 - 잠금 구간 = 2026-05-01 ~ 2026-11-08 → `data/raw/**/year=2026/month=05..11/**` 경로.
@@ -114,11 +142,11 @@ claude -p "daily-report skill로 오늘 아침 리포트 작성"
 |---|---|---|
 | ⓪ 읽기 | `research/knowledge/*.md`(잠금·Val 노출 태그), `research/lessons/LESSONS.md`, 원장 계열 시도 수 | `LessonBook().find_similar(template=, text=)`, `trial_budget(family)` |
 | ① 가설 | 한 문장 + **메커니즘 + 반대편(누가 잃어 주나)** + 무엇이 죽이나 + 범위. 교훈에서 나온 가설은 파생 가설(계열 상속) | `derive_hypothesis` → `apply_derivation` → `check_template` |
-| ② 신호 선별 | 진입(+필터) 이벤트 스터디 vs 매칭 귀무, 계열 단위 다중검정(BH). 통과 신호만 전략화 | `btc_quant.research.signal_study.screen`, `record_facts_from_screen` |
+| ② 신호 선별 | 진입(+필터) 이벤트 스터디 vs 매칭 귀무, 계열 단위 다중검정(BH). 통과 신호만 전략화 | MCP `screen_signals` (연구 모드에서 `signal_study.screen`·`run_screen` 직접 실행은 hook 거부) |
 | ③ 검정력 | 계획 격자의 실질 시도 수에서 G5 통과 최소 Sharpe | `btc_quant.research.power` (CLI `--days --grid --family --target`) |
-| ④ 전략 캠페인 | 진입·필터 고정, 청산 = ATR 배수 SL/TP + 정보 지평 기반 최대 보유, **청산 변형 ≤ 6** | `research.cli run <template>` |
-| ⑤ 관문·견고성 | G0~G6 파이프라인(Val 예산·누적 Holm), 견고성 묶음(지연·상위 거래 제거·연도 제외·비용 ×1.5·국면·알파·거래소 재현), skeptic | `pipeline.run_pipeline`, `robustness.robustness_for_spec` |
-| ⑥ 오답노트 | 사실 자동 기록 → 해석 0~3개(미검증) → 이전 해석 검증/반박 표시 → 사후분석 | `record_facts_from_pipeline`, `add_interpretation`, `mark`, `postmortem`, `render_markdown` |
+| ④ 전략 캠페인 | 진입·필터 고정, 청산 = ATR 배수 SL/TP + 정보 지평 기반 최대 보유, **청산 변형 ≤ 6** | MCP `create_and_run_campaign` (사람: `research.cli run <template>`) |
+| ⑤ 관문·견고성 | G0~G6 파이프라인(Val 예산·누적 Holm), 견고성 묶음(지연·상위 거래 제거·연도 제외·비용 ×1.5·국면·알파·거래소 재현), skeptic | `create_and_run_campaign` 안에서 실행, 결과 `get_campaign_report`; 개별 재계산 `robustness.robustness_for_spec` |
+| ⑥ 오답노트 | 사실 자동 기록 → 해석 0~3개(미검증) → 이전 해석 검증/반박 표시 → 사후분석 | 사실은 파이프라인이 자동 기록, MCP `lessons_add_interpretation`·`lessons_mark`·`lessons_derive_hypothesis`, Python `postmortem`, `render_markdown` |
 
 ## 6. 오답노트 (`research/lessons/`, `btc_quant.research.lessons`)
 
@@ -160,6 +188,9 @@ claude -p "daily-report skill로 오늘 아침 리포트 작성"
 - **hook은 경보선(tripwire)이지 샌드박스가 아니다.** Bash 검사는 명령 문자열에 대한 정규식 휴리스틱이다.
   `cd config && sed -i … gates.yaml`, 변수·글롭으로 조립한 경로, Python 코드 안에서 문자열을 만들어
   여는 경우, 다른 스크립트를 경유한 쓰기 등은 놓칠 수 있다.
+- MCP 우회 차단·사람 전용 읽기 차단도 같은 휴리스틱이다: 별칭(`from … import run_campaign as r` 는 잡지만
+  `getattr(mod, "run_" + "campaign")` 는 못 잡음), 동적 경로 조립, 다른 스크립트를 거쳐 import 하는 파일, 셸 변수로
+  만든 경로, `find … -exec cat` 류는 놓칠 수 있다. 반대로 넓은 검색은 좁혀야 통과한다(`Grep` 에 `path`/`glob`/`type`).
 - 반대로 과잉 차단도 있다: 쓰기 동사(`rm`, `cp`, `mv` …)와 보호 경로가 한 명령에 함께 있으면
   보호 경로가 읽기 대상이어도 거부한다(예: `cp config/gates.yaml /tmp/`). 명령을 나누면 된다.
 - **잠금 구간의 실제 강제 장치는 Python `DataAccess` 계층**(`btc_quant.registry.splits`)이다.

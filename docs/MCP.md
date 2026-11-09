@@ -50,9 +50,9 @@ claude -p --agent researcher "research-campaign skill로 다음 가설 캠페인
 | `find_similar` | 반복 점검(exact/same_blocks/same_entry/fuzzy) + 계열 주간 예산 + 템플릿 점검 | – | `LessonBook().find_similar`, `trial_budget`, `check_template` |
 | `screen_signals` | 신호 선별(이벤트 스터디, 청산 없음, Dev). 주간 예산 강제, 원장·오답노트 사실 기록 | 원장·캠페인 폴더·오답노트 | `campaign.run_screen` |
 | `power_check` | 격자 크기/템플릿 → G5 통과 최소 연 Sharpe, 목표 대비 판정 | – | `power.budget_report` |
-| `create_and_run_campaign` | 선별 연결 캠페인 사전등록·실행 → 관문 G0~G6 → 견고성 → 기본 리포트 | 원장·캠페인 폴더·레지스트리(pipeline)·리포트·오답노트 | `run_campaign` + `run_pipeline` + `write_report` |
+| `create_and_run_campaign` | 선별 연결 캠페인 사전등록·실행 → 관문 G0~G6 → 견고성 → 리포트 2벌(사람용 전체 + 에이전트 안전) | 원장·캠페인 폴더·레지스트리(pipeline)·리포트·오답노트 | `run_campaign` + `run_pipeline` + `write_reports` (연구 모드 Bash 직접 호출은 hook 이 거부) |
 | `list_campaigns` | 캠페인·선별 목록(최신 먼저, 계열·예산·판정) | – | `campaign.list_campaigns` |
-| `get_campaign_report` | 캠페인/선별 구조화 요약: 격자·검정력·선별 연결, Dev 깔때기·관문, 견고성·기여도, **G6 = pass/fail**, 오답노트 사실 | – | `pipeline.json` (정제) |
+| `get_campaign_report` | 캠페인/선별 구조화 요약: 격자·검정력·선별 연결, Dev 깔때기·관문, 견고성·기여도, **G6 = pass/fail** (`G6_outcome`: pass/fail/budget_exhausted/engine_mismatch), 오답노트 사실, 에이전트 안전 리포트 경로 | – | `pipeline_public.json` (없으면 `pipeline.json` 을 서버 안에서 같은 규칙으로 정제) |
 | `query_ledger` | 원장 읽기 전용 조회(화이트리스트 표·열, 동등 필터) + `trials` 집계 | – | `Ledger().records`, `trials_count` |
 | `lessons_view` | 사실·해석(현재 상태)·무결성·주간 예산 | – | `LessonBook().facts/interpretations/verify` |
 | `lessons_add_interpretation` | 해석 추가(항상 unverified, 근거 필수, Val/잠금 수치 거부) | 오답노트 | `add_interpretation` |
@@ -86,15 +86,24 @@ guard hook 도 연구 모드에서 이런 이름의 MCP 도구(다른 서버 포
   `val_budget_exhausted`; G6 세부(Val Sharpe·MDD·p 값·Holm)·`grade_checks`·Val 기반 `risk_limits` 는 반환하지
   않는다. `query_ledger` 의 `val_evaluations`·`lockbox` 는 `outcome` 코드만, `transitions` 는 `evidence` 제외,
   `runs` 는 dev 외 구간(G6 가 남긴 Val 실행) 지표를 `withheld` 로 숨긴다.
-- 주의: 사람용 기본 리포트 파일(`research/reports/campaign_<id>.md`)에는 Val 세부 줄이 있다(기존 설계).
-  에이전트는 그 수치를 인용·해석·가설 근거로 쓰지 않는다(skill 규칙). 요약은 `get_campaign_report` 를 쓴다.
+- **리포트·파이프라인 산출물 2벌** (2026-11-09):
+  | 파일 | 내용 | 연구 모드 읽기 |
+  |---|---|---|
+  | `research/reports/human/campaign_<id>.md` | 사람용 전체: G6 세부(Val Sharpe·MDD·p·Holm), 등급 비용 G6, Val 기반 §7 리스크 한도 | **거부** (guard hook) |
+  | `research/reports/campaign_<id>.md` | 에이전트 안전: Dev 세부 전부 + G6/잠금 = 결과 코드만, Val 예산 = 횟수만, 리스크 한도 생략 | 허용 (skill 이 섹션 추가) |
+  | `research/campaigns/<id>/pipeline.json` | 전체 관문 결과 (오답노트 사실 기록기·검정력 압축비 등 Python 이 읽음) | **거부** |
+  | `research/campaigns/<id>/pipeline_public.json` | `pipeline.public_pipeline()` 정제본: G6 → `{passed, outcome, val_budget.exhausted}`, `grade_checks` → passed/outcome, `risk_limits` → withheld, `val_status` → val_id/cap/used/remaining | 허용 (`get_campaign_report` 의 원천) |
+  CLI(`research.cli run|gates|report`, 사람)는 둘 다 쓰고 사람용 경로를 출력한다. 원장의 `runs`/`val_evaluations`/
+  `lockbox`/`transitions` jsonl 과 `strategies/**/*.risk.yaml` 도 Val/잠금 수치를 담으므로 연구 모드에서 직접 읽기를
+  거부한다(조회는 `query_ledger`).
 
 ### 4.3 원장 쓰기 전 거부 (MCP 경로에서 강제)
 `create_and_run_campaign` 순서: 템플릿 검증 → 격자 ≤ 템플릿 예산 → **선별 연결 필수**(`from_screen` 또는
 `requires_screen_pass`) → 파생 태그·계열 일치(`check_template`) → **정확 중복이면 `repeat_justification` 필수**
 → **주간 시도 예산**(계열·전역, 문서상 자문이지만 MCP 에서는 강제) → 선별 통과 구성 매칭 → **엄격 검정력**
 (`power.target_sharpe` 선언 + 필요 Sharpe ≤ 목표). 하나라도 실패하면 원장에 아무것도 쓰지 않는다.
-`screen_signals` 도 계열별 주간 예산을 강제한다. 기준선(선별 없는) 캠페인이 필요하면 사람이 CLI 로 돌린다.
+`screen_signals` 도 계열별 주간 예산을 강제한다. 기준선(선별 없는) 캠페인이 필요하면 사람이 CLI 로 돌린다
+(연구 모드에서는 hook 이 CLI·Python 직접 실행을 거부하므로 MCP 가 유일한 경로다 — §5).
 
 ### 4.4 쓰기 범위
 서버가 쓰는 곳: 원장(Python API), `research/campaigns/<id>/`, `research/reports/`, 오답노트(API),
@@ -118,11 +127,21 @@ guard hook 도 연구 모드에서 이런 이름의 MCP 도구(다른 서버 포
 
 ## 5. 한계
 
-- MCP 서버는 연구 API 를 감싸는 경로일 뿐 샌드박스가 아니다. 같은 세션의 Bash 로 Python API 를 직접 부를 수
-  있으며(대체 경로로 문서화), 그 경우 주간 예산·선별 필수·엄격 검정력은 MCP 만큼 강제되지 않는다(skill 규칙이
-  여전히 구속). 잠금의 실제 강제 장치는 여전히 `DataAccess`, 상태 전이는 `btc_quant.registry` 다.
+- MCP 서버는 연구 API 를 감싸는 경로일 뿐 샌드박스가 아니다. 연구 모드 guard hook 은 **원장·오답노트에 쓰는
+  연구 진입점의 Bash 직접 실행을 거부**한다(2026-11-09, docs/AI_RESEARCH.md §4.2): `btc_quant.research.cli
+  run|screen|gates`(`btc-quant-research` 포함), Python 의 `run_campaign`/`run_pipeline`/`run_screen`/`run_forward`/
+  `record_runs_batch`/`signal_study.screen`, `Ledger` 쓰기(`register_hypothesis`·`create_campaign`·`record_*`·
+  `open_val_evaluation`·`append`), `LessonBook` 의 `add_interpretation`/`mark`/`derive_hypothesis`/`apply_derivation`
+  — 명령 문자열(`python -c`, heredoc)과 `python <script.py>`·`python -m <저장소 밖 btc_quant 아닌 모듈>` 대상 파일
+  내용을 검사한다. 허용으로 남는 것: 읽기(`Ledger().records`, `find_similar`, `check_template`, `trial_budget`),
+  `study_signal`(원장 기록 없는 순수 계산), `robustness_for_spec`, `postmortem`, `render_markdown`,
+  `record_facts_from_*`(멱등, 산출물에서 파생), `research.cli list|report`, 합성 보정(`calibration_study`).
+  이것도 정규식 경보선이다: 별칭·동적 import·`getattr`·다른 인터프리터·간접 실행 스크립트 등으로 우회할 수 있다.
+  잠금의 실제 강제 장치는 여전히 `DataAccess`, 상태 전이는 `btc_quant.registry` 다.
 - 도구 호출은 동기 실행(서버의 작업 스레드)이며 진행 알림을 보내지 않는다. 긴 캠페인은 시간 제한을 늘린다.
 - `propose_criterion` 은 합성 보정을 실제로 돌린다(기본 bounded: 값마다 30개 시장) — 매우 오래 걸릴 수 있다.
+  저장된 엣지 세기 k(`criteria.FULL_K_FOR`)는 비용 v1·코인원 꼬리 k=0.03 조건에서 보정됐으므로, 현재 비용 레지스트리·
+  꼬리 정리 폭이 다르면 먼저 k 를 현재 조건으로 다시 유도한다(`derive_full_k` = pilot_edge_map, 추가 시간).
 
 ## 6. 개발자용
 

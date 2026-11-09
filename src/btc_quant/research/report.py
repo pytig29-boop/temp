@@ -1,4 +1,10 @@
-"""캠페인 마크다운 리포트 → research/reports/campaign_<id>.md.
+"""캠페인 마크다운 리포트 — 두 벌 (Val 누설 방지, PLAN §10b-9 "Val/잠금은 결과 코드만").
+
+- 사람용(전체): research/reports/human/campaign_<id>.md — G6 세부(Val Sharpe·MDD·p 값·Holm), 등급 비용 G6 세부,
+  Val 기반 §7 리스크 한도까지. 연구 모드 guard hook 이 이 경로 읽기를 거부한다(.claude/hooks/guard.py).
+- 에이전트용(안전): research/reports/campaign_<id>.md — Dev 세부 전부 + Val(G6)·잠금은 **결과 코드만**
+  (pass / fail / budget_exhausted / engine_mismatch / not evaluated), Val 예산은 횟수만, 리스크 한도는 생략.
+  에이전트(skill)는 이 파일에 섹션을 덧붙인다.
 
 입력: research/campaigns/<id>/{manifest.json, template.yaml, results.parquet, pipeline.json(있으면)}
 과 원장(가설·캠페인 레코드). 실패도 그대로 쓴다("no candidate passed").
@@ -13,6 +19,20 @@ import pandas as pd
 from .campaign import ResearchEnv, load_campaign
 
 GATES = ("G0", "G1", "G2", "G3", "G4", "G5")
+AUDIENCES = ("human", "agent")
+HUMAN_SUBDIR = "human"          # research/reports/human/ — 연구 모드에서 읽기 거부 (guard hook)
+VAL_STATUS_PUBLIC_KEYS = ("val_id", "cap", "used", "remaining")
+
+
+def val_outcome(g6) -> str:
+    """G6 게이트 dict → 결과 코드 (lessons._candidate_fact 와 같은 규칙)."""
+    if not isinstance(g6, dict):
+        return "not evaluated"
+    if g6.get("val_status") == "exhausted" or (g6.get("val_budget") or {}).get("exhausted"):
+        return "budget_exhausted"
+    if g6.get("reference_engine_match") is False:
+        return "engine_mismatch"
+    return "pass" if g6.get("passed") else "fail"
 
 
 def _f(x, nd=3) -> str:
@@ -62,13 +82,30 @@ def _gate_line(name: str, g: dict) -> str:
     return f"- **{name} {_pf(g)}** — " + ", ".join(parts)
 
 
+def _wk(exchange) -> str:
+    from btc_quant.data.quality import wick_params
+    return f"{wick_params(exchange)[0]:g}"
+
+
 def _v(x):
     if isinstance(x, (list, tuple)):
         return "[" + ", ".join(map(str, x)) + "]"
     return x
 
 
-def render(campaign_id: str, root: str | Path | None = None, env: ResearchEnv | None = None) -> str:
+def _g6_line(g: dict, agent: bool, label: str = "G6") -> str:
+    if agent:
+        return (f"- **{label} (Val) {val_outcome(g).upper()}** — outcome code only "
+                "(Val detail is human-only: research/reports/human/)")
+    return _gate_line("G6", g)
+
+
+def render(campaign_id: str, root: str | Path | None = None, env: ResearchEnv | None = None,
+           audience: str = "human") -> str:
+    """audience='human' = 전체, 'agent' = Val/잠금 결과 코드만 (모듈 설명)."""
+    if audience not in AUDIENCES:
+        raise ValueError(f"audience must be one of {AUDIENCES}")
+    agent = audience == "agent"
     env = env or ResearchEnv.at(root)
     cr = load_campaign(campaign_id, env=env)
     tpl, man = cr.template, cr.manifest
@@ -83,6 +120,13 @@ def render(campaign_id: str, root: str | Path | None = None, env: ResearchEnv | 
              f"`{man['data_snapshot']}` · code `{man['code_commit']}`\n")
     verdict = pipe["verdict"] if pipe else "pipeline not run yet"
     L.append(f"**Verdict: {verdict}.**\n")
+    if agent:
+        L.append("> Agent-safe report: Dev detail + Val (G6) / lockbox **outcome codes only**. The full human "
+                 f"report is `research/reports/{HUMAN_SUBDIR}/campaign_{campaign_id}.md` (human-only; not readable "
+                 "in research mode).\n")
+    else:
+        L.append("> ⚠ HUMAN-ONLY report: contains Val (G6) detail. Do not paste Val numbers into agent prompts, "
+                 f"lessons or hypotheses. Agent-safe version: `research/reports/campaign_{campaign_id}.md`.\n")
 
     L.append("## Hypothesis (pre-registered)\n")
     L.append(f"- Text: {tpl.hypothesis['text']}")
@@ -92,14 +136,14 @@ def render(campaign_id: str, root: str | Path | None = None, env: ResearchEnv | 
     L.append("## Grid & budget\n")
     L.append(f"- Data: {tpl.exchange} {tpl.symbol} {tpl.timeframe}, segment `{tpl.segment}` "
              f"[{man['period']['start']}, {man['period']['end']}), {man['data']['rows_1m']:,} 1m rows "
-             f"(filled {man['data']['filled_frac']:.2%}) — read via DataAccess, `regularize(clean_wicks(·))`")
+             f"(filled {man['data']['filled_frac']:.2%}) — read via DataAccess, `prepare_m1` (venue clean_wicks k={_wk(tpl.exchange)} → regularize → gap warm-up)")
     L.append(f"- Entry `{tpl.entry.block}`: {tpl.entry.grid}")
     for i, fs in enumerate(tpl.filter_sets):
         desc = ", ".join(f"`{f.block}` {f.grid}" for f in fs) or "(no filter)"
         L.append(f"- Filter set {i}: {desc}")
     L.append(f"- Decision timeframe **{tpl.decision_tf}**; aux data {tpl.aux or 'none'}"
              + (f" ({man['data'].get('aux_rows_1m')} 1m rows, same construction as paper: "
-                "regularize(clean_wicks) → to_tf, block-side reindex without ffill)" if tpl.aux else ""))
+                "prepare_m1 → to_tf, block-side reindex without ffill)" if tpl.aux else ""))
     L.append(f"- Exits ({tpl.exit_mode} mode{', ATR window ' + str(tpl.atr_bars) + ' bars' if tpl.exit_mode == 'atr' else ''}): "
              f"{tpl.exits} → {len(tpl.exit_combos())} exit variants")
     L.append(f"- Costs: primary `{tpl.costs['primary']}`, grade `{tpl.costs['grade']}`, "
@@ -166,6 +210,8 @@ def render(campaign_id: str, root: str | Path | None = None, env: ResearchEnv | 
             L.append(f"- Method `{sel.get('method')}` (top K by weighted Sharpe).\n")
         if pipe.get("val_status"):
             vs = pipe["val_status"]
+            if agent:
+                vs = {k: vs.get(k) for k in VAL_STATUS_PUBLIC_KEYS if k in vs}
             L.append(f"- Val budget status: " + ", ".join(f"{k}={_f(_v(v), 3)}" for k, v in vs.items()
                                                           if not isinstance(v, (dict, list))) + "\n")
         if pipe.get("uses_experimental"):
@@ -182,9 +228,11 @@ def render(campaign_id: str, root: str | Path | None = None, env: ResearchEnv | 
             L.append(f"```yaml\n{_yaml(c['spec'])}```")
             L.append(f"Weighted Sharpe {_f(m.get('sharpe_w'))}, Sharpe {_f(m.get('sharpe'))}, trades {m.get('n_trades')}, "
                      f"expectancy {_f(m.get('expectancy'), 5)}, MDD {_f(m.get('max_dd'))}\n")
-            for g in GATES + ("G6",):
+            for g in GATES:
                 if g in c["gates"]:
                     L.append(_gate_line(g, c["gates"][g]))
+            if "G6" in c["gates"]:
+                L.append(_g6_line(c["gates"]["G6"], agent))
             nb = c["gates"]["G3"].get("neighbors") or []
             if nb:
                 L.append("- G3 neighbors: " + ", ".join(f"{n['change']}→{_f(n['sharpe_w'], 2)}" for n in nb))
@@ -205,8 +253,11 @@ def render(campaign_id: str, root: str | Path | None = None, env: ResearchEnv | 
                 gc = c["grade_checks"]
                 L.append(f"Cost grade **{c['grade']}** — under `{tpl.costs['grade']}`: "
                          + ", ".join(f"{g} {_pf(gc[g])}" for g in ("G2", "G4", "G6")) + "\n")
-                L.append(_gate_line("G6", gc["G6"]) + " (grade cost)\n")
-            if c.get("risk_limits"):
+                L.append(_g6_line(gc["G6"], agent, "G6 grade cost") if agent
+                         else _gate_line("G6", gc["G6"]) + " (grade cost)\n")
+            if c.get("risk_limits") and agent:
+                L.append("Risk limits (§7, from Val): withheld (Val-derived; human report / registry risk.yaml).\n")
+            elif c.get("risk_limits"):
                 rl = c["risk_limits"]
                 L.append(f"Risk limits (§7, from Val): daily {_f(rl['daily_loss_limit'], 4)}, weekly "
                          f"{_f(rl['weekly_loss_limit'], 4)}, drawdown {_f(rl['drawdown_limit'], 4)}, "
@@ -270,10 +321,23 @@ def _yaml(d: dict) -> str:
     return yaml.safe_dump(d, allow_unicode=True, sort_keys=False)
 
 
-def write_report(campaign_id: str, root: str | Path | None = None, env: ResearchEnv | None = None) -> Path:
+def report_paths(campaign_id: str, env: ResearchEnv) -> dict[str, Path]:
+    return {"human": env.reports_dir / HUMAN_SUBDIR / f"campaign_{campaign_id}.md",
+            "agent": env.reports_dir / f"campaign_{campaign_id}.md"}
+
+
+def write_reports(campaign_id: str, root: str | Path | None = None, env: ResearchEnv | None = None
+                  ) -> dict[str, Path]:
+    """두 리포트를 모두 쓴다: {"human": research/reports/human/campaign_<id>.md (전체),
+    "agent": research/reports/campaign_<id>.md (Val 결과 코드만)}."""
     env = env or ResearchEnv.at(root)
-    text = render(campaign_id, env=env)
-    env.reports_dir.mkdir(parents=True, exist_ok=True)
-    p = env.reports_dir / f"campaign_{campaign_id}.md"
-    p.write_text(text, encoding="utf-8")
-    return p
+    paths = report_paths(campaign_id, env)
+    for aud, p in paths.items():
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(render(campaign_id, env=env, audience=aud), encoding="utf-8")
+    return paths
+
+
+def write_report(campaign_id: str, root: str | Path | None = None, env: ResearchEnv | None = None) -> Path:
+    """두 리포트를 쓰고 사람용(전체) 경로를 반환 (CLI = 사람). 에이전트 경로는 `write_reports(...)["agent"]`."""
+    return write_reports(campaign_id, root, env)["human"]

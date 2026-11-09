@@ -258,7 +258,7 @@ class PaperTrader:
             events += self._on_fill(ev, bar, book, live)
 
         # 3) 리스크 갱신 (봉 마감 시각 기준)
-        if not bar.filled:
+        if not bar.filled or bar.n_trades > 0:     # 공백 직후 워밍업 봉(filled 표시, 실제 체결)도 시세 갱신
             self.risk.on_market_data(_dt(t_close), price=bar.close)
         if self.engine.position is not None:      # 무포지션이면 자산 불변 (청산 시 on_trade_closed 가 갱신)
             self.risk.on_equity(_dt(t_close), self.mark_equity(bar.close))

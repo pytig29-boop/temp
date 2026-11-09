@@ -323,7 +323,7 @@ def gen_market(start: str, end: str, seed: int, k_edge: float = 0.0,
 
 def _engine_m1(df: pd.DataFrame) -> pd.DataFrame:
     from .campaign import prepare_m1
-    return prepare_m1(df)
+    return prepare_m1(df, "coinone")      # 합성 시장 = 파이프라인에서 coinone 으로 저장 (make_root) → 같은 준비
 
 
 # ============================================================== 엣지 세기 보정

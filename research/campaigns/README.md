@@ -78,7 +78,7 @@ ctx 를 만들어 넘김; 원장 grid·template.yaml 에 aux 기록). 끝나면 
   G6(run_fast/run_reference 에 스펙 그대로) 모두 스펙의 결정 주기·청산 모드를 따른다.
 - G0: 실시간 가능한 aux(`upbit`, 템플릿에 선언)를 요구하는 live_ready 블록 허용. 실험 블록 사용은
   `uses_experimental` 로 기록 → 리포트에 "human block review required before lockbox" (D11).
-- 보조 데이터 구성 = 페이퍼와 동일: 업비트 1분봉 `regularize(clean_wicks(raw))` → `to_tf(·, B)` → 블록이 대상 bars 에
+- 보조 데이터 구성 = 페이퍼와 동일: 업비트 1분봉 `prepare_m1(raw, "upbit")` (거래소별 꼬리 정리 → regularize → 공백 워밍업) → `to_tf(·, B)` → 블록이 대상 bars 에
   reindex(ffill 없음). Val 도 같은 범위(워밍업 포함)로.
 - **견고성 묶음**(`robustness.robustness_suite`, Dev): G6 통과 후보마다 실행해 `candidate["robustness"]` 에 첨부.
   거래소 재현 = 대상이 코인원이면 업비트 Dev(업비트면 코인원). 업비트 aux 스펙은 거래소 재현 skipped.
@@ -99,18 +99,19 @@ ctx 를 만들어 넘김; 원장 grid·template.yaml 에 aux 기록). 끝나면 
 | `template.yaml` | 실행한 템플릿 원문 | 커밋 |
 | `manifest.json` | 가설·캠페인 id, 기간, 데이터 스냅샷 id(aux 포함 시 `…|upbit:…`), 코드 커밋, 스펙·실행 수, 결정 주기·청산 모드, 검정력(`power`), 선별 연결(`screen`), 실행 시간 | 커밋 |
 | `summary_top50.csv` | primary 비용 상위 50개 스펙의 파라미터·지표 | 커밋 |
-| `pipeline.json` | 관문 결과(상위 K 후보별 G0~G6 수치, 기여도, 등급, 레지스트리 전이) | 커밋 |
+| `pipeline.json` | 관문 결과(상위 K 후보별 G0~G6 수치, 기여도, 등급, 레지스트리 전이) — **사람 전용**(G6 세부; 연구 모드 읽기 거부) | 커밋 |
+| `pipeline_public.json` | 에이전트 안전 사본(`pipeline.public_pipeline`): G6·등급 G6 = 결과 코드, risk_limits 생략, Val 예산 = 횟수 | 커밋 |
 | `results.parquet` | 전체 스펙 × 평가 비용(primary, grade)의 `metrics.summarize` 결과 + 스펙 JSON | **커밋 안 함** |
 | `returns_<primary>.parquet` | primary 비용 일간 수익 행렬(일자 × logic_hash) — PBO·실질 시도 수 입력 | **커밋 안 함** |
 | `.gitignore` | `*.parquet` (러너가 생성) | 커밋 |
 
 parquet 는 같은 데이터 스냅샷·코드 커밋이면 재실행으로 결정적으로 재현된다. 원장 runs 에는 모든 실행의
-지표·스냅샷·커밋이 남으므로 parquet 가 없어도 감사 가능하다. 리포트는 `research/reports/campaign_<id>.md`.
+지표·스냅샷·커밋이 남으므로 parquet 가 없어도 감사 가능하다. 리포트는 2벌: 에이전트 안전 `research/reports/campaign_<id>.md`(Val/잠금 = 결과 코드만), 사람용 전체 `research/reports/human/campaign_<id>.md`.
 
 ## 절차와 관문 결정 (요약; 상세는 `src/btc_quant/research/pipeline.py`, `nulls.py` docstring)
 
 1. 예산 확인 → 데이터 스냅샷 id(파일 해시) → **가설·캠페인 원장 등록** → Dev 데이터 로드
-   (`DataAccess.read("dev")` → `regularize(clean_wicks(·))`) → (진입 파라미터 × 필터 파라미터)마다 신호 1회 →
+   (`DataAccess.read("dev")` → `prepare_m1(·, exchange)`) → (진입 파라미터 × 필터 파라미터)마다 신호 1회 →
    청산 격자 `simulate_many` → 스펙 × {primary, grade} 비용 `summarize` → 원장 runs 에 전부 기록.
 2. primary 가중 Sharpe 순 상위 K(기본 5) 후보에 대해:
    - **G0** validate + live_ready + 허용된 aux(upbit, 템플릿 선언)만 + 이 데이터에서 절단 인과성 점검.

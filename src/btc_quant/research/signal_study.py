@@ -744,7 +744,7 @@ def dev_aux_context(env, tpl: ScreenTemplate) -> Context:
         raw = env.data.read("dev", a, tpl.symbol, tpl.timeframe)
         if raw.empty:
             raise CampaignError(f"no {a} aux data on dev")
-        aux_m1[a] = prepare_m1(raw)
+        aux_m1[a] = prepare_m1(raw, a)
     return aux_context(aux_m1, tpl.bar_minutes)
 
 

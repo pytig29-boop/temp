@@ -19,7 +19,22 @@ logs/research_tool_calls.jsonl and the call is denied when it:
      data/raw path that could cover the lockbox;
   4. calls an MCP tool whose name implies a human-only capability (approve /
      activate / rollback / promote / open lockbox / orders / keys) — the btcq
-     research MCP server exposes none of these (docs/MCP.md).
+     research MCP server exposes none of these (docs/MCP.md);
+  5. reads human-only Val/lockbox detail (Read/Grep/Glob/Bash): the full campaign
+     reports research/reports/human/**, the full research/campaigns/<id>/pipeline.json
+     (agents use pipeline_public.json / MCP get_campaign_report), the ledger tables
+     that carry Val/lockbox numbers (runs / val_evaluations / lockbox / transitions
+     .jsonl — use MCP query_ledger) and the Val-derived strategies/**/*.risk.yaml;
+     broad recursive searches (Grep / grep -r / rg over the repo root, research/,
+     strategies/) that would include those files are denied unless narrowed;
+  6. runs research entry points that write the ledger directly, bypassing the MCP
+     checks (weekly budget, screen gate, strict power, repeat check):
+     `btc_quant.research.cli run|screen|gates`, Python that calls run_campaign /
+     run_pipeline / run_screen / run_forward / signal_study.screen /
+     Ledger().record_* / register_hypothesis / create_campaign / LessonBook
+     add_interpretation / mark / derive_hypothesis / apply_derivation — including
+     the contents of a `python <script.py>` / `python -m <local module>` target.
+     Use the btcq MCP tools instead (docs/MCP.md §4.3).
 
 Hook protocol (https://code.claude.com/docs/en/hooks): JSON on stdin with
 tool_name / tool_input / cwd; to deny we print
@@ -115,6 +130,54 @@ GIT_SAFE = {
 SECRET_RE = re.compile(r"(^|[\s'\"/=])\.env(\.[\w.-]+)?(?=$|[\s'\";|&)])|runtime/secrets")
 
 
+# Human-only READ paths (Val / lockbox detail). Regexes over the project-relative path.
+HUMAN_ONLY_READ = [
+    (r"research/reports/human(/|$)",
+     "full campaign reports contain Val (G6) detail and are human-only; read the agent-safe "
+     "research/reports/campaign_<id>.md or MCP get_campaign_report (Val = outcome codes only)"),
+    (r"research/campaigns/[^/]+/pipeline\.json$",
+     "pipeline.json holds G6/Val detail and is human-only; use research/campaigns/<id>/pipeline_public.json "
+     "or MCP get_campaign_report"),
+    (r"research/ledger/(runs|val_evaluations|lockbox|transitions)\.jsonl$",
+     "this ledger table carries Val/lockbox numbers; use MCP query_ledger (dev metrics, outcome codes only)"),
+    (r"strategies/.+\.risk\.ya?ml$", "risk.yaml limits are derived from Val (human-only)"),
+]
+# Sample human-only files, used to decide whether a broad search / glob could reach them.
+HUMAN_ONLY_SAMPLES = (
+    "research/reports/human/campaign_camp-000001.md",
+    "research/campaigns/camp-000001/pipeline.json",
+    "research/ledger/runs.jsonl", "research/ledger/val_evaluations.jsonl",
+    "research/ledger/lockbox.jsonl", "research/ledger/transitions.jsonl",
+    "strategies/validated/x_v1.risk.yaml",
+)
+# Fragments that name a human-only file anywhere in a Bash command.
+HUMAN_ONLY_BASH_RE = re.compile(
+    r"reports[/\\]+human(?![\w-])|(?<![\w-])pipeline\.json\b|"
+    r"(?<![\w-])(runs|val_evaluations|lockbox|transitions)\.jsonl\b|\.risk\.ya?ml\b")
+RECURSIVE_SEARCH_RE = re.compile(
+    r"(?:^|[\s;&|(`])(rg|ag|ack|grep\s+(?:[^|;&]*\s)?-[a-zA-Z]*[rR][a-zA-Z]*|grep\s+(?:[^|;&]*\s)?--recursive"
+    r"|git\s+grep)(?=\s|$)")
+
+# Research entry points that write the ledger / lessons directly (bypass of the MCP checks).
+RESEARCH_BYPASS_RES = [
+    re.compile(r"(btc_quant[./]research[./]cli|btc-quant-research)\b[^;&|\n]*?\s(run|screen|gates)(?=\s|$|;|&|\|)"),
+    re.compile(r"\b(run_campaign|run_pipeline|run_screen|run_forward|record_runs_batch)\b"),
+    re.compile(r"signal_study\s+import\s+[^\n;]*(?<![\w.])screen\b(?!_)|signal_study\.screen\s*\("),
+    re.compile(r"\.(register_hypothesis|create_campaign|record_runs?|record_lockbox_\w+|open_val_evaluation|"
+               r"record_val_result|record_forward_result|record_transition)\s*\("),
+    re.compile(r"\bLedger\s*\([^)]*\)\s*\.\s*append\s*\(|\bledger\s*\.\s*append\s*\("),
+    re.compile(r"\b(add_interpretation|derive_hypothesis|apply_derivation)\s*\("),
+]
+LESSONS_MARK_RE = re.compile(r"\.mark\s*\(")
+LESSONS_CTX_RE = re.compile(r"\b(LessonBook|lessons)\b")
+PY_SCRIPT_RE = re.compile(r"\bpython[\d.]*\s+(?:-[^\s-]\S*\s+)*([^\s;&|<>'\"]+\.py)(?=\s|$|;|&|\|)")
+PY_MODULE_RE = re.compile(r"\bpython[\d.]*\s+(?:-[^\sm]\S*\s+)*-m\s+([A-Za-z_][\w.]*)")
+BYPASS_REASON = ("runs a research entry point that writes the ledger/lessons directly ({what}); in research mode "
+                 "campaigns, screens, pipelines and ledger/lessons writes go through the btcq MCP tools "
+                 "(screen_signals, create_and_run_campaign, register_hypothesis, lessons_*), which enforce the "
+                 "weekly budget, screen gate, strict power and repeat checks (docs/MCP.md §4.3)")
+
+
 # ---------------------------------------------------------------------------
 def project_root() -> Path:
     env = os.environ.get("CLAUDE_PROJECT_DIR")
@@ -141,6 +204,186 @@ def protected_reason(rel: str) -> str | None:
     for pat, why in PROTECTED_WRITE:
         if re.match(pat, rel):
             return why
+    return None
+
+
+def human_only_reason(rel: str) -> str | None:
+    for pat, why in HUMAN_ONLY_READ:
+        if re.match(pat, rel):
+            return why
+    return None
+
+
+def _glob_rx(glob: str) -> re.Pattern:
+    """Path-aware glob → regex: ** = any (incl. /), * and ? stay within one path segment."""
+    out, i = [], 0
+    while i < len(glob):
+        ch = glob[i]
+        if glob.startswith("**/", i):
+            out.append(r"(?:.*/)?"); i += 3; continue
+        if glob.startswith("**", i):
+            out.append(r".*"); i += 2; continue
+        if ch == "*":
+            out.append(r"[^/]*")
+        elif ch == "?":
+            out.append(r"[^/]")
+        elif ch == "[":
+            j = glob.find("]", i)
+            if j > i:
+                out.append(glob[i:j + 1]); i = j + 1; continue
+            out.append(r"\[")
+        else:
+            out.append(re.escape(ch))
+        i += 1
+    return re.compile("".join(out) + r"$")
+
+
+def _expand_braces(glob: str) -> list[str]:
+    m = re.search(r"\{([^{}]*)\}", glob)
+    if not m:
+        return [glob]
+    out = []
+    for alt in m.group(1).split(","):
+        out += _expand_braces(glob[:m.start()] + alt + glob[m.end():])
+    return out
+
+
+def _under(base: str, sample: str) -> str | None:
+    """sample relative to base if base covers it (base '' / '.' = repo root), else None."""
+    b = base.strip("/")
+    if b in ("", "."):
+        return sample
+    if sample == b or sample.startswith(b + "/"):
+        return sample[len(b):].lstrip("/") or sample.rsplit("/", 1)[-1]
+    return None
+
+
+def search_reaches_human_only(base: str, glob: str | None = None, ftype: str | None = None) -> str | None:
+    """Would a recursive search rooted at `base` (optionally filtered by a rg-style glob / file type) read a
+    human-only file? Returns the matching sample path or None."""
+    if ftype and ftype.lower() not in ("md", "markdown", "json", "jsonl", "yaml", "yml", "txt", "all"):
+        return None
+    for sample in HUMAN_ONLY_SAMPLES:
+        sub = _under(base, sample)
+        if sub is None:
+            if human_only_reason(base.strip("/")):      # searching inside a human-only dir / file
+                return base
+            continue
+        if not glob:
+            return sample
+        for g in _expand_braces(glob):
+            neg = g.startswith("!")
+            if neg:
+                continue
+            target = sub if "/" in g.strip("/") else sub.rsplit("/", 1)[-1]
+            if _glob_rx(g.lstrip("/")).match(target) or _glob_rx(g.lstrip("/")).match(sub):
+                return sample
+    return None
+
+
+def bash_human_only_reason(cmd: str) -> str | None:
+    m = HUMAN_ONLY_BASH_RE.search(cmd)
+    if m:
+        return (f"command references human-only Val/lockbox detail ('{m.group(0)}'): full campaign reports "
+                "(research/reports/human/), pipeline.json, ledger runs/val_evaluations/lockbox/transitions, "
+                "*.risk.yaml. Use research/reports/campaign_<id>.md, pipeline_public.json or the MCP tools "
+                "(get_campaign_report, query_ledger)")
+    # shell globs that expand into human-only files
+    for tok in re.findall(r"[^\s'\";|&<>()]+", cmd):
+        if GLOB_CHARS & set(tok) and not tok.startswith("-"):
+            t = tok.lstrip("./")
+            for g in _expand_braces(t):
+                rx = _glob_rx(g)
+                hit = next((x for x in HUMAN_ONLY_SAMPLES if rx.match(x)), None)
+                if hit:
+                    return f"glob '{tok}' can expand to human-only Val/lockbox file(s) such as {hit}"
+    # recursive searches over broad scopes
+    for seg in re.split(r"\|\||&&|[;|&\n]", cmd):
+        if not RECURSIVE_SEARCH_RE.search(seg):
+            continue
+        try:
+            import shlex
+            toks = shlex.split(seg, posix=True)
+        except ValueError:
+            toks = seg.split()
+        incl = [t.split("=", 1)[1] for t in toks if t.startswith(("--include=", "--glob=", "--iglob="))]
+        for i, t in enumerate(toks):
+            if t in ("-g", "--glob", "--iglob", "--include") and i + 1 < len(toks):
+                incl.append(toks[i + 1])
+        ftype = None
+        for i, t in enumerate(toks):
+            if t in ("-t", "--type") and i + 1 < len(toks):
+                ftype = toks[i + 1]
+            elif t.startswith("--type="):
+                ftype = t.split("=", 1)[1]
+        # positional args after the tool: first = pattern (unless -e/-f), rest = paths
+        start = next((i for i, t in enumerate(toks) if t in ("rg", "ag", "ack", "grep")), None)
+        if start is None:
+            continue
+        pos, skip = [], False
+        has_e = False
+        for t in toks[start + 1:]:
+            if skip:
+                skip = False
+                continue
+            if t in ("-e", "-f", "--regexp", "--file"):
+                has_e, skip = True, True
+                continue
+            if t in ("-g", "--glob", "--iglob", "--include", "-t", "--type", "-A", "-B", "-C", "-m",
+                     "--max-count", "--exclude", "--exclude-dir", "-T", "--type-not"):
+                skip = True
+                continue
+            if t.startswith("-"):
+                continue
+            pos.append(t)
+        paths = pos if has_e else pos[1:]
+        for base in (paths or ["."]):
+            b = os.path.normpath(base).replace("\\", "/")
+            globs = incl or [None]
+            for g in globs:
+                hit = search_reaches_human_only("" if b == "." else b, g, ftype)
+                if hit:
+                    return (f"recursive search over '{base}' would read human-only Val/lockbox detail ({hit}); "
+                            "narrow it (e.g. src/, docs/, research/knowledge/, research/lessons/) or add an "
+                            "--include/-g/-t filter that excludes *.md/*.json/*.jsonl/*.yaml")
+    return None
+
+
+def _scan_python_targets(cmd: str, root: Path, cwd: str | None) -> str | None:
+    """`python x.py` / `python -m local.module`: scan the target file for ledger-writing entry points."""
+    files: list[Path] = []
+    base = Path(cwd or root)
+    for m in PY_SCRIPT_RE.finditer(cmd):
+        p = Path(m.group(1)).expanduser()
+        files.append(p if p.is_absolute() else base / p)
+    for m in PY_MODULE_RE.finditer(cmd):
+        mod = m.group(1)
+        if mod.startswith("btc_quant.") and not mod.startswith("btc_quant.strategy.blocks"):
+            continue          # project code (reviewed); only the CLI patterns above apply
+        rel = Path(*mod.split("."))
+        for b in (base, root, root / "src"):
+            files += [b / rel.with_suffix(".py"), b / rel / "__main__.py"]
+    for f in files:
+        try:
+            if f.is_file() and f.stat().st_size < 2_000_000:
+                why = research_bypass_reason(f.read_text(encoding="utf-8", errors="replace"), scan_files=False)
+                if why:
+                    return f"script {f.name}: {why}"
+        except OSError:
+            continue
+    return None
+
+
+def research_bypass_reason(text: str, root: Path | None = None, cwd: str | None = None,
+                           scan_files: bool = True) -> str | None:
+    for rx in RESEARCH_BYPASS_RES:
+        m = rx.search(text)
+        if m:
+            return BYPASS_REASON.format(what=m.group(0).strip()[:80])
+    if LESSONS_MARK_RE.search(text) and LESSONS_CTX_RE.search(text):
+        return BYPASS_REASON.format(what="LessonBook.mark(...)")
+    if scan_files and root is not None:
+        return _scan_python_targets(text, root, cwd)
     return None
 
 
@@ -187,9 +430,26 @@ def check_file_tool(tool: str, ti: dict, root: Path, cwd: str | None) -> str | N
     # read tools
     if tool == "Read":
         target = rel_path(ti.get("file_path", ""), root, cwd)
+        why = human_only_reason(target)
+        if why:
+            return f"Read of '{target}' denied: {why}"
     else:  # Grep / Glob: directory scope + pattern/glob
         base = rel_path(ti.get("path", "") or "", root, cwd) if ti.get("path") else ""
+        if base == ".":
+            base = ""
         extra = ti.get("glob") if tool == "Grep" else ti.get("pattern")
+        if tool == "Grep":
+            hit = search_reaches_human_only(base, ti.get("glob"), ti.get("type"))
+            if hit:
+                return (f"Grep over '{base or '.'}' would read human-only Val/lockbox detail ({hit}); narrow "
+                        "`path` (e.g. src, docs, research/knowledge, research/lessons) or set `glob`/`type` to "
+                        "exclude *.md/*.json/*.jsonl/*.yaml")
+        else:
+            tgt = "/".join(x for x in (base, extra or "") if x)
+            for g in _expand_braces(tgt):
+                if human_only_reason(g) or (GLOB_CHARS & set(g) and re.search(r"reports/+human|pipeline\.json"
+                                                                              r"|\.risk\.ya?ml", g)):
+                    return f"Glob '{tgt}' targets human-only Val/lockbox files ({HUMAN_ONLY_READ[0][1]})"
         if re.fullmatch(r"data/?", base):
             base = "data/raw"  # searching all of data/ covers data/raw
         target = "/".join(x for x in (base, extra or "") if x)
@@ -197,12 +457,18 @@ def check_file_tool(tool: str, ti: dict, root: Path, cwd: str | None) -> str | N
     return f"{tool} denied: {why}" if why else None
 
 
-def check_bash(cmd: str) -> str | None:
+def check_bash(cmd: str, root: Path | None = None, cwd: str | None = None) -> str | None:
     if not cmd:
         return None
     for rx in ADMIN_RES:
         if rx.search(cmd):
             return "human-only admin command (lockbox approval / activation / rollback / parameter approval) is not available to AI research sessions (PLAN §6, docs/PARAMS.md)"
+    why = research_bypass_reason(cmd, root, cwd)
+    if why:
+        return why
+    why = bash_human_only_reason(cmd)
+    if why:
+        return why
     for m in GIT_RE.finditer(cmd):
         sub = m.group(1)
         if sub == "push":
@@ -259,7 +525,7 @@ def evaluate(payload: dict, root: Path) -> str | None:
     if tool in WRITE_TOOLS or tool in READ_TOOLS:
         return check_file_tool(tool, ti, root, cwd)
     if tool == "Bash":
-        return check_bash(ti.get("command", ""))
+        return check_bash(ti.get("command", ""), root, cwd)
     if tool.startswith("mcp__"):
         why = check_mcp_name(tool)
         if why:
