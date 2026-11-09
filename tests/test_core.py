@@ -141,3 +141,10 @@ def test_report_builds():
     m1["low"] = np.minimum(m1.open, m1.close) * 0.9998
     md = cf.build_report(m1, "synthetic", horizons=(5, 30), xs=(0.003,))
     assert "필요 승률개선" in md and "hour(KST)" in md
+
+
+def test_format_to_per_exchange():
+    from datetime import datetime, timezone
+    t = datetime(2026, 11, 1, 0, 0, tzinfo=timezone.utc)
+    assert upbit.format_to("upbit", t) == "2026-11-01T00:00:00Z"
+    assert upbit.format_to("bithumb", t) == "2026-11-01T09:00:00"
