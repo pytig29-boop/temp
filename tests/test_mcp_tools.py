@@ -238,8 +238,8 @@ def test_request_lockbox_eval_does_not_open(tools, monkeypatch):
     rep_dir.mkdir(parents=True, exist_ok=True)
     (rep_dir / "review_bad.md").write_text("# Skeptic\nVERDICT: REJECT\n", encoding="utf-8")
     (rep_dir / "review_ok.md").write_text("# Skeptic\nVERDICT: SURVIVES  Confidence: low\n", encoding="utf-8")
-    args = dict(strategy_id="mcp_lbx_cand", version=1, justification="mechanism holds on Dev robustness suite",
-                review_report="research/reports/review_ok.md")
+    args = {"strategy_id": "mcp_lbx_cand", "version": 1, "justification": "mechanism holds on Dev robustness suite",
+            "review_report": "research/reports/review_ok.md"}
     assert call(tools, "request_lockbox_eval", **args)["error"]["code"] == "not_eligible"     # draft
     reg.transition("mcp_lbx_cand", 1, "candidate", "test", actor="test")
     reg.transition("mcp_lbx_cand", 1, "validated", "test", actor="test")

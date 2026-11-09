@@ -209,7 +209,7 @@ Draft → Candidate → Validated → Challenger(페이퍼) → Promotion Review
 
 | 장치 | 내용 |
 |---|---|
-| **MCP 서버** | `list_blocks`, `register_hypothesis`, `create_campaign`, `run_campaign`, `run_gates`, `run_ablation`, `query_ledger`, `compare`, `request_lockbox_eval`, `write_report`. 승격·주문·키·잠금 직접 열람 도구는 없음 |
+| **MCP 서버** | ✅ 구현됨 (2026-11-09) — 도구 20종, 실제 목록·안전 속성은 `docs/MCP.md`. 승인·활성화·롤백·잠금 열기·설정 수정·주문·키 관련 도구는 존재하지 않음(테스트로 강제) |
 | **Skills** | `research-campaign`(가설→격자→실행→관문→리포트), `candidate-review`(반대 논리 심사), `block-authoring`(새 블록 + 테스트), `daily-report` |
 | **Subagents** | `researcher`, `skeptic`(후보를 깨뜨리려 시도), `data-steward` |
 | **Hooks** | 승인 전략·관문·리스크·데이터 분할 설정 쓰기 차단, 잠금 데이터 경로 읽기 차단, MCP 호출 로그 |

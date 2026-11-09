@@ -18,12 +18,13 @@
 | | `candidate-review` | 예상 실패 유형 사전 기록 + 견고성 묶음 + 반대 논리 체크리스트 + 리포트 양식 |
 | | `block-authoring` | 새 블록 = 실험 블록(D11, 자동 수용 검사), 근거에 메커니즘·노출 표기 |
 | | `daily-report` | 아침 리포트 (오답노트·주간 예산 포함) |
+| MCP 서버 | `.mcp.json` → `btc_quant.mcp` (`btcq`, docs/MCP.md) | 연구 도구 20개: `list_blocks`, `get_data_summary`, `register_hypothesis`, `find_similar`, `screen_signals`, `power_check`, `create_and_run_campaign`, `list_campaigns`, `get_campaign_report`, `query_ledger`, `lessons_view`, `lessons_add_interpretation`, `lessons_mark`, `lessons_derive_hypothesis`, `propose_block`, `request_lockbox_eval`, `registry_status`, `params_status`, `propose_criterion`, `forward_status`. 승인·활성화·롤백·잠금 개봉·설정/원장 편집·주문·키 도구는 없음 |
 
-MCP 서버(`list_blocks`, `register_hypothesis`, `create_campaign`, `run_campaign`, `run_gates`, `run_ablation`,
-`query_ledger`, `compare`, `request_lockbox_eval`, `write_report`)는 이후 마일스톤에서 구현된다.
-그전까지 skill 문서에 적힌 대응 Python API(`btc_quant.registry.ledger.Ledger`,
-`btc_quant.registry.splits.DataAccess`, `btc_quant.backtest.fast`, `btc_quant.evaluation.*`)를 쓴다.
-MCP 도구 호출(`mcp__*`)도 hook 로그 대상이다.
+에이전트는 MCP 도구를 먼저 쓰고(주간 예산·선별 연결·엄격 검정력·중복 점검을 원장 쓰기 전에 강제, Val/잠금은
+결과 코드만), MCP 가 다루지 않는 일(사후분석, 개별 스펙 견고성 재계산 등)만 skill 문서의 Python API
+(`btc_quant.research.lessons`, `btc_quant.research.robustness`, `btc_quant.registry.ledger.Ledger` 읽기,
+`btc_quant.registry.splits.DataAccess`)로 한다. MCP 도구 호출(`mcp__*`)도 hook 로그 대상이며, 연구 모드에서
+사람 전용 기능처럼 보이는 이름의 MCP 도구(approve/activate/rollback/open_lockbox/order/key 등)는 hook 이 거부한다.
 
 ## 2. 연구 모드란
 
@@ -53,6 +54,8 @@ claude -p "daily-report skill로 오늘 아침 리포트 작성"
   `data-steward`를 호출한다.
 - 클라우드 환경에서는 환경 설정의 환경 변수에 `BTCQ_RESEARCH_MODE=1`을 넣는다.
 - 확인: 연구 모드에서 아무 도구나 한 번 쓰면 `logs/research_tool_calls.jsonl`에 줄이 추가된다.
+- MCP 서버 `btcq`(`.mcp.json`)는 프로젝트 MCP 서버로 자동 등록된다(첫 실행 시 승인, `/mcp` 로 확인, 도구 20개).
+  사용법·안전 속성은 docs/MCP.md.
 
 ## 4. 무엇이 차단되나 (연구 모드)
 
@@ -65,6 +68,7 @@ claude -p "daily-report skill로 오늘 아침 리포트 작성"
 | `research/ledger/**` | 원장은 append-only, `Ledger` Python API로만 추가 |
 | `research/lessons/*.jsonl`, `research/lessons/.lock`, `research/lessons/LESSONS.md` (README.md 제외) | 오답노트 사실은 불변, 해석·표시·사후분석은 `btc_quant.research.lessons` API로만 추가, LESSONS.md는 생성물 |
 | `research/lockbox_approvals/**`, `research/activation_approvals/**` | 사람 승인 기록 |
+| `research/lockbox_requests/**` | 잠금 평가 요청은 MCP `request_lockbox_eval`(자격 검사)로만 기록 |
 | `src/btc_quant/{backtest,evaluation,registry,data}/**` | 엔진·관문·레지스트리·데이터 코드는 AI 수정 불가 (§3.3) |
 | `data/raw/**` | 원천 데이터는 수집기만 기록 |
 | `.claude/{settings*.json,hooks,agents,skills}` | 연구 세션이 자기 감시 장치를 바꾸지 못하게 |
@@ -175,6 +179,7 @@ claude -p "daily-report skill로 오늘 아침 리포트 작성"
 
 ## 9. 개발자용
 
+- MCP 서버: `uv run pytest -q tests/test_mcp_tools.py tests/test_mcp_safety.py` (docs/MCP.md §6).
 - 테스트: `uv run pytest -q tests/test_guard_hook.py` (hook을 하위 프로세스로 실행, 모드 on/off·허용/거부 사례),
   `uv run pytest -q tests/test_research_lessons.py` (오답노트: 분류·불변성·계열 상속·Val 차단·유사 탐색·사후분석).
 - 보호 경로 추가: `guard.py`의 `PROTECTED_WRITE` 목록에 (정규식, 이유) 추가 후 테스트 보강.

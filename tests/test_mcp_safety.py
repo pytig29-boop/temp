@@ -49,7 +49,7 @@ def test_forbidden_capabilities_absent(capability):
 
 def test_no_tool_parameter_grants_human_powers():
     """인자 이름으로도 사람 전용 동작을 켤 수 없다 (override·승인·키·강제 등)."""
-    bad = re.compile(r"override|approv|activat|rollback|force|lockbox_key|api_key|secret|unlock|human", re.I)
+    bad = re.compile(r"override|approv|activat|rollback|force|lockbox_key|api_key|secret|unlock|human", re.IGNORECASE)
     for t in listed(build_server(ResearchTools(progress=lambda s: None))):
         props = t.input_schema.get("properties") or {}
         assert not [p for p in props if bad.search(p)], (t.name, list(props))

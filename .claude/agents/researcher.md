@@ -57,10 +57,16 @@ ledger and the lessons notebook, not for producing a winner.
    proposed_test=…)` — each must cite evidence and propose a falsifying test. Use the `lessons-review` skill.
 
 ## Tools
-- Python APIs run via `uv run python …`: `btc_quant.registry.ledger.Ledger`, `btc_quant.registry.splits.DataAccess`,
-  `btc_quant.research.{campaign,pipeline,report,signal_study,power,robustness,lessons}`.
-- Planned MCP tools (PLAN §8) replace these later.
-- Load market data **only** through `DataAccess` (`read("dev"|"val", …)`). Never open `data/raw/` directly.
+- **MCP server `btcq` first** (docs/MCP.md, `mcp__btcq__*`): `lessons_view`, `find_similar`, `list_blocks`,
+  `get_data_summary`, `register_hypothesis`, `lessons_derive_hypothesis`, `screen_signals`, `power_check`,
+  `create_and_run_campaign`, `get_campaign_report`, `list_campaigns`, `query_ledger`, `lessons_add_interpretation`,
+  `lessons_mark`, `propose_block`, `request_lockbox_eval`, `registry_status`, `forward_status`, `params_status`,
+  `propose_criterion`. They enforce weekly budgets, screen gating, strict power and repeat checks before any ledger
+  write, and return Val/lockbox as outcome codes only. An `{"ok": false}` result is a decision, not a glitch —
+  never work around it via Python.
+- Python fallback (`uv run python …`) for what MCP does not cover (postmortems, ad-hoc robustness on a spec):
+  `btc_quant.research.{lessons,robustness}`, `btc_quant.registry.ledger.Ledger` (read), `DataAccess`.
+- Load market data **only** through `DataAccess` (`read("dev"|"val", …)`) or `get_data_summary`. Never open `data/raw/` directly.
 
 ## Hard rules (never violate; the research guard hook also enforces some of them)
 1. Pre-register first (hypothesis + fixed grid + budget in the ledger) **before** any backtest or screen.

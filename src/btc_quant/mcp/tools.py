@@ -23,8 +23,9 @@ import os
 import re
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import yaml
 
@@ -118,7 +119,7 @@ def _error_code(e: BaseException) -> str:
 def tool(fn: Callable) -> Callable:
     """결과를 {"ok": true, …} 로 감싸고, 예외는 구조화된 오류로 바꾼다 (절대 던지지 않음)."""
     @functools.wraps(fn)
-    def wrapper(self: "ResearchTools", *a, **kw) -> dict[str, Any]:
+    def wrapper(self: ResearchTools, *a, **kw) -> dict[str, Any]:
         try:
             out = fn(self, *a, **kw)
             return _clean({"ok": True, "tool": fn.__name__, **(out or {})})
@@ -141,9 +142,7 @@ def _scalars(d: dict | None, maxlen: int = 300) -> dict[str, Any]:
     for k, v in (d or {}).items():
         if isinstance(v, str):
             out[k] = v if len(v) <= maxlen else v[:maxlen] + "…"
-        elif isinstance(v, (bool, int, float)) or v is None:
-            out[k] = v
-        elif hasattr(v, "item") and not isinstance(v, (list, dict)):
+        elif isinstance(v, (bool, int, float)) or v is None or hasattr(v, "item") and not isinstance(v, (list, dict)):
             out[k] = v
     return out
 
@@ -281,14 +280,14 @@ class ResearchTools:
                 rec = {"start": start.isoformat(), "end": end.isoformat()}
                 try:
                     df = env.data.read_range(start, end, ex, sym, tf)
-                except Exception as e:  # noqa: BLE001 — 해당 구간 데이터 없음
+                except Exception as e:
                     if _error_code(e) == "lockbox_denied":
                         raise
                     rec.update(rows=0, note="no data")
                     row["segments"][s] = rec
                     continue
                 idx = pd.DatetimeIndex(df.index)
-                rec.update(rows=int(len(df)), first=idx.min().isoformat() if len(idx) else None,
+                rec.update(rows=len(df), first=idx.min().isoformat() if len(idx) else None,
                            last=idx.max().isoformat() if len(idx) else None)
                 if tf_min and len(idx):
                     expected = int((end - start) / pd.Timedelta(minutes=tf_min))
@@ -356,6 +355,7 @@ class ResearchTools:
                     family: str | None = None, target_sharpe: float | None = None,
                     n_days: int | None = None) -> dict[str, Any]:
         import pandas as pd
+
         from btc_quant.research.power import budget_report
         env = self.env()
         if template is not None:
@@ -706,7 +706,7 @@ class ResearchTools:
         modname = f"btc_quant.strategy.blocks.experimental.{q.stem}"
         docs = str(self.docs_path) if self.docs_path else ""
         proc = subprocess.run([sys.executable, "-c", _ACCEPT_SCRIPT, str(q), modname, docs],
-                              capture_output=True, text=True, timeout=900, cwd=str(self.code_root),
+                              capture_output=True, text=True, timeout=900, cwd=str(self.code_root), check=False,
                               env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
         marker = "\x00ACCEPT_JSON"
         if proc.returncode != 0 or marker not in proc.stdout:
@@ -813,7 +813,11 @@ class ResearchTools:
 
     @tool
     def params_status(self) -> dict[str, Any]:
-        from btc_quant.params.costs import all_cost_models, cost_versions, round_trip_bps
+        from btc_quant.params.costs import (
+            all_cost_models,
+            cost_versions,
+            round_trip_bps,
+        )
         from btc_quant.params.proposals import list_proposals
         from btc_quant.params.registry import load_registry, params_version, validate
         from btc_quant.research.campaign import config_root
