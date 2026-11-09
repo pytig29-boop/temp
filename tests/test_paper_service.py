@@ -243,8 +243,8 @@ def test_service_uses_registry_cost(tmp_path, monkeypatch):
     from btc_quant.backtest.types import CostModel
     m = CostModel("coinone_conservative", 0.0, 2.5, 3.5)
     monkeypatch.setattr(S, "load_costs", lambda root=None: {"coinone_conservative": m})
-    svc = _service(tmp_path, lambda: pd.Timestamp("2024-01-01", tz="UTC"))
+    svc = _service(tmp_path, lambda: 1_704_067_200.0)
     assert svc.cost == m
     monkeypatch.setattr(S, "load_costs", lambda root=None: {})
     with pytest.raises(ValueError, match="unknown cost model"):
-        _service(tmp_path, lambda: pd.Timestamp("2024-01-01", tz="UTC"))
+        _service(tmp_path, lambda: 1_704_067_200.0)
