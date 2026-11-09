@@ -37,7 +37,7 @@ G6:
 G7:
   alpha: 0.10
   cap: 10                      # 10회 개봉 시 잠금 구간 은퇴
-  holm_mode: cap               # cap(보수적, 수명 FWER<=alpha) | cumulative
+  holm_mode: cumulative        # 사용자 결정 2026-11-09 (cap: 보수적, 수명 FWER<=alpha | cumulative: 개봉 수 기준 Holm)
 G8:
   min_paper_weeks: 3
   min_paper_trades: 30
