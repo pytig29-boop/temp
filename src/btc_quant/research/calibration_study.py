@@ -681,8 +681,8 @@ def summarize_runs(runs: list[dict]) -> dict:
             row["first_validated_pos"] = [x for x in g["first_validated_pos"] if x is not None]
             row["last_n_trials_dsr_mean"] = float(pd.to_numeric(g["last_n_trials_dsr"]).mean())
             row["last_n_family_trials_mean"] = float(pd.to_numeric(g["last_n_family_trials"]).mean())
-            ks = [x for x in g["last_star_val_k"] if x is not None]
-            row["last_star_val_k_median"] = float(np.median(ks)) if ks else float("nan")
+            ks = pd.to_numeric(g["last_star_val_k"], errors="coerce").dropna()
+            row["last_star_val_k_median"] = float(ks.median()) if len(ks) else float("nan")
             # 캠페인 위치별: 아무 후보 validated 비율, Dev 생존, Val 누적 사용
             per = {}
             for steps in g["steps"]:
