@@ -220,6 +220,10 @@ class PaperService:
         self._bg: set[asyncio.Task] = set()
         self._state_path = self.cfg.out / "service_state.json"
         self._svc_state = _read_json(self._state_path) or {}
+        if "last_summary" not in self._svc_state:   # 첫 기동: 다음 KST 09:00 부터 요약
+            today = datetime.fromtimestamp(clock(), timezone.utc).astimezone(KST)
+            if today.hour >= self.cfg.summary_hour_kst:
+                self._svc_state["last_summary"] = today.strftime("%Y-%m-%d")
         self._day_stats: dict[str, dict] = {k: {"trades": 0, "net": 1.0} for k in self.traders}
         self.collector = collector or self._make_collector()
         self.collector.add_listener(self.on_event)

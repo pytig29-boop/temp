@@ -132,6 +132,7 @@ class PaperTrader:
         self.entry_cmp: dict | None = None           # 진입 체결 비교(호가 vs 모델)
         self.exit_capture: dict | None = None        # 체결 스트림에서 SL/TP 도달 순간의 호가
         self.book_open: dict | None = None           # 직전 봉 마감(≈ 다음 봉 시가) 시점 호가
+        self.book_open_wall: float | None = None     # 그 호가를 잡은 벽시계 (결정 시각)
         self.last_decision: dict | None = None
         self.n_trades = 0
         self.n_decisions = 0
@@ -189,7 +190,7 @@ class PaperTrader:
           백테스트와 같은 규칙으로 반영한다."""
         if hist.last_ts is None:
             return []
-        self.book_open = book
+        self.book_open, self.book_open_wall = book, self.clock()
         if self.last_ts is None:
             self.last_ts = hist.last_ts
             if self.engine.start is None:
@@ -253,7 +254,7 @@ class PaperTrader:
             self._decide(t_close, hist, book, live)
 
         # 5) 다음 봉 시가 근처 호가 = 지금 호가
-        self.book_open = book
+        self.book_open, self.book_open_wall = book, self.clock()
         for e in self.risk.drain_events():
             rec = {**{k: v for k, v in e.items() if k != "type"}, "type": "risk_event",
                    "event": e.get("type"), "ts": t_close}
@@ -291,7 +292,8 @@ class PaperTrader:
             sl, tp = ev.ref_price * (1 - ex.stop_loss_pct / 100), ev.ref_price * (1 + ex.take_profit_pct / 100)
             expiry = ev.ts + pd.Timedelta(minutes=int(ex.max_hold_min))
             notional = self.equity
-            bf = walk_book(self.book_open, "buy", notional=notional, now=now) if self.book_open else None
+            bf = (walk_book(self.book_open, "buy", notional=notional, now=self.book_open_wall)
+                  if self.book_open else None)
             cmp = compare_to_model(bf, ev.fill_price, ev.ref_price, self.cost, self.conservative)
             self.entry_cmp = cmp
             self.exit_capture = None
@@ -308,12 +310,12 @@ class PaperTrader:
         # sell
         trade = self.engine.trades.pop() if self.engine.trades else None
         if ev.reason in ("sl", "tp") and self.exit_capture and self.exit_capture["reason"] == ev.reason:
-            src, book = "stream_trigger", self.exit_capture["book"]
+            src, book, at = "stream_trigger", self.exit_capture["book"], self.exit_capture["wall"]
         elif ev.reason in ("sl", "tp"):
-            src, book = "bar_close", book_now
+            src, book, at = "bar_close", book_now, now
         else:
-            src, book = "bar_open", self.book_open
-        bf = walk_book(book, "sell", qty=self.qty, now=now) if book and self.qty > 0 else None
+            src, book, at = "bar_open", self.book_open, self.book_open_wall
+        bf = walk_book(book, "sell", qty=self.qty, now=at) if book and self.qty > 0 else None
         cmp = compare_to_model(bf, ev.fill_price, ev.ref_price, self.cost, self.conservative)
         eq_before = self.equity
         self.equity = eq_before * (1 + trade["net_ret"]) if trade else eq_before
