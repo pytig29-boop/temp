@@ -18,6 +18,7 @@ dependencies = [
 
 [project.scripts]
 btc-quant = "btc_quant.cli:main"
+btc-quant-admin = "btc_quant.registry.admin_cli:main"
 
 [dependency-groups]
 dev = ["pytest>=8"]
