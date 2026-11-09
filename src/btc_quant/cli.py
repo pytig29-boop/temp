@@ -60,13 +60,22 @@ def cmd_sample_orderbook(a):
     print(df.describe().T[["mean", "50%", "max"]].to_markdown(floatfmt=".2f"))
 
 
+def _read(exchange: str, symbol: str, timeframe: str, start, end):
+    """모든 분석 읽기는 DataAccess 경유 — 잠금 구간이 겹치면 LockboxAccessError.
+    기본 구간: Dev 시작 ~ Val 끝."""
+    from .registry.splits import DataAccess, segment_bounds
+    start = start or segment_bounds("dev")[0]
+    end = end or segment_bounds("val")[1]
+    return DataAccess().read_range(start, end, exchange, symbol, timeframe)
+
+
 def cmd_quality(a):
-    df = store.read_ohlcv(a.exchange, a.symbol, a.timeframe, a.start, a.end)
+    df = _read(a.exchange, a.symbol, a.timeframe, a.start, a.end)
     print(quality.check_ohlcv(df, freq=a.timeframe.replace("m", "min")).to_markdown())
 
 
 def cmd_cost_floor(a):
-    raw = store.read_ohlcv(a.exchange, a.symbol, "1m", a.start, a.end)
+    raw = _read(a.exchange, a.symbol, "1m", a.start, a.end)
     q = quality.check_ohlcv(raw)
     m1 = quality.regularize(quality.clean_wicks(raw))
     scen = (cost_floor.zero_fee_scenarios(a.scenarios) if a.scenarios in ("coinone", "korbit")
@@ -81,8 +90,8 @@ def cmd_cost_floor(a):
 
 def cmd_lead_lag(a):
     (ea, sa), (eb, sb) = a.a.split(":"), a.b.split(":")
-    ca = store.read_ohlcv(ea, sa, "1m", a.start, a.end)["close"]
-    cb = store.read_ohlcv(eb, sb, "1m", a.start, a.end)["close"]
+    ca = _read(ea, sa, "1m", a.start, a.end)["close"]
+    cb = _read(eb, sb, "1m", a.start, a.end)["close"]
     print(lead_lag.lead_lag(ca, cb).to_markdown(floatfmt=".4f"))
     print()
     print(lead_lag.conditional_next_move(ca, cb).to_markdown(floatfmt=".3f"))
