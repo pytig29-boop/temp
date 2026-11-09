@@ -1,0 +1,144 @@
+# 파라미터 변경 제안 — 사람 승인 전에는 아무 효과 없음. 승인: python -m btc_quant.params approve <id>
+id: pp-20261109-cost-calibration-2026-11-09-coinone-upbi-57ac18
+created: '2026-11-09T14:05:10+00:00'
+created_by: agent
+class: 1
+kind: cost_models
+title: cost calibration 2026-11-09 (coinone, upbit)
+provisional: true
+evidence: research/reports/params_calibration_20261109.md
+changes:
+- target: costs:coinone_base
+  name: coinone_base
+  from:
+    fee_rate: 0.0
+    spread_bps: 1.0
+    slip_bps: 1.0
+    tick: 0.0
+    side_bps: 1.5
+    round_trip_bps: 3.0
+  to:
+    fee_rate: 0.0
+    spread_bps: 0.9896
+    slip_bps: 0.0052
+    tick: 0.0
+    side_bps: 0.5
+    round_trip_bps: 1.0
+  direction: looser
+  venue: coinone
+  role: base
+- target: costs:coinone_conservative
+  name: coinone_conservative
+  from:
+    fee_rate: 0.0
+    spread_bps: 2.0
+    slip_bps: 3.0
+    tick: 0.0
+    side_bps: 4.0
+    round_trip_bps: 8.0
+  to:
+    fee_rate: 0.0
+    spread_bps: 0.9909
+    slip_bps: 0.4945
+    tick: 0.0
+    side_bps: 0.9899
+    round_trip_bps: 1.9799
+  direction: looser
+  venue: coinone
+  role: conservative
+- target: costs:coinone_stress
+  name: coinone_stress
+  from:
+    fee_rate: 0.0
+    spread_bps: 5.0
+    slip_bps: 8.0
+    tick: 0.0
+    side_bps: 10.5
+    round_trip_bps: 21.0
+  to:
+    fee_rate: 0.0
+    spread_bps: 1.9808
+    slip_bps: 1.1796
+    tick: 0.0
+    side_bps: 2.17
+    round_trip_bps: 4.34
+  direction: looser
+  venue: coinone
+  role: stress
+- target: costs:upbit_base
+  name: upbit_base
+  from:
+    fee_rate: 0.0005
+    spread_bps: 1.4
+    slip_bps: 1.0
+    tick: 0.0
+    side_bps: 1.7
+    round_trip_bps: 13.4
+  to:
+    fee_rate: 0.0005
+    spread_bps: 2.4625
+    slip_bps: 0.2488
+    tick: 0.0
+    side_bps: 1.48
+    round_trip_bps: 12.9601
+  direction: looser
+  venue: upbit
+  role: base
+- target: costs:upbit_conservative
+  name: upbit_conservative
+  from:
+    fee_rate: 0.0005
+    spread_bps: 2.0
+    slip_bps: 3.0
+    tick: 0.0
+    side_bps: 4.0
+    round_trip_bps: 18.0
+  to:
+    fee_rate: 0.0005
+    spread_bps: 6.7993
+    slip_bps: 0.6904
+    tick: 0.0
+    side_bps: 4.09
+    round_trip_bps: 18.1801
+  direction: stricter
+  venue: upbit
+  role: conservative
+- target: costs:upbit_stress
+  name: upbit_stress
+  from:
+    fee_rate: 0.0005
+    spread_bps: 5.0
+    slip_bps: 8.0
+    tick: 0.0
+    side_bps: 10.5
+    round_trip_bps: 31.0
+  to:
+    fee_rate: 0.0005
+    spread_bps: 11.2362
+    slip_bps: 5.0119
+    tick: 0.0
+    side_bps: 10.63
+    round_trip_bps: 31.26
+  direction: stricter
+  venue: upbit
+  role: stress
+rationale: 'class ① 비대칭 규칙: 더 느슨한(싼) 비용 또는 잠정 표본의 변경은 사람 승인 후에만 적용. 근거 리포트 참조.'
+coverage:
+  coinone:
+    status: provisional
+    n_snapshots: 965
+    hours_observed: 4
+    n_kst_hours: 4
+    days: 1
+    start: '2026-11-09 11:46:00.045000+00:00'
+    end: '2026-11-09 14:05:01.238000+00:00'
+  upbit:
+    status: provisional
+    n_snapshots: 656
+    hours_observed: 3
+    n_kst_hours: 3
+    days: 1
+    start: '2026-11-09 08:09:25.122000+00:00'
+    end: '2026-11-09 14:05:00.552000+00:00'
+status: pending
+content_hash: c2ebe2d6d7cce45d
