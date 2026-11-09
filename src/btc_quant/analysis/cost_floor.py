@@ -45,6 +45,18 @@ def default_scenarios(spread_bps: float = 1.4, bithumb_spread_bps: float = 3.3,
     ]
 
 
+def korbit_scenarios(spreads=(2.0, 5.0, 10.0), slip_bps: float = 1.0,
+                     normal_taker_fee: float = 0.0015) -> list[CostScenario]:
+    """코빗 무료 이벤트(2027-08-23까지) 기준 + 이벤트 종료 후 대비.
+
+    스프레드는 미측정 → 2/5/10bp 민감도. 정상 테이커 수수료 0.15%는 API 문서 예시값(미확인).
+    """
+    out = [CostScenario(f"korbit_0fee_spread{int(sp)}", 0.0, sp, slip_bps) for sp in spreads]
+    out.append(CostScenario("upbit_base(0.05%)", 0.0005, 1.4, slip_bps))
+    out.append(CostScenario("korbit_after_promo(0.15%?)", normal_taker_fee, spreads[1], slip_bps))
+    return out
+
+
 def _entries(m1: pd.DataFrame, horizon: int, warmup: int = 5) -> np.ndarray:
     """5분 경계의 1분봉 인덱스 중, [i-warmup, i+horizon) 구간에 누락이 없는 것."""
     n = len(m1)
@@ -164,7 +176,7 @@ def build_report(m1: pd.DataFrame, title: str, scenarios=None,
                  horizons=(5, 15, 30, 60, 120), xs=(0.002, 0.003, 0.005, 0.008, 0.012),
                  quality_md: str = "") -> str:
     scenarios = scenarios or default_scenarios()
-    main = next(s for s in scenarios if s.name.startswith("upbit_base"))
+    main = scenarios[0]
     fmt = dict(floatfmt=".3f")
     parts = [
         f"# 비용 바닥 분석 — {title}",

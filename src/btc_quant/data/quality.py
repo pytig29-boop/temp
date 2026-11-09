@@ -21,6 +21,7 @@ class QualityReport:
     expected_bars: int
     largest_gaps: list[tuple[pd.Timestamp, pd.Timestamp, int]] = field(default_factory=list)
     extreme_moves: int = 0
+    wick_outliers: int = 0
 
     @property
     def ok(self) -> bool:
@@ -36,6 +37,7 @@ class QualityReport:
             f"- OHLC 관계 위반: {self.ohlc_violations}, 가격<=0: {self.nonpositive_price}, "
             f"음수 거래량: {self.negative_volume}",
             f"- 극단 변동(봉간 |log ret| 임계 초과): {self.extreme_moves}",
+            f"- 비정상 꼬리(직전 중앙값 대비 고가·저가 이탈): {self.wick_outliers}",
             f"- 판정: {'PASS' if self.ok else 'FAIL'}",
         ]
         if self.largest_gaps:
@@ -71,7 +73,31 @@ def check_ohlcv(df: pd.DataFrame, freq: str = "1min", extreme_logret: float = 0.
         ohlc_violations=viol, nonpositive_price=nonpos, negative_volume=negvol,
         missing_bars=int(missing_mask.sum()), expected_bars=len(full),
         largest_gaps=gaps[:top_gaps], extreme_moves=int((lr > extreme_logret).sum()),
+        wick_outliers=int(flag_wick_outliers(d).sum()),
     )
+
+
+def flag_wick_outliers(df: pd.DataFrame, k: float = 0.03, window: int = 15) -> pd.Series:
+    """고가/저가가 기준가(직전 window개 종가 중앙값과 현재 시·종가 중 가까운 값)에서 k 이상 벗어난 봉.
+
+    얇은 호가에서 생기는 오체결(예: 코빗 문서 예시의 고가 99억)을 잡기 위한 인과적(과거만 사용) 검사.
+    """
+    ref = df["close"].shift(1).rolling(window, min_periods=1).median().fillna(df["open"])
+    body_hi = df[["open", "close"]].max(axis=1)
+    body_lo = df[["open", "close"]].min(axis=1)
+    hi_ref = pd.concat([ref, body_hi], axis=1).max(axis=1)
+    lo_ref = pd.concat([ref, body_lo], axis=1).min(axis=1)
+    return (df["high"] > hi_ref * (1 + k)) | (df["low"] < lo_ref * (1 - k))
+
+
+def clean_wicks(df: pd.DataFrame, k: float = 0.03, window: int = 15) -> pd.DataFrame:
+    """비정상 꼬리 봉의 고가·저가를 몸통(시·종가)으로 잘라낸 사본. 원천 데이터는 수정하지 않는다."""
+    out = df.copy()
+    m = flag_wick_outliers(df, k, window)
+    out.loc[m, "high"] = out.loc[m, ["open", "close"]].max(axis=1)
+    out.loc[m, "low"] = out.loc[m, ["open", "close"]].min(axis=1)
+    out["wick_cleaned"] = m
+    return out
 
 
 def regularize(df: pd.DataFrame, freq: str = "1min") -> pd.DataFrame:

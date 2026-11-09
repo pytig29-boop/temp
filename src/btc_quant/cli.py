@@ -17,7 +17,9 @@ from pathlib import Path
 import pandas as pd
 
 from .analysis import cost_floor, lead_lag
-from .data import binance_vision, orderbook, quality, store, upbit
+from .data import binance_vision, korbit, orderbook, quality, store, upbit
+
+EXCHANGES = list(upbit.BASE_URLS) + ["korbit"]
 
 REPORTS = Path("research/reports")
 
@@ -32,7 +34,10 @@ def _symbol(market: str) -> str:
 
 
 def cmd_fetch_candles(a):
-    df = upbit.fetch_candles(a.exchange, a.market, a.unit, _dt(a.start), _dt(a.end))
+    if a.exchange == "korbit":
+        df = korbit.fetch_candles(a.market, a.unit, _dt(a.start), _dt(a.end))
+    else:
+        df = upbit.fetch_candles(a.exchange, a.market, a.unit, _dt(a.start), _dt(a.end))
     files = store.write_ohlcv(df, a.exchange, _symbol(a.market), f"{a.unit}m")
     print(f"{len(df):,} candles → {len(files)} files")
 
@@ -61,12 +66,13 @@ def cmd_quality(a):
 def cmd_cost_floor(a):
     raw = store.read_ohlcv(a.exchange, a.symbol, "1m", a.start, a.end)
     q = quality.check_ohlcv(raw)
-    m1 = quality.regularize(raw)
-    scen = cost_floor.default_scenarios(a.spread_bps, a.bithumb_spread_bps)
+    m1 = quality.regularize(quality.clean_wicks(raw))
+    scen = (cost_floor.korbit_scenarios() if a.scenarios == "korbit"
+            else cost_floor.default_scenarios(a.spread_bps, a.bithumb_spread_bps))
     title = f"{a.exchange} {a.symbol} ({m1.index[0]:%Y-%m-%d} ~ {m1.index[-1]:%Y-%m-%d})"
     md = cost_floor.build_report(m1, title, scen, quality_md=q.to_markdown())
     REPORTS.mkdir(parents=True, exist_ok=True)
-    f = REPORTS / f"cost_floor_{a.exchange}_{datetime.now(timezone.utc):%Y%m%d}.md"
+    f = REPORTS / f"cost_floor_{a.exchange}_{a.scenarios}_{datetime.now(timezone.utc):%Y%m%d}.md"
     f.write_text(md, encoding="utf-8")
     print(f"report → {f}")
 
@@ -85,7 +91,7 @@ def main(argv=None):
     sp = p.add_subparsers(required=True)
 
     s = sp.add_parser("fetch-candles", help="Upbit/Bithumb 분봉 수집")
-    s.add_argument("--exchange", choices=list(upbit.BASE_URLS), default="upbit")
+    s.add_argument("--exchange", choices=EXCHANGES, default="upbit")
     s.add_argument("--market", default="KRW-BTC")
     s.add_argument("--unit", type=int, default=1)
     s.add_argument("--start", required=True)
@@ -100,7 +106,7 @@ def main(argv=None):
     s.set_defaults(fn=cmd_fetch_binance)
 
     s = sp.add_parser("sample-orderbook", help="호가 스냅샷으로 스프레드 측정")
-    s.add_argument("--exchange", choices=list(upbit.BASE_URLS), default="upbit")
+    s.add_argument("--exchange", choices=EXCHANGES, default="upbit")
     s.add_argument("--market", default="KRW-BTC")
     s.add_argument("--seconds", type=int, default=600)
     s.add_argument("--interval", type=float, default=2.0)
@@ -115,6 +121,7 @@ def main(argv=None):
         s.add_argument("--end")
         s.add_argument("--spread-bps", type=float, default=1.4)
         s.add_argument("--bithumb-spread-bps", type=float, default=3.3)
+        s.add_argument("--scenarios", choices=["default", "korbit"], default="default")
         s.set_defaults(fn=fn)
 
     s = sp.add_parser("lead-lag", help="두 시장 1분 수익률 선후행")

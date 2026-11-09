@@ -148,3 +148,44 @@ def test_format_to_per_exchange():
     t = datetime(2026, 11, 1, 0, 0, tzinfo=timezone.utc)
     assert upbit.format_to("upbit", t) == "2026-11-01T00:00:00Z"
     assert upbit.format_to("bithumb", t) == "2026-11-01T09:00:00"
+
+
+# --- Korbit (문서 예시 응답 기반) ---
+from btc_quant.data import korbit
+
+KORBIT_CANDLES = {"success": True, "data": [
+    {"timestamp": 1708041600000, "open": "71211000", "high": "9999990000", "low": "300000",
+     "close": "71392000", "volume": "1.93"},
+    {"timestamp": 1708041660000, "open": "71392000", "high": "71400000", "low": "71300000",
+     "close": "71350000", "volume": "0.5"}]}
+
+
+def test_korbit_symbol():
+    assert korbit.to_symbol("KRW-BTC") == "btc_krw" == korbit.to_symbol("BTC-KRW")
+
+
+def test_korbit_parse_candles():
+    df = korbit.parse_candles(KORBIT_CANDLES)
+    assert str(df.index.tz) == "UTC" and df["close"].iloc[1] == 71350000.0
+
+
+def test_korbit_parse_orderbook():
+    ob = korbit.parse_orderbook({"success": True, "data": {
+        "timestamp": 1700000000000,
+        "bids": [{"price": "99", "qty": "1"}], "asks": [{"price": "101", "qty": "2"}]}})
+    u = ob["orderbook_units"][0]
+    assert (u["bid_price"], u["ask_price"], u["ask_size"]) == (99.0, 101.0, 2.0)
+
+
+def test_korbit_error_raises():
+    with pytest.raises(RuntimeError):
+        korbit.parse_candles({"success": False, "error": "x"})
+
+
+def test_wick_outlier_flag_and_clean():
+    df = korbit.parse_candles(KORBIT_CANDLES)
+    m = quality.flag_wick_outliers(df)
+    assert m.iloc[0] and not m.iloc[1]
+    c = quality.clean_wicks(df)
+    assert c["high"].iloc[0] == 71392000.0 and c["low"].iloc[0] == 71211000.0
+    assert df["high"].iloc[0] == 9999990000.0  # 원본 불변

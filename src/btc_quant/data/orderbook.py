@@ -6,7 +6,13 @@ from datetime import datetime, timezone
 
 import pandas as pd
 
-from .upbit import fetch_orderbook
+from . import korbit, upbit
+
+
+def fetch_any(exchange: str, market: str) -> dict:
+    if exchange == "korbit":
+        return korbit.fetch_orderbook(market)
+    return upbit.fetch_orderbook(exchange, market)
 
 
 def market_buy_cost(units: list[dict], notional: float) -> float:
@@ -46,7 +52,7 @@ def sample(exchange: str, market: str, seconds: int, interval: float = 2.0) -> p
     rows, t_end = [], time.time() + seconds
     while time.time() < t_end:
         try:
-            rows.append(summarize_snapshot(fetch_orderbook(exchange, market)))
+            rows.append(summarize_snapshot(fetch_any(exchange, market)))
         except Exception as e:  # 개별 실패는 기록만 하고 계속
             print(f"  snapshot failed at {datetime.now(timezone.utc):%H:%M:%S}: {e}")
         time.sleep(interval)
