@@ -147,3 +147,73 @@ def test_forward_no_data_and_cli(env, capsys):
     assert F.main(["run", "--root", str(env.root), "--as-of", "2024-04-20", "--no-fetch"]) == 0
     assert "forward 2024-04-20" in capsys.readouterr().out
     assert (env.reports_dir / "forward_2024-04-20.md").exists()
+
+
+# ------------------------------------------------------------------ 보조 데이터(업비트) 스펙
+class LaggedFetcher(FakeFetcher):
+    """업비트 = 무작위 보행, 코인원 = 업비트를 1분 늦게 따라감 (업비트 선행 블록이 실제로 신호를 낸다)."""
+
+    def __init__(self, fail: set[str] = frozenset()):
+        super().__init__(fail)
+        up = _market(5)
+        co = up.shift(1).bfill()
+        self.by_ex = {"upbit": up, "coinone": co}
+
+    def __call__(self, exchange, start, end):
+        self.calls.append((exchange, start, end))
+        if exchange in self.fail:
+            raise ConnectionError("boom")
+        d = self.by_ex[exchange]
+        return d[(d.index >= start) & (d.index < end)].copy()
+
+
+def _aux_spec() -> StrategySpec:
+    return StrategySpec("fwdaux", BlockRef("upbit_lead_impulse", {"k": 1, "thr_bp": 4}), ExitSpec(0.5, 0.5, 5),
+                        timeframe="1m")
+
+
+def _register_validated(env, spec):
+    reg = env.registry
+    camp = env.ledger.records("campaigns")[0]["id"]
+    reg.register(spec, actor="test")
+    reg.transition(spec.id, 1, "candidate", "dev", actor="test", evidence={"campaign_id": camp})
+    reg.transition(spec.id, 1, "validated", "val", actor="test", evidence={})
+
+
+def test_forward_aux_spec_builds_ctx_from_forward_upbit(env):
+    from btc_quant.backtest import fast
+    from btc_quant.research.campaign import aux_context, get_cost, prepare_m1
+
+    spec = _aux_spec()
+    _register_validated(env, spec)
+    calls = _spy_reads(env)
+    out = F.run_forward(env=env, fetcher=LaggedFetcher(), now=NOW)
+    rec = next(r for r in out["results"] if r["strategy_key"] == "fwdaux_v1")
+    assert rec["status"] == "ok" and rec["n_trades"] > 0 and rec["aux_rows"]["upbit"] > 0
+    assert rec["params_version"] and rec["cost_versions"]["coinone_conservative"] >= 1
+    # 보조 데이터 포함 모든 읽기는 Forward 구간 안 (잠금 구간·Forward 이전 미접근, 워밍업 규칙 그대로)
+    assert calls and all(pd.Timestamp(s) >= FWD_START for s, _, _ in calls)
+    # 같은 구성(업비트 Forward 1분봉 → regularize(clean_wicks) → to_tf, ffill 없음)으로 직접 계산한 값과 같다
+    end = pd.Timestamp(out["window_end"])
+    eval_start = FWD_START + pd.Timedelta(days=out["warmup_days"])
+    m1 = prepare_m1(env.data.read_range(FWD_START, end, "coinone", "BTC-KRW", "1m"))
+    up = prepare_m1(env.data.read_range(FWD_START, end, "upbit", "BTC-KRW", "1m"))
+    res = fast.run_fast(spec, m1, get_cost("coinone_conservative"), eval_start, end,
+                        ctx=aux_context({"upbit": up}, spec.tf_min))
+    assert rec["n_trades"] == len(res.trades) and rec["net_return"] == pytest.approx(
+        float((1 + res.daily_returns).prod() - 1), rel=1e-9, abs=1e-12)
+    # ctx 없이는 이 스펙을 평가할 수 없다 (예전 forward 는 여기서 실패했다)
+    with pytest.raises(KeyError, match="requires ctx.aux"):
+        fast.run_fast(spec, m1, get_cost("coinone_conservative"), eval_start, end)
+    # 코인원 전용 스펙은 aux_rows 없음
+    plain = next(r for r in out["results"] if r["strategy_key"] == "fwd24_v1")
+    assert plain["status"] == "ok" and "aux_rows" not in plain
+
+
+def test_forward_aux_spec_without_upbit_data_is_no_data(env):
+    _register_validated(env, _aux_spec())
+    out = F.run_forward(env=env, fetcher=LaggedFetcher(fail={"upbit"}), now=NOW)
+    rec = next(r for r in out["results"] if r["strategy_key"] == "fwdaux_v1")
+    assert rec["status"] == "no_data" and "upbit" in rec["note"]
+    assert next(r for r in out["results"] if r["strategy_key"] == "fwd24_v1")["status"] == "ok"
+    assert F.spec_aux_keys(_aux_spec()) == ["upbit"] and F.spec_aux_keys(_spec(24)) == []

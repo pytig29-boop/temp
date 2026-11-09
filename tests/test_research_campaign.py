@@ -114,18 +114,26 @@ def test_ledger_before_runs_and_every_run_recorded(rw_root, monkeypatch):
     assert (cr.dir / "summary_top50.csv").exists() and "*.parquet" in (cr.dir / ".gitignore").read_text()
     man = json.loads((cr.dir / "manifest.json").read_text())
     assert man["n_runs"] == len(runs) and man["data_snapshot"] == camp["period"]["data_snapshot"]
+    # 파라미터 거버넌스 버전 (docs/PARAMS.md §4): 매니페스트와 모든 실행 기록에
+    from btc_quant.params import cost_versions, params_snapshot
+    snap = params_snapshot()
+    assert man["params_version"] == snap["params_version"] and len(man["params_version"]) == 12
+    assert man["cost_versions"] == cost_versions() and man["params"]["params_version"] == snap["params_version"]
+    assert all(r["params_version"] == snap["params_version"] and r["cost_versions"] == cost_versions()
+               for r in runs)
     # 원장 레코드 형식이 Ledger.record_run 과 같은지
     lg = Ledger(rw_root / "ledger_fmt")
     h = lg.register_hypothesis("t", "r", "s")
     c2 = lg.create_campaign(h, {}, 5, ["coinone_conservative"], "dev", family="donchian_breakout")
-    lg.record_run(c2, runs[0]["spec"], "coinone_conservative", runs[0]["period"], "snap-x", "abc", {"a": 1})
+    lg.record_run(c2, runs[0]["spec"], "coinone_conservative", runs[0]["period"], "snap-x", "abc", {"a": 1},
+                  params_version="x" * 12, cost_versions={"coinone_conservative": 1})
     assert set(lg.records("runs")[0]) == set(runs[0])
     # 저장된 수익 행렬 == 엔진 직접 실행
     lh = cr.ranked()["logic_hash"].iloc[0]
     spec = cr.specs[lh]
     m1 = C.load_segment(env, "dev", "coinone", "BTC-KRW", "1m")
     s, e = env.data.segment_bounds("dev")
-    res = fast.run_fast(spec, m1, COINONE_CONSERVATIVE, s, e)
+    res = fast.run_fast(spec, m1, C.get_cost("coinone_conservative"), s, e)   # 레지스트리 현재 버전
     np.testing.assert_allclose(res.daily_returns.to_numpy(), cr.returns[lh].to_numpy(), rtol=0, atol=1e-15)
     loaded = C.load_campaign(cr.campaign_id, env=env)
     assert loaded.specs[lh] == spec and len(loaded.results) == len(cr.results)

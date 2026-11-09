@@ -82,7 +82,7 @@ python -m btc_quant.params propose-criteria gates.G5.min_dsr --values 0.9 0.975 
     --motivation "DSR 문턱의 합성 오탐률/검정력 점검" --ref synthetic:calibration_study \
     --max-fpr 0.05 --min-power 0.7 --power-sharpe 2 --mode bounded --null-markets 20 --planted-markets 10 --jobs 4
 ```
-- 한 번에 한 기준. 대상은 class ② 이고 값이 `config/gates.yaml` 에 있는 항목(코드 상수인 견고성 기준은 사람이 코드로).
+- 한 번에 한 기준. 대상은 class ② 이고 값이 `config/gates.yaml` 에 있는 항목(견고성 기준 `robustness.*` 포함).
 - **anti-goalpost**: motivation/references 에 원장 id(`camp-`/`run-`/`hyp-`/`val-`/`lbx-`/`fwd-`/`trn-NNN`),
   원장에 있는 spec_id·logic_hash, 레지스트리 전략 id, `research/campaigns|ledger|lessons`·`strategies/` 경로가 있으면
   거부(아무것도 실행하지 않음). references 는 `synthetic:`, `docs/`, `literature:`, `research/reports/pipeline_calibration` 만.
@@ -120,15 +120,27 @@ from btc_quant.params import params_snapshot, cost_model, gate_config_for_campai
 snap = params_snapshot()      # {"params_version": "79bc502df565", "cost_versions": {...}, "registry_version": 1, ...}
 ```
 - `params_version` = 모든 관리 파라미터의 현재 값 + 비용 모델 현재 버전의 12자리 해시. 값이 하나라도 바뀌면 바뀐다.
-- 캠페인 매니페스트와 원장 `runs` 의 `metrics`(또는 별도 필드)에 `params_version` 과 `cost_versions` 를 저장한다.
+- 저장 위치(연결 완료): 캠페인 `manifest.json` 의 `params`·`params_version`·`cost_versions`, 원장 `runs` 레코드의
+  선택 필드 `params_version`·`cost_versions`(`Ledger.record_run(s)(..., params_version=, cost_versions=)`; 이전
+  레코드에는 없음 — 추가 전용 형식, 시도·예산 판정 불변), 선별 `signal_screen.json` 의 `params`,
+  `pipeline.json` 과 전진 인큐베이션 `forward_results` 레코드의 `params_version`·`cost_versions`.
+  레지스트리 검증이 실패하면(drift 등) `params_version=None` + `params_error` 를 남기고 계속한다.
   같은 결과를 재현하려면 `cost_model(name, version=v)` 와 params.yaml history 로 당시 값을 복원한다.
-- 비용 모델은 `research/campaign.get_cost` / `paper/service.COSTS` 대신 `btc_quant.params.cost_model(name)` 으로 읽는다
-  (CostModel.name 은 버전과 무관하게 같아 원장 cost_name 과 호환).
-- 관문 설정은 `gates.load_gate_config()` 대신 `gate_config_for_campaign(campaign_id)` 로 읽는다(전향 적용).
+- 비용 모델: `research/campaign.get_cost(name)` 는 `btc_quant.params.cost_model(name)` 의 얇은 래퍼(costs.yaml
+  mtime 캐시), `paper/service.COSTS`/`load_costs()` 는 `all_cost_models()` (이름 동일). 예전 상수
+  `campaign.UPBIT_STRESS` 는 없어졌고 `campaign.COST_MODELS` 는 호환용 지연 속성이다.
+- 관문 설정: 파이프라인은 `gate_config_for_campaign(campaign_id)` (전향 적용, 넘겨받은 설정은 deepcopy),
+  전진 인큐베이션은 `gate_config_for_campaign(None)`(현재 gates.yaml). 설정 루트는 연구 저장소에
+  `config/gates.yaml` 이 있으면 그곳, 아니면 코드 저장소(`campaign.config_root`).
+- 견고성 기준: `config/gates.yaml` 의 `robustness:` (params.yaml `robustness.*`, `latency_delays_min` 만 class ①).
+  `robustness.run_suite(..., thresholds=)` 로 넘기며 파이프라인은 캠페인 시점 설정의 `robustness` 를 쓴다.
+  `research/robustness.py` 상수는 같은 값의 대체값이다.
 
 ## 5. 현재 상태 (2026-11-09)
 
-- 비용 모델: 모두 v1(프리셋과 동일). 첫 실측 보정(코인원·업비트 REST 호가 약 20분 + 기존 스냅샷)은 **잠정**이며,
-  제안 1건이 승인 대기 중이다 — 근거 `research/reports/params_calibration_20261109.md`.
-- 견고성 기준(`robustness.*`)은 코드 상수다. 바꾸려면 사람이 코드와 params.yaml 을 함께 고친다(gates.yaml 이관 권장).
+- 비용 모델: 코인원 3종은 **v2(잠정 B안, 왕복 2/4/8bp)** — 사용자 채팅 승인(2026-11-09), 기록
+  `research/param_approvals/`. 업비트 3종은 v1. 첫 실측 보정 제안(실측값 그대로)은 B안으로 대체되어 기각.
+  근거 `research/reports/params_calibration_20261109.md`. 72시간·24 KST시간대 표본 확보 후 재보정.
+- 견고성 기준(`robustness.*`)은 `config/gates.yaml` `robustness:` 로 이관됐다(값·params_version 변화 없음).
+  다른 class ② 기준과 같은 절차(propose-criteria → 사람 승인 → 다음 캠페인부터)로 바꾼다.
 - `risk_prefs.capital_fraction` 은 미정(사람 결정 대기).

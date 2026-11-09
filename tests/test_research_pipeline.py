@@ -92,6 +92,9 @@ def test_planted_edge_passes(planted):
     val_runs = [r for r in env.ledger.records("runs")
                 if r["campaign_id"] == cr.campaign_id and r["period"].get("segment") == "val"]
     assert {r["cost_name"] for r in val_runs} >= {"coinone_conservative", "coinone_base"}
+    # 파라미터 버전: pipeline.json·ablation·Val 실행 기록 모두 캠페인과 같은 params_version
+    assert out["params_version"] == cr.manifest["params_version"] and out["cost_versions"]
+    assert all(r["params_version"] == out["params_version"] for r in val_runs + abl_runs)
     # 리포트
     text = report.read_text()
     assert "candidate(s) passed G0–G6" in text and "Ablation" in text and "Yearly" in text
