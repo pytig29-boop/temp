@@ -350,6 +350,7 @@ class SignalSet:
     triggers: pd.DataFrame      # raw (pre-decluster) triggers: config, t
     pool_t: pd.DatetimeIndex    # eligible decision times (all configs)
     per_config: pd.DataFrame    # config, family, n_pool, n_triggers, n_events
+    base_t: pd.DatetimeIndex | None = None   # eligible decision times before any filter block (baseline)
 
 
 def signal_events(co_m1: pd.DataFrame, up_m1: pd.DataFrame, configs, min_gap_min: float,
@@ -396,10 +397,11 @@ def signal_events(co_m1: pd.DataFrame, up_m1: pd.DataFrame, configs, min_gap_min
                          "params": dict(entry.params), "t": t_dec[i], "pos": int(pos[i])})
         stats.append({"config": lab, "family": family_of(entry), "n_pool": int(ok.sum()),
                       "n_triggers": int(trig.size), "n_events": int(keep.sum())})
-    pool_all = base_ok if pool_all is None else pool_all
+    base_all = base_ok & bars["complete"].to_numpy(bool)
+    pool_all = base_all if pool_all is None else pool_all
     ev_df = pd.DataFrame(rows, columns=["config", "family", "block", "params", "t", "pos"])
     tr_df = pd.DataFrame(trig_rows, columns=["config", "t"])
-    return SignalSet(ev_df, tr_df, t_dec[pool_all], pd.DataFrame(stats))
+    return SignalSet(ev_df, tr_df, t_dec[pool_all], pd.DataFrame(stats), t_dec[base_all])
 
 
 def pool_events(events: pd.DataFrame) -> pd.DataFrame:
@@ -609,6 +611,9 @@ class StudyResult:
     ev_meas: Measured
     ctl_meas: Measured
     verdict: dict
+    baseline: pd.DataFrame | None = None      # every eligible live minute, no signal / no filter (measured)
+    diag_events: pd.DataFrame | None = None   # DIAGNOSTIC: template entries with the filter blocks dropped
+    diag_per_config: pd.DataFrame | None = None
 
 
 def run_study(since, until=None, root: str | Path = ".", data_root: str | Path | None = None,
@@ -617,7 +622,7 @@ def run_study(since, until=None, root: str | Path = ".", data_root: str | Path |
               primary_latency: float = PRIMARY_LATENCY, rest_warmup: bool = True,
               warmup_minutes: int = 300, gaps_path: str | Path | None = "runtime/collector_gaps.jsonl",
               seed_fetch=None, max_control: int = MAX_CONTROL, seed: int = 0,
-              registry: Registry = REGISTRY) -> StudyResult:
+              registry: Registry = REGISTRY, diagnostics: bool = True) -> StudyResult:
     root = Path(root)
     data_root = Path(data_root) if data_root is not None else root / "data" / "raw"
     fwd = forward_start(root)
@@ -684,9 +689,30 @@ def run_study(since, until=None, root: str | Path = ".", data_root: str | Path |
     em = measure(ev_t, m1["coinone"], builds["coinone"].first_trade, books["coinone"], books["upbit"], cost, **kw)
     cm = measure(ctl_t, m1["coinone"], builds["coinone"].first_trade, books["coinone"], books["upbit"], cost, **kw)
     events = pd.concat([pooled.reset_index(drop=True), em.table.drop(columns=["t"])], axis=1) if len(pooled) else em.table
+    baseline = diag_events = diag_pc = None
+    if diagnostics:
+        # (i) unconditional baseline: every eligible live decision minute (no entry, no filter) -> what the
+        #     backtest-open vs executable gap looks like in general; (ii) the template's entries with the
+        #     filter blocks (session) dropped -> more (non-pre-registered) events for the measurement only.
+        bt_all = pd.DatetimeIndex(sig.base_t if sig.base_t is not None else [], tz="UTC")
+        if len(bt_all) > max_control:
+            rng = np.random.default_rng(seed)
+            bt_all = bt_all[np.sort(rng.choice(len(bt_all), max_control, replace=False))]
+        baseline = measure(bt_all, m1["coinone"], builds["coinone"].first_trade, books["coinone"],
+                           books["upbit"], cost, **kw).table
+        sig_nf = signal_events(m1["coinone"], m1["upbit"], [(e, []) for e, _ in configs], tpl.min_gap_min,
+                               horizons, since=ev_since, until=until, registry=registry)
+        pooled_nf = pool_events(sig_nf.events)
+        t_nf = pd.DatetimeIndex(pooled_nf["t"]) if len(pooled_nf) else pd.DatetimeIndex([], tz="UTC")
+        dm = measure(t_nf, m1["coinone"], builds["coinone"].first_trade, books["coinone"], books["upbit"],
+                     cost, **kw)
+        diag_events = (pd.concat([pooled_nf.reset_index(drop=True), dm.table.drop(columns=["t"])], axis=1)
+                       if len(pooled_nf) else dm.table)
+        diag_pc = sig_nf.per_config
     cov["event_window"] = [str(ev_since), str(until)]
     cov["eligible_minutes"] = len(sig.pool_t)
     cov["eligible_hours"] = len(sig.pool_t) / 60.0
+    cov["unfiltered_minutes"] = len(sig.base_t) if sig.base_t is not None else 0
     params = {"since": str(since), "until": str(until), "template": str(template), "latencies": list(latencies),
               "primary_latency": primary_latency, "notional_krw": notional, "horizons": list(horizons),
               "cost": {"name": cost.name, "spread_bps": cost.spread_bps, "slip_bps": cost.slip_bps,
@@ -695,15 +721,21 @@ def run_study(since, until=None, root: str | Path = ".", data_root: str | Path |
               "min_gap_min": tpl.min_gap_min, "rest_warmup": rest_warmup, "grace_s": GRACE_S,
               "min_deficit_bp": MIN_DEFICIT_BP, "baseline_win_min": list(BASELINE_WIN_MIN),
               "n_configs": len(configs)}
-    verdict = make_verdict(events, cm.table, params, cov)
-    return StudyResult(params, cov, sig.per_config, events, cm.table, em, cm, verdict)
+    verdict = make_verdict(events, cm.table, params, cov, baseline)
+    return StudyResult(params, cov, sig.per_config, events, cm.table, em, cm, verdict, baseline, diag_events,
+                       diag_pc)
 
 
 # ============================================================== verdict
 BT_EXCESS_BP = (1.3, 2.9)       # Dev matched-null excess at 5 min, camp-000001 (fact-000001)
+# Prior event rate when the live window has no events yet: fact-000001 Dev events of the busiest single config
+# (upbit_lead_impulse k=3 thr_bp=10: 32,450) over Dev eligible hours (2021-01-01..2025-10-31, 18 KST h/day
+# ~= 31,800 h) -> ~1.0 per eligible hour; a lower bound for the pooled union of the 8 configs.
+DEV_PRIOR_EVENTS_PER_HOUR = 1.0
 
 
-def make_verdict(ev: pd.DataFrame, ctl: pd.DataFrame, params: dict, cov: dict) -> dict:
+def make_verdict(ev: pd.DataFrame, ctl: pd.DataFrame, params: dict, cov: dict,
+                 baseline: pd.DataFrame | None = None) -> dict:
     L = params["primary_latency"]
     side_bp = params["cost"]["entry_side_bp"]
     col = f"slip_walk_bp_L{L:g}"
@@ -712,13 +744,23 @@ def make_verdict(ev: pd.DataFrame, ctl: pd.DataFrame, params: dict, cov: dict) -
     n = len(e)
     slip = boot_mean(e[col]) if n else (math.nan,) * 3 + (0,)
     slip_c = boot_mean(ctl[col]) if len(ctl) else (math.nan,) * 3 + (0,)
+    bl = baseline[baseline["measurable"].astype(bool)] if baseline is not None and len(baseline) else None
+    slip_b = boot_mean(bl[col]) if bl is not None and len(bl) else (math.nan,) * 3 + (0,)
     extra = slip[0] - side_bp if np.isfinite(slip[0]) else math.nan
     h = max(params["horizons"])
     net_book = boot_mean(e[f"exec_book_net_bp_h{h}"]) if n else (math.nan,) * 3 + (0,)
     net_bt = boot_mean(e[f"bt_net_bp_h{h}"]) if n else (math.nan,) * 3 + (0,)
     sd = float(np.nanstd(e[col], ddof=1)) if n > 2 else math.nan
     sd_r = float(np.nanstd(e[f"exec_book_net_bp_h{h}"], ddof=1)) if n > 2 else math.nan
-    rate = n / cov["eligible_hours"] if cov.get("eligible_hours") else math.nan
+    sd_src = "events"
+    if not (np.isfinite(sd) and np.isfinite(sd_r)) and bl is not None and len(bl) > 2:
+        sd = float(np.nanstd(bl[col], ddof=1))                     # unconditional live minutes as a proxy
+        sd_r = float(np.nanstd(bl[f"exec_book_net_bp_h{h}"], ddof=1))
+        sd_src = "baseline"
+    rate = n / cov["eligible_hours"] if cov.get("eligible_hours") and n > 0 else math.nan
+    rate_src = "live"
+    if not np.isfinite(rate):
+        rate, rate_src = DEV_PRIOR_EVENTS_PER_HOUR, "dev_prior"
     need_slip = n_needed(sd, 0.5)
     need_ret = math.ceil(((1.96 + 0.84) * sd_r / 2.0) ** 2) if np.isfinite(sd_r) and sd_r > 0 else math.nan
     if n < MIN_EVENTS_FOR_VERDICT:
@@ -732,11 +774,13 @@ def make_verdict(ev: pd.DataFrame, ctl: pd.DataFrame, params: dict, cov: dict) -
     else:
         status = "UNDETERMINED"
     return {"status": status, "n_events": n, "slip_mean_ci": slip[:3], "slip_control_mean_ci": slip_c[:3],
+            "slip_baseline_mean_ci": slip_b[:3], "n_baseline": slip_b[3],
             "extra_vs_model_bp": extra, "entry_side_model_bp": side_bp, "net_book_h": h,
             "net_book_mean_ci": net_book[:3], "net_bt_mean_ci": net_bt[:3], "events_per_eligible_hour": rate,
             "n_needed_slip_pm0.5bp": need_slip, "n_needed_detect_2bp_net": need_ret,
             "hours_needed_slip": need_slip / rate if rate and np.isfinite(need_slip) else math.nan,
-            "hours_needed_net": need_ret / rate if rate and np.isfinite(need_ret) else math.nan}
+            "hours_needed_net": need_ret / rate if rate and np.isfinite(need_ret) else math.nan,
+            "sd_slip": sd, "sd_net": sd_r, "sd_source": sd_src, "rate_source": rate_src}
 
 
 # ============================================================== report
@@ -765,9 +809,10 @@ def _q(x, qs=(0.1, 0.5, 0.9)) -> str:
     return " / ".join(f"{np.quantile(x, q):.1f}" for q in qs)
 
 
-def _metric_rows(ev: pd.DataFrame, ctl: pd.DataFrame, metrics) -> list[str]:
-    out = ["| metric | events: mean [95% CI] (n) | p10 / p50 / p90 | control: mean [95% CI] (n) | "
-           "event − control [95% CI] |", "|---|---|---|---|---|"]
+def _metric_rows(ev: pd.DataFrame, ctl: pd.DataFrame, metrics, a_name: str = "events",
+                 b_name: str = "control") -> list[str]:
+    out = [f"| metric | {a_name}: mean [95% CI] (n) | p10 / p50 / p90 | {b_name}: mean [95% CI] (n) | "
+           f"{a_name} − {b_name} [95% CI] |", "|---|---|---|---|---|"]
     for col, name in metrics:
         if col not in ev and col not in ctl:
             continue
@@ -789,11 +834,18 @@ def render_markdown(res: StudyResult) -> str:
              "`python -m btc_quant.research.execution_study`. Forward segment only "
              f"(Forward start {cov['forward_start']}); lockbox / Val not read. Not a ledger trial "
              "(measurement of execution, no new hypothesis test).", "",
-             f"**Verdict: {v['status']}** — {verdict_text(v, p)}", "",
+             f"**Verdict: {v['status']}** — {verdict_text(v, p)}", ""]
+    if cov.get("eligible_minutes", 0) == 0 and cov.get("unfiltered_minutes", 0) > 0:
+        lines += ["> **No eligible minutes:** every live decision minute in the window was removed by the "
+                  "template's filter blocks (`session_kst all_but_quiet` excludes KST 03–08 = 18:00–24:00 UTC). "
+                  "The pre-registered signal can only fire on data collected 00:00–18:00 UTC; the diagnostics "
+                  "section measures the same quantities without the filter.", ""]
+    lines += [
              "## Data", "",
              f"- Window: since {p['since']} until {p['until']}; events evaluated in {cov['event_window'][0]} .. "
              f"{cov['event_window'][1]}; eligible decision minutes (session filter etc.) {cov['eligible_minutes']} "
-             f"(= {cov['eligible_hours']:.1f} h).",
+             f"(= {cov['eligible_hours']:.1f} h); before the filter blocks (session_kst) {cov.get('unfiltered_minutes', 0)} "
+             "minutes.",
              f"- Template `{p['template']}` ({p['n_configs']} configs), declustering {p['min_gap_min']:g} min, "
              f"cost `{p['cost']['name']}` v-current: spread {p['cost']['spread_bps']:g} bp + slip "
              f"{p['cost']['slip_bps']:g} bp/side → entry-side charge {p['cost']['entry_side_bp']:.1f} bp, round trip "
@@ -841,7 +893,7 @@ def render_markdown(res: StudyResult) -> str:
             ("t50_s", "catch-up 50 % time, s (uncensored)"), ("t90_s", "catch-up 90 % time, s"),
             ("t50_s_censored", "share not 50 % caught up by 300 s")]
     for x in lat:
-        m_cu.append((f"closed_before_L{x:g}", f"deficit share closed by t+{round(x)}s"))
+        m_cu.append((f"closed_before_L{x:g}", f"deficit share closed by t+{x:g}s"))
     m_cu += [("upbit_ret_prev60_bp", "Upbit mid return t−60s→t, bp"),
              ("coinone_ret_prev60_bp", "Coinone mid return t−60s→t, bp")]
     lines += ["", "## Catch-up (Coinone book after the signal)", ""] + _metric_rows(ev, ctl, m_cu)
@@ -875,6 +927,46 @@ def render_markdown(res: StudyResult) -> str:
                   (f"exec_mid_gross_bp_h{h}", f"h={h}m Coinone mid→mid (no cost), bp")]
     lines += ["", "## Forward returns", ""] + _metric_rows(ev, ctl, m_ret)
 
+    if res.baseline is not None:
+        bl = res.baseline[res.baseline["measurable"].astype(bool)] if len(res.baseline) else res.baseline
+        de = res.diag_events
+        de = de[de["measurable"].astype(bool)] if de is not None and len(de) else de
+        hmax = max(p["horizons"])
+        m_key = [("open_delay_s", "first Coinone print in minute t, s after t"),
+                 ("stale_print_bp", "Coinone mid(t) vs last print (bar close), bp"),
+                 ("open_vs_mid_bp", "backtest open (a) vs Coinone mid(t), bp"),
+                 ("co_spread_bp_t", "Coinone spread at t, bp")]
+        for x in lat:
+            m_key.append((f"slip_walk_bp_L{x:g}", f"ask-walk VWAP @t+{x:g}s − a, bp"))
+        m_key += [(f"slip_top_bp_L{L:g}", f"best ask @t+{L:g}s − a, bp"),
+                  (f"impact_bp_L{L:g}", f"walk VWAP − best ask @t+{L:g}s, bp"),
+                  ("deficit_bp", "book deficit D0, bp"), ("t50_s", "catch-up 50 % time, s"),
+                  (f"closed_before_L{L:g}", f"deficit share closed by t+{L:g}s"),
+                  (f"bt_net_bp_h{hmax}", f"h={hmax}m backtest net, bp"),
+                  (f"exec_book_net_bp_h{hmax}", f"h={hmax}m executable both sides net, bp"),
+                  (f"exec_mid_gross_bp_h{hmax}", f"h={hmax}m Coinone mid→mid, bp")]
+        lines += ["", "## Diagnostics outside the pre-registered selection", "",
+                  "Not part of the verdict. (i) **baseline** = every eligible live decision minute with no entry and "
+                  "no filter block (the generic gap between the backtest's Coinone 1m open and an executable buy); "
+                  "(ii) **unfiltered events** = the template's 8 entry configs with the `session_kst` filter "
+                  "dropped (so KST 03–08 minutes count), pooled and declustered the same way. These describe "
+                  "microstructure, not the pre-registered signal's edge.", ""]
+        if de is not None and res.diag_per_config is not None:
+            n_raw = int(res.diag_per_config["n_triggers"].sum())
+            lines.append(f"Unfiltered: {int(res.diag_per_config['n_events'].sum())} per-config events "
+                         f"({n_raw} raw triggers) → {len(res.diag_events)} pooled, {len(de)} measurable. "
+                         f"Baseline: {len(res.baseline)} minutes, {len(bl)} measurable.")
+            lines.append("")
+        lines += _metric_rows(de if de is not None else bl.iloc[:0], bl, m_key, "unfiltered events", "baseline")
+        if de is not None and len(de):
+            cols = ["t", "families", "a_open", "open_delay_s", f"slip_walk_bp_L{L:g}", "deficit_bp", "t50_s",
+                    f"bt_net_bp_h{hmax}", f"exec_book_net_bp_h{hmax}"]
+            lines += ["", "Unfiltered events:", "", "| " + " | ".join(cols) + " |", "|" + "---|" * len(cols)]
+            for _, r in de.head(60).iterrows():
+                lines.append("| " + " | ".join(
+                    (f"{r[c]:%m-%d %H:%M}" if c == "t" else (str(r[c]) if c == "families" else _f(r[c], 1)))
+                    for c in cols) + " |")
+
     lines += ["", "## Verdict and what more data is needed", "",
               f"- Status **{v['status']}** with n = {v['n_events']} measurable pooled events "
               f"(verdict needs ≥ {MIN_EVENTS_FOR_VERDICT}).",
@@ -884,7 +976,12 @@ def render_markdown(res: StudyResult) -> str:
               f"{BT_EXCESS_BP[0]}–{BT_EXCESS_BP[1]} bp.",
               f"- Fully executable net at {v['net_book_h']} min: {_ci(v['net_book_mean_ci'])} bp vs backtest-style "
               f"net {_ci(v['net_bt_mean_ci'])} bp on the same events.",
-              f"- Event rate {_f(v['events_per_eligible_hour'])} pooled events per eligible hour. For a ±0.5 bp CI on "
+              f"- Unconditional live minutes (baseline): entry shortfall {_ci(v.get('slip_baseline_mean_ci', (math.nan,) * 3))} bp "
+              f"(n = {v.get('n_baseline', 0)}).",
+              f"- Event rate {_f(v['events_per_eligible_hour'])} pooled events per eligible hour "
+              f"({'live' if v.get('rate_source') == 'live' else 'Dev prior from fact-000001, live rate unknown'}); "
+              f"dispersion from {v.get('sd_source', 'events')} (sd shortfall {_f(v.get('sd_slip'))} bp, sd net "
+              f"{_f(v.get('sd_net'))} bp). For a ±0.5 bp CI on "
               f"the entry shortfall: n ≈ {_f(v['n_needed_slip_pm0.5bp'], 0)} (≈ {_f(v['hours_needed_slip'], 0)} "
               f"eligible hours). To detect a +2 bp executable net edge (80 % power): n ≈ "
               f"{_f(v['n_needed_detect_2bp_net'], 0)} (≈ {_f(v['hours_needed_net'], 0)} eligible hours).",
@@ -917,7 +1014,9 @@ def verdict_text(v: dict, p: dict) -> str:
     if s == "INSUFFICIENT_DATA":
         return (f"only {v['n_events']} measurable live events (< {MIN_EVENTS_FOR_VERDICT}); preliminary entry "
                 f"shortfall vs the backtest open {slip} bp against the model's {v['entry_side_model_bp']:.1f} bp, "
-                f"executable {v['net_book_h']}-min net {_ci(v['net_book_mean_ci'])} bp. Re-run on more hours.")
+                f"executable {v['net_book_h']}-min net {_ci(v['net_book_mean_ci'])} bp; unconditional live minutes "
+                f"{_ci(v.get('slip_baseline_mean_ci', (math.nan,) * 3))} bp (n = {v.get('n_baseline', 0)}). "
+                "Re-run on more hours.")
     if s == "EXECUTABLE":
         return f"executable net at {v['net_book_h']} min is positive with its 95 % CI above 0 ({_ci(v['net_book_mean_ci'])} bp)."
     if s == "NOT_EXECUTABLE":
@@ -951,19 +1050,24 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--report", default=None, help="default research/reports/execution_study_<YYYYMMDD>.md")
     ap.add_argument("--events-csv", default=None)
     ap.add_argument("--json", default=None, help="write the summary (coverage, per-config, verdict) as JSON")
+    ap.add_argument("--no-diagnostics", action="store_true",
+                    help="skip the unconditional baseline and the filter-dropped diagnostic events")
     a = ap.parse_args(argv)
     res = run_study(a.since, a.until, root=a.root, data_root=a.data_root, template=a.template,
                     latencies=_parse_floats(a.latencies), notional=a.notional,
                     horizons=tuple(int(x) for x in _parse_floats(a.horizons)),
                     primary_latency=a.primary_latency, rest_warmup=not a.no_rest_warmup,
-                    warmup_minutes=a.warmup_minutes)
+                    warmup_minutes=a.warmup_minutes, diagnostics=not a.no_diagnostics)
     md = render_markdown(res)
     out = Path(a.report) if a.report else (Path(a.root) / "research" / "reports"
                                             / f"execution_study_{pd.Timestamp(res.params['until']):%Y%m%d}.md")
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(md, encoding="utf-8")
     if a.events_csv:
-        pd.concat([res.events.assign(set="event"), res.control.assign(set="control")]).to_csv(a.events_csv, index=False)
+        parts = [res.events.assign(set="event"), res.control.assign(set="control")]
+        if res.baseline is not None:
+            parts += [res.baseline.assign(set="baseline"), res.diag_events.assign(set="unfiltered_event")]
+        pd.concat(parts).to_csv(a.events_csv, index=False)
     if a.json:
         Path(a.json).write_text(json.dumps({"params": res.params, "coverage": res.coverage,
                                             "per_config": res.per_config.to_dict("records"),

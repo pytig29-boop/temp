@@ -38,10 +38,10 @@ def _levels(best: float, sign: int) -> list[float]:
     return [best * (1 + sign * k * LEVEL_STEP) for k in range(15)]
 
 
-def synth_rows(lag: float, n_min: int = N_MIN):
+def synth_rows(lag: float, n_min: int = N_MIN, start: pd.Timestamp = T0):
     """Collector-format rows: Upbit trades every 2 s at mid, Coinone trades at :05,:15,..,:55 hitting the bid,
     books every second (received 0.1 s after the exchange time). Coinone follows Upbit's jump after `lag` s."""
-    t0 = T0.value / 1e9
+    t0 = start.value / 1e9
     rows = {("upbit", "trades"): [], ("coinone", "trades"): [], ("upbit", "orderbook"): [],
             ("coinone", "orderbook"): []}
     for s in range(n_min * 60):
@@ -62,15 +62,15 @@ def synth_rows(lag: float, n_min: int = N_MIN):
 
 @pytest.fixture
 def make_root(tmp_path):
-    def _make(lag: float):
-        root = tmp_path / f"lag{lag:g}"
+    def _make(lag: float, start: pd.Timestamp = T0):
+        root = tmp_path / f"lag{lag:g}_{start:%H}"
         (root / "config").mkdir(parents=True)
         for f in ("splits.yaml", "costs.yaml"):
             shutil.copy(REPO / "config" / f, root / "config" / f)
         tpl = root / es.DEFAULT_TEMPLATE
         tpl.parent.mkdir(parents=True)
         shutil.copy(REPO / es.DEFAULT_TEMPLATE, tpl)
-        for (ex, kind), rows in synth_rows(lag).items():
+        for (ex, kind), rows in synth_rows(lag, start=start).items():
             wc.write_rows(root / "data" / "raw", ex, kind, rows)
         return root
     return _make
@@ -280,3 +280,31 @@ def test_event_selection_matches_signal_study():
             assert pd.Timestamp(st["last_event"]) == mine["t"].max()
         total += len(mine)
     assert total > 20
+
+
+def test_quiet_session_diagnostics_and_baseline(make_root):
+    """Same planted 60 s lag but inside KST 03-08 (session_kst all_but_quiet closed): no pre-registered events,
+    the filter-dropped diagnostic still finds the lead event, the baseline measures every eligible minute,
+    and the verdict falls back to baseline dispersion and the Dev prior rate."""
+    start = pd.Timestamp("2026-11-09 20:00", tz="UTC")          # KST 05:00
+    root = make_root(60, start)
+    res = es.run_study(start, start + pd.Timedelta(minutes=N_MIN), root=root, rest_warmup=False, gaps_path=None)
+    assert res.events.empty and res.coverage["eligible_minutes"] == 0
+    t_ev = start + pd.Timedelta(minutes=101)
+    de = res.diag_events
+    assert list(de["t"]) == [t_ev] and "lead" in de["families"].iloc[0]
+    r = de.iloc[0]
+    assert r["slip_top_bp_L1"] == pytest.approx(((P + CO_HALF) / (P - CO_HALF) - 1) * 1e4)
+    assert r["t50_s"] == (JUMP_S + 60) - 101 * 60 + 1
+    bl = res.baseline
+    assert len(bl) == res.coverage["unfiltered_minutes"] > 50
+    flat = bl[pd.DatetimeIndex(bl["t"]) < start + pd.Timedelta(minutes=95)]
+    assert np.allclose(flat["slip_top_bp_L1"], ((P + CO_HALF) / (P - CO_HALF) - 1) * 1e4)
+    v = res.verdict
+    assert v["status"] == "INSUFFICIENT_DATA" and v["rate_source"] == "dev_prior"
+    assert v["sd_source"] == "baseline" and v["n_baseline"] == bl["measurable"].sum()
+    md = es.render_markdown(res)
+    assert "Diagnostics outside the pre-registered selection" in md and "Unfiltered events:" in md
+    no = es.run_study(start, start + pd.Timedelta(minutes=N_MIN), root=root, rest_warmup=False, gaps_path=None,
+                      diagnostics=False)
+    assert no.baseline is None and "Diagnostics outside" not in es.render_markdown(no)
