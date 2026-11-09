@@ -308,7 +308,7 @@ class RiskManager:
                         else f"시세 {age:.0f}s 미수신 ≥ {L.stale_seconds:g}s"))
         if s.consecutive_api_errors >= L.max_api_errors:
             out.append(("api_errors", f"API 오류 {s.consecutive_api_errors}회 연속"))
-        if s.last_deviation is not None and s.last_deviation > L.price_deviation_threshold:
+        if s.last_deviation is not None and s.last_deviation > L.price_deviation_threshold + 1e-12:
             out.append(("price_deviation",
                         f"참조가 괴리 {s.last_deviation:.3%} > {L.price_deviation_threshold:.3%}"))
         return out
