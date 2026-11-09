@@ -1,0 +1,21 @@
+# 데이터 분할 (PLAN §2.1) — 변경은 사람만. 날짜는 UTC, start 포함 / end 미포함(exclusive).
+# Dev 2021-01-01 ~ 2025-10-31, Val 2025-11-01 ~ 2026-04-30,
+# Lockbox 2026-05-01 ~ 2026-11-08, Forward 2026-11-09 ~ 현재.
+#
+# 잠금 구간 롤링(개봉 10회 도달 시): lockbox 를 dev/val 로 편입하고, 그때까지 쌓인
+# forward 를 새 lockbox 로 지정한 뒤 lockbox_id 를 바꾼다(예: lb2). 개봉 횟수는 lockbox_id 별로 센다.
+lockbox_id: lb1
+lockbox_cap: 10
+segments:
+  dev:
+    start: "2021-01-01"
+    end: "2025-11-01"
+  val:
+    start: "2025-11-01"
+    end: "2026-05-01"
+  lockbox:
+    start: "2026-05-01"
+    end: "2026-11-09"
+  forward:
+    start: "2026-11-09"
+    end: null   # 현재 시각까지

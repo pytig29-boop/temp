@@ -1,0 +1,55 @@
+# PLAN §5.2 관문 / §5.3 잠금 / §7 리스크 공식 수치 (지금 고정. 변경은 사람만).
+# 규약: 낙폭(MDD)은 양수 크기(0.20 = 20%), 손실 한도는 음수 수익률(-0.03 = -3%).
+version: 1
+primary_metric:
+  half_life_days: 365          # D1/§2.2 반감기 12개월, Dev 끝 기준
+  annualization: 365
+  cost: conservative           # D3
+G0:
+  max_filters: 2
+  max_params: 8                # 청산 3개 포함
+G1:
+  min_trades: 300
+  min_recent_trades: 60        # Dev 최근 12개월
+  recent_days: 365
+G2:
+  min_weighted_sharpe: 0.0     # 초과(>)
+  null_runs: 1000              # 같은 필터·청산 + 무작위 진입
+  null_top_fraction: 0.05      # 상위 5%: p = (1+#null>=obs)/(B+1) <= 0.05
+G3:
+  neighbor_median_ratio: 0.5   # 인접 조합 Sharpe 중앙값 >= 선택 조합의 50%
+G4:
+  rolling_window_days: 182     # 6개월
+  rolling_step_days: 30
+  min_rolling_positive_frac: 0.60
+  min_recent_sharpe: 0.0       # 초과(>), 최근 12개월
+  recent_days: 365
+G5:
+  min_dsr: 0.95                # 이상(>=)
+  max_pbo: 0.30                # 미만(<)
+  pbo_splits: 16
+  cluster_threshold: 0.5       # 상관거리 sqrt((1-rho)/2) 절단 높이 (평균 rho >= 0.5 → 1 시도)
+G6:
+  min_sharpe: 0.0              # 초과(>), Val, conservative
+  max_stress_mdd: 0.20         # 이하(<=), stress 비용
+  max_mc_mdd95: 0.20           # 이하(<=), 거래당 몬테카를로 MDD 95백분위
+  mc_sims: 10000
+G7:
+  alpha: 0.10
+  cap: 10                      # 10회 개봉 시 잠금 구간 은퇴
+  holm_mode: cap               # cap(보수적, 수명 FWER<=alpha) | cumulative
+G8:
+  min_paper_weeks: 3
+  min_paper_trades: 30
+  pnl_band: 0.90               # 손익이 백테스트 90% 구간 안
+risk:
+  daily_loss_floor: -0.03      # min(-3%, Val 일간 1백분위)
+  weekly_loss_floor: -0.06     # min(-6%, Val 주간 1백분위)
+  drawdown_floor: -0.12        # min(-12%, -(MC MDD95 × 1.2))
+  drawdown_mc_mult: 1.2
+  loss_percentile: 1
+  min_max_trades_per_day: 5    # max(5, 3 × 일평균)
+  trades_per_day_mult: 3
+  data_stall_minutes: 2
+  api_error_streak: 3
+  price_anomaly_quantile: 0.999
