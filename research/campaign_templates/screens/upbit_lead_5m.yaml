@@ -1,0 +1,17 @@
+# v4 신호 선별 예시 (5분 결정, 업비트 보조 데이터). 실행: uv run python -m btc_quant.research.cli screen <이 파일>
+name: upbit_lead_5m_screen
+hypothesis:
+  text: "코인원 BTC-KRW 5분 결정에서 업비트 선행 충격 후 30~120분 코인원 수익이 매칭 귀무보다 높다 (대조: 돌파·평균회귀)."
+  rationale: "1분 지연 추종 가설이 5분 결정에서도 남는지(정보 지평) 확인. 대조 신호는 같은 5분 결정의 공식 블록."
+  success_criteria: "BH q=0.10 통과 & coinone_conservative 순평균 > 0 & 이벤트 ≥ 300"
+data: {exchange: coinone, symbol: BTC-KRW, timeframe: 1m, aux: [upbit]}
+bar_minutes: 5
+signals:
+  - entry: {block: upbit_lead_impulse, params: {k: 1, thr_bp: 20}}
+  - entry: {block: donchian_breakout, params: {lookback: 48}}
+  - entry: {block: bollinger_z_revert, params: {window: 48, z: 2.5}}
+study: {horizons: [5, 15, 30, 60, 120, 240], primary_horizons: [30, 60, 120], min_gap_min: 60, n_null: 1000,
+        seed: 0, min_events: 300, stratify: hour_vol}
+costs: {primary: coinone_conservative, grade: upbit_conservative}
+correction: {method: bh, alpha: 0.10}
+budget: 3

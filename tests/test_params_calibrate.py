@@ -5,7 +5,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
-import yaml
 
 from btc_quant.params import calibrate as K
 from btc_quant.params import costs as C

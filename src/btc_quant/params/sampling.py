@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pandas as pd
@@ -42,13 +42,13 @@ def sample_books(exchange: str, seconds: float, interval: float = 2.0, market: s
         try:
             rows.append(to_book_row(fetch(exchange, market)))
         except Exception as e:  # 개별 실패는 기록만
-            print(f"  [{exchange}] snapshot failed {datetime.now(timezone.utc):%H:%M:%S}: {e}")
+            print(f"  [{exchange}] snapshot failed {datetime.now(UTC):%H:%M:%S}: {e}")
         time.sleep(interval)
     if not rows:
         return None
     out = Path(root) / f"exchange={exchange}" / f"symbol={SYMBOL}" / "orderbook"
     out.mkdir(parents=True, exist_ok=True)
-    f = out / f"rest_{datetime.now(timezone.utc):%Y%m%dT%H%M%S}.parquet"
+    f = out / f"rest_{datetime.now(UTC):%Y%m%dT%H%M%S}.parquet"
     pd.DataFrame(rows).to_parquet(f, index=False)
     return f
 

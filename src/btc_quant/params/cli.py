@@ -57,7 +57,12 @@ def cmd_sample(a) -> int:
 
 
 def cmd_calibrate(a) -> int:
-    from .calibrate import InsufficientDataError, apply_calibration, calibrate, report_markdown
+    from .calibrate import (
+        InsufficientDataError,
+        apply_calibration,
+        calibrate,
+        report_markdown,
+    )
     try:
         res = calibrate(tuple(v.strip() for v in a.venues.split(",")), root=_root(a), notional=a.notional,
                         since=pd.Timestamp(a.since, tz="UTC") if a.since else None)

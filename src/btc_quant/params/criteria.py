@@ -21,18 +21,19 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from ._io import repo_root, today, utcnow
 from .registry import load_registry
 
 REPORTS_REL = Path("research") / "reports"
 ALLOWED_REF_PREFIXES = ("synthetic:", "docs/", "literature:", "research/reports/pipeline_calibration")
-LEDGER_ID_RE = re.compile(r"\b(camp|run|hyp|val|lbx|fwd|trn)-\d{3,}\b", re.I)
+LEDGER_ID_RE = re.compile(r"\b(camp|run|hyp|val|lbx|fwd|trn)-\d{3,}\b", re.IGNORECASE)
 REAL_PATH_RE = re.compile(r"(research/(campaigns|ledger|lessons|lockbox_approvals)|strategies/(active|review|retired|"
-                          r"candidates)|runtime/paper)", re.I)
+                          r"candidates)|runtime/paper)", re.IGNORECASE)
 # pipeline_calibration 에서 측정한 full 레이아웃 k (재보정 비용 절약; mode=bounded 기본값)
 FULL_K_FOR = {0.5: 0.0239, 1.0: 0.0257, 2.0: 0.0292, 3.0: 0.0327}
 

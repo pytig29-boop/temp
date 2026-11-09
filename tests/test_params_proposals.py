@@ -32,7 +32,6 @@ def cost_proposal(root: Path) -> str:
 
 def ok_confirm(expected, what):
     assert expected in what or expected  # 화면 요약을 받는다
-    return None
 
 
 def test_non_tty_refused(tmp_path):

@@ -1,0 +1,18 @@
+# v4 신호 선별 예시 (1분 결정, 업비트 보조 데이터). 실행: uv run python -m btc_quant.research.cli screen <이 파일>
+# 형식: docs/SIGNAL_STUDY.md §7 + data.aux (research/campaigns/README.md "v4 단계")
+name: upbit_lead_1m_screen
+hypothesis:
+  text: "코인원 BTC-KRW 1분 결정에서 업비트 선행 충격·거래소 가격차 이탈 후 수 분~30분 동안 코인원 수익이 매칭 귀무보다 높다."
+  rationale: "업비트가 KRW 가격 발견을 주도하고 코인원(점유율 ~2%)은 지연 추종한다는 가설 (docs/BLOCKS.md 교차거래소 메커니즘, Phase 0 바이낸스→업비트 1분 선행의 국내판). 대조: 같은 1분 결정의 Donchian 돌파."
+  success_criteria: "BH q=0.10 통과 & coinone_conservative 순평균 > 0 & 이벤트 ≥ 300"
+data: {exchange: coinone, symbol: BTC-KRW, timeframe: 1m, aux: [upbit]}
+bar_minutes: 1
+signals:
+  - entry: {block: upbit_lead_impulse, params: {k: 1, thr_bp: 10}}
+  - entry: {block: venue_gap_revert, params: {window: 240, z: 2.5}}
+  - entry: {block: donchian_breakout, params: {lookback: 240}}
+study: {horizons: [1, 5, 15, 30, 60, 120], primary_horizons: [5, 15, 30], min_gap_min: 60, n_null: 1000,
+        seed: 0, min_events: 300, stratify: hour_vol}
+costs: {primary: coinone_conservative, grade: upbit_conservative}
+correction: {method: bh, alpha: 0.10}
+budget: 3

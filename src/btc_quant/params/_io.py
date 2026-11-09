@@ -5,9 +5,9 @@ import contextlib
 import fcntl
 import os
 import tempfile
-from datetime import datetime, timezone
+from collections.abc import Iterator
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Iterator
 
 import yaml
 
@@ -20,11 +20,11 @@ def repo_root(root: str | Path | None = None) -> Path:
 
 
 def utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 def today() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return datetime.now(UTC).strftime("%Y-%m-%d")
 
 
 def read_yaml(path: Path) -> dict:

@@ -42,7 +42,15 @@ import pandas as pd
 from btc_quant.backtest.types import CostModel
 
 from ._io import repo_root, today, utcnow
-from .costs import ROLES, cost_model, direction, load_costs, model_for, round_trip_bps, side_cost_bps
+from .costs import (
+    ROLES,
+    cost_model,
+    direction,
+    load_costs,
+    model_for,
+    round_trip_bps,
+    side_cost_bps,
+)
 
 REPORTS_REL = Path("research") / "reports"
 SYMBOL = "BTC-KRW"
@@ -172,8 +180,8 @@ def coverage(samples: pd.DataFrame, settings: dict) -> dict:
     good_kst = pd.DatetimeIndex(good).tz_convert(KST) if len(good) else pd.DatetimeIndex([])
     kst_hours = sorted({int(h.hour) for h in good_kst})
     days = len({h.date() for h in good_kst})
-    cov = {"n_snapshots": int(len(snaps)), "n_side_samples": int(len(samples)), "hours_observed": int(len(good)),
-           "hour_buckets_any": int(len(per_hour)), "kst_hours": kst_hours, "n_kst_hours": len(kst_hours),
+    cov = {"n_snapshots": len(snaps), "n_side_samples": len(samples), "hours_observed": len(good),
+           "hour_buckets_any": len(per_hour), "kst_hours": kst_hours, "n_kst_hours": len(kst_hours),
            "days": days, "start": str(snaps["ts"].min()), "end": str(snaps["ts"].max()),
            "sources": {k: int(v) for k, v in snaps["source"].str.split(":").str[0].value_counts().items()},
            "incomplete_frac": float((~samples["complete"].astype(bool)).mean())}
@@ -226,7 +234,7 @@ def distribution(samples: pd.DataFrame) -> dict:
     d["spread_p50"] = _q(sp, 0.5)
     d["spread_p90"] = _q(sp, 0.9)
     d["spread_p99"] = _q(sp, 0.99)
-    d["by_side"] = {s: {"n": int(len(g)), "p50": _q(g["cost_bps"].to_numpy(float), 0.5),
+    d["by_side"] = {s: {"n": len(g), "p50": _q(g["cost_bps"].to_numpy(float), 0.5),
                         "p90": _q(g["cost_bps"].to_numpy(float), 0.9),
                         "p99": _q(g["cost_bps"].to_numpy(float), 0.99)}
                     for s, g in samples.groupby("side")}

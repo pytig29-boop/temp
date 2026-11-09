@@ -1,0 +1,24 @@
+# v4 캠페인 템플릿 예시 — 1분 결정 + ATR 청산 + 업비트 보조 데이터 + 선별 연결. 형식: research/campaigns/README.md
+# 선별(screens/upbit_lead_1m.yaml)에서 아래 진입 구성이 통과해야 실행된다 (requires_screen_pass).
+name: upbit_lead_1m_atr_v1
+family: upbit_lead_impulse
+hypothesis:
+  text: "코인원 BTC-KRW 1분 결정에서 업비트 선행 충격(k=1, 10bp) 진입 + ATR 배수 청산이 보수적 비용 후 양의 기대수익을 낸다."
+  rationale: "업비트 → 코인원 지연 추종 가설(docs/BLOCKS.md). 청산은 선별의 정보 지평·MFE/MAE 기반 ATR 배수 4개 패턴만(§10b-2)."
+  success_criteria: "≥1 스펙이 G0~G6 + 견고성 묶음 통과 (실험 블록 → 잠금 전 사람 검토)."
+timeframe: 1m
+data: {exchange: coinone, symbol: BTC-KRW, timeframe: 1m, aux: [upbit]}
+requires_screen_pass: true
+power: {target_sharpe: 2.0}
+entry:
+  block: upbit_lead_impulse
+  grid: {k: [1], thr_bp: [10]}
+filters:
+  - []
+exits: {mode: atr, sl_atr: [1.5, 3.0], tp_atr: [1.5, 3.0], max_hold_min: [15], atr_bars: 14}
+costs:
+  primary: coinone_conservative
+  grade: upbit_conservative
+  stress: coinone_stress
+  grade_stress: upbit_stress
+budget: 4                       # 1 × 1 × 4 = 4 스펙
