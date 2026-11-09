@@ -2,8 +2,10 @@
 
 시점 (docs/ENGINE_SPEC.md 와 동일한 의미론)
 - 1분봉 k 가 닫히면(`on_bar`): 엔진에 봉 k 를 넣는다(진입은 봉 k 시가, SL/TP 는 봉 k 고저 → 모델 체결).
-- 봉 k 가 5분 경계 직전 봉(분 % 5 == 4)이면, 방금 확정된 5분봉 s = k−4분의 신호를 **후행 창**
-  (`M1History.window`)에서 백테스트와 같은 블록 함수로 계산 → 리스크 게이트 → `on_decision(k+1분)`.
+- 봉 k 다음이 결정 주기 B(스펙 timeframe: 5분/1분) 경계이면, 방금 확정된 결정 봉 s = k+1분−B 의 신호
+  (ATR 청산 모드면 ATR 도)를 **후행 창**(`M1History.window`)에서 백테스트와 같은 블록 함수로 계산
+  → 리스크 게이트 → `on_decision(k+1분, ...)`. 업비트 보조 데이터 블록은 업비트 1분봉 이력(aux_hist)으로
+  ctx.aux["upbit"] 를 같은 봉 길이로 만들어 넘긴다.
   블록은 인과적이므로 충분한 lookback 이면 후행 창의 마지막 값 = 전체 이력 평가 값
   (tests/test_paper_trader.py 에서 검증).
 - `risk.should_flatten` 이 참이면 다음 1분봉 시가에 강제 청산(사유 "flatten").
@@ -28,15 +30,16 @@ from typing import Any
 import pandas as pd
 
 from btc_quant.backtest.reference import FillEvent, Position, ReferenceEngine, is_boundary
-from btc_quant.backtest.signals import FIVE_MIN
+from btc_quant.backtest.signals import atr_series
 from btc_quant.backtest.types import COINONE_CONSERVATIVE, CostModel
 from btc_quant.live.risk import RiskManager
 from btc_quant.strategy.blocks import REGISTRY
 from btc_quant.strategy.blocks.base import Context, Registry
-from btc_quant.strategy.features import to_5m
+from btc_quant.strategy.features import to_tf
 from btc_quant.strategy.spec import StrategySpec
 
-from .bars import Bar, M1History, check_live_ready, required_lookback_bars, window_minutes
+from .bars import (Bar, M1History, check_live_ready, required_lookback_bars, spec_aux, ts_minute,
+                   window_minutes)
 from .fills import DEFAULT_NOTIONAL, BookFill, compare_to_model, walk_book
 
 log = logging.getLogger("btc_quant.paper.trader")
@@ -80,37 +83,53 @@ def _jsonable(o: Any) -> Any:
     return o
 
 
-def evaluate_signals(spec: StrategySpec, m1_window: pd.DataFrame, bar5: pd.Timestamp,
-                     registry: Registry = REGISTRY, ctx: Context | None = None) -> dict:
-    """5분봉 bar5 의 신호 값을 m1_window 로부터 계산 (backtest.signals.build_signals 와 같은 결합)."""
-    bars = to_5m(m1_window)
+def evaluate_signals(spec: StrategySpec, m1_window: pd.DataFrame, bar: pd.Timestamp,
+                     registry: Registry = REGISTRY, ctx: Context | None = None,
+                     aux_m1: dict[str, pd.DataFrame] | None = None) -> dict:
+    """결정 봉 bar 의 신호 값을 m1_window 로부터 계산 (backtest.signals.build_signals 와 같은 결합).
+    aux_m1 = {"upbit": 업비트 1분봉 창} 이면 같은 봉 길이로 변환해 ctx.aux 에 넣는다.
+    ATR 청산 모드면 결정 봉의 ATR(`signals.atr_series`)도 계산한다."""
+    tf = spec.tf_min
+    bars = to_tf(m1_window, tf)
     ctx = ctx or Context()
-    out = {"bar5": bar5, "entry": False, "filters": [], "complete": False, "entry_ok": False,
-           "exit_sig": False, "close5": None, "n5": int(len(bars))}
-    if bar5 not in bars.index:
+    if aux_m1:
+        aux = dict(ctx.aux)
+        for k, df in aux_m1.items():
+            aux[k] = to_tf(df, tf) if len(df) else pd.DataFrame(columns=list(df.columns) + ["complete"])
+        ctx = Context(aux=aux, bar=ctx.bar)
+    out = {"bar": bar, "entry": False, "filters": [], "complete": False, "entry_ok": False,
+           "exit_sig": False, "atr": None, "close": None, "n_bars": int(len(bars))}
+    if bar not in bars.index:
         return out
-    entry = bool(registry.evaluate(spec.entry, bars, ctx).loc[bar5])
-    filt = [bool(registry.evaluate(f, bars, ctx).loc[bar5]) for f in spec.filters]
-    complete = bool(bars["complete"].loc[bar5])
-    ex = (bool(registry.evaluate(spec.exit.signal_exit, bars, ctx).loc[bar5])
+    entry = bool(registry.evaluate(spec.entry, bars, ctx).loc[bar])
+    filt = [bool(registry.evaluate(f, bars, ctx).loc[bar]) for f in spec.filters]
+    complete = bool(bars["complete"].loc[bar])
+    ex = (bool(registry.evaluate(spec.exit.signal_exit, bars, ctx).loc[bar])
           if spec.exit.signal_exit is not None else False)
+    atr = None
+    if spec.exit.is_atr:
+        v = float(atr_series(bars, spec.exit.atr_bars).loc[bar])
+        atr = v if math.isfinite(v) else None
     out.update(entry=entry, filters=filt, complete=complete,
-               entry_ok=bool(entry and all(filt) and complete), exit_sig=ex,
-               close5=float(bars["close"].loc[bar5]))
+               entry_ok=bool(entry and all(filt) and complete), exit_sig=ex, atr=atr,
+               close=float(bars["close"].loc[bar]))
     return out
 
 
 class PaperTrader:
     def __init__(self, spec: StrategySpec, cost: CostModel, risk: RiskManager, grade: str = "B", *,
                  key: str | None = None, out_dir: str | Path | None = None,
-                 initial_equity: float = DEFAULT_NOTIONAL, lookback_5m: int | None = None,
+                 initial_equity: float = DEFAULT_NOTIONAL, lookback_bars: int | None = None,
                  start: pd.Timestamp | None = None, registry: Registry = REGISTRY,
                  ctx: Context | None = None, conservative: CostModel = COINONE_CONSERVATIVE,
+                 aux_hist: dict[str, M1History] | None = None,
                  clock=time.time, persist: bool = True):
         if grade not in ("A", "B"):
             raise ValueError("grade must be A or B")
         spec.validate(registry)
-        check_live_ready(spec, registry)
+        self.aux_keys = spec_aux(spec, registry)
+        check_live_ready(spec, registry, available_aux=tuple(aux_hist or ()))
+        self.aux_hist = aux_hist or {}
         if risk.grade != grade:
             log.warning("%s: risk grade %s != trader grade %s", spec.id, risk.grade, grade)
         self.spec, self.cost, self.risk, self.grade = spec, cost, risk, grade
@@ -119,11 +138,12 @@ class PaperTrader:
         self.out_dir = Path(out_dir) if out_dir is not None else None
         self.persist = persist and self.out_dir is not None
         self.clock = clock
-        self.lookback_5m = int(lookback_5m) if lookback_5m else required_lookback_bars(spec, registry)
-        self.window_min = window_minutes(self.lookback_5m)
-        ex = spec.exit
-        self.engine = ReferenceEngine(ex.stop_loss_pct, ex.take_profit_pct, ex.max_hold_min, cost,
-                                      start=start, end=None)
+        self.tf = spec.tf_min                         # 결정 주기 B (분)
+        self.step = pd.Timedelta(minutes=self.tf)
+        self.lookback_bars = int(lookback_bars) if lookback_bars else required_lookback_bars(spec, registry)
+        self.window_min = window_minutes(self.lookback_bars, self.tf)
+        self.engine = ReferenceEngine.from_exit(spec.exit, cost, start=start, end=None,
+                                                timeframe=spec.timeframe)
         self.initial_equity = float(initial_equity)
         self.equity = float(initial_equity)          # 실현 자산 (청산마다 복리)
         self.qty = 0.0                               # 보유 수량 (BTC)
@@ -198,7 +218,7 @@ class PaperTrader:
             t = hist.last_ts + ONE_MIN
             self.risk.on_market_data(_dt(t), price=hist.last_close)
             self.risk.on_equity(_dt(t), self.equity)
-            if is_boundary(t):
+            if is_boundary(t, self.tf):
                 self._decide(t, hist, book, live=True)
             self._log("risk", {"type": "attach", "ts": t, "mode": "fresh", "start": self.engine.start})
             if self.persist:
@@ -249,8 +269,8 @@ class PaperTrader:
             self.pending_flatten = why
             self._log("risk", {"type": "flatten_pending", "ts": t_close, "reason": why})
 
-        # 4) 5분 경계 결정 (다음 봉 시가 직전)
-        if is_boundary(t_close):
+        # 4) 결정 주기 경계 결정 (다음 봉 시가 직전)
+        if is_boundary(t_close, self.tf):
             self._decide(t_close, hist, book, live)
 
         # 5) 다음 봉 시가 근처 호가 = 지금 호가
@@ -265,14 +285,18 @@ class PaperTrader:
         return events
 
     def _decide(self, t: pd.Timestamp, hist: M1History, book: dict | None, live: bool) -> None:
-        bar5 = t - FIVE_MIN
+        bar = t - self.step
         win = hist.window(t - ONE_MIN, self.window_min)
-        sig = evaluate_signals(self.spec, win, bar5, self.registry, self.ctx)
+        aux_m1 = None
+        if self.aux_keys:
+            lo = ts_minute(win.index[0]) if len(win) else ts_minute(t)
+            aux_m1 = {k: self.aux_hist[k].frame(lo, ts_minute(t - ONE_MIN)) for k in self.aux_keys}
+        sig = evaluate_signals(self.spec, win, bar, self.registry, self.ctx, aux_m1)
         ok, why = self.risk.can_enter(_dt(t))
         pos = self.engine.position is not None
         cooldown = self.engine.cooldown_until is not None and t < self.engine.cooldown_until
         entry_ok = bool(sig["entry_ok"] and ok)
-        self.engine.on_decision(t, entry_ok, sig["exit_sig"])
+        self.engine.on_decision(t, entry_ok, sig["exit_sig"], sig["atr"])
         self.n_decisions += 1
         rec = {"type": "decision", "ts": t, **sig, "risk_ok": ok, "risk_reason": why,
                "entry_ok_gated": entry_ok, "in_position": pos, "cooldown": bool(cooldown),
@@ -288,9 +312,8 @@ class PaperTrader:
     def _on_fill(self, ev: FillEvent, bar: Bar, book_now: dict | None, live: bool) -> list[dict]:
         now = self.clock()
         if ev.side == "buy":
-            ex = self.spec.exit          # 같은 봉에서 청산까지 되면 engine.position 은 이미 None
-            sl, tp = ev.ref_price * (1 - ex.stop_loss_pct / 100), ev.ref_price * (1 + ex.take_profit_pct / 100)
-            expiry = ev.ts + pd.Timedelta(minutes=int(ex.max_hold_min))
+            sl, tp = ev.sl, ev.tp        # 같은 봉에서 청산까지 되면 engine.position 은 이미 None
+            expiry = ev.ts + pd.Timedelta(minutes=int(self.spec.exit.max_hold_min))
             notional = self.equity
             bf = (walk_book(self.book_open, "buy", notional=notional, now=self.book_open_wall)
                   if self.book_open else None)
@@ -351,11 +374,11 @@ class PaperTrader:
         if e.position is not None:
             p = e.position
             pos = {"entry_time": _iso(p.entry_time), "ref": p.ref, "entry_price": p.entry_price,
-                   "sl": p.sl, "tp": p.tp, "expiry": _iso(p.expiry)}
+                   "sl": p.sl, "tp": p.tp, "expiry": _iso(p.expiry), "atr_frac": p.atr_frac}
         dec = None
         if e.decision is not None:
             dec = {"ts": _iso(e.decision.ts), "entry_ok": e.decision.entry_ok,
-                   "exit_sig": e.decision.exit_sig}
+                   "exit_sig": e.decision.exit_sig, "atr": e.decision.atr}
         return _jsonable({
             "version": STATE_VERSION, "key": self.key, "spec_id": self.spec.id,
             "spec_version": self.spec.version, "logic_hash": self.spec.logic_hash(),
@@ -365,7 +388,7 @@ class PaperTrader:
             "position": pos, "cooldown_until": _iso(e.cooldown_until), "decision": dec,
             "pending_flatten": self.pending_flatten, "entry_cmp": self.entry_cmp,
             "n_trades": self.n_trades, "n_decisions": self.n_decisions,
-            "lookback_5m": self.lookback_5m, "saved_at": time.time(),
+            "timeframe": self.spec.timeframe, "lookback_bars": self.lookback_bars, "saved_at": time.time(),
         })
 
     def save_state(self) -> None:
@@ -399,10 +422,10 @@ class PaperTrader:
         pos = d.get("position")
         e.position = None if pos is None else Position(
             _ts(pos["entry_time"]), float(pos["ref"]), float(pos["entry_price"]), float(pos["sl"]),
-            float(pos["tp"]), _ts(pos["expiry"]))
+            float(pos["tp"]), _ts(pos["expiry"]), pos.get("atr_frac"))
         dec = d.get("decision")
         if dec is not None:
-            e.on_decision(_ts(dec["ts"]), dec["entry_ok"], dec["exit_sig"])
+            e.on_decision(_ts(dec["ts"]), dec["entry_ok"], dec["exit_sig"], dec.get("atr"))
         self.pending_flatten = d.get("pending_flatten")
         self.entry_cmp = d.get("entry_cmp")
         self.n_trades = int(d.get("n_trades", 0))

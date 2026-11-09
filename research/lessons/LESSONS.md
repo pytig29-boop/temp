@@ -3,7 +3,7 @@
 > `btc_quant.research.lessons.render_markdown()` 생성물. **직접 편집 금지** (원본: `research/lessons/*.jsonl`).
 > 사실(Facts)은 파이프라인 결과에서 자동 추출되어 불변이다. 해석(Interpretations)은 AI 작성이며
 > 후속 캠페인으로 verified/refuted 되기 전까지 **unverified** 이다. Val/잠금은 결과 코드만.
-> 생성: 2026-11-09T12:53:27+00:00 · 사실 0 · 해석 0 · 사후분석 4 · 파생 0
+> 생성: 2026-11-09T13:01:35+00:00 · 사실 0 · 해석 0 · 사후분석 4 · 파생 0
 
 ## 실패 유형 (자동 분류)
 

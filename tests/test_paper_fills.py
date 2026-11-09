@@ -85,7 +85,7 @@ def test_trader_records_book_fill(tmp_path):
     risk = RiskManager(RiskLimits(-0.5, -0.5, -0.5, 100, stale_seconds=1e9), "bk", "B", kill_dir=None)
     cost = CostModel("c", 0.0, 2.0, 3.0)
     tr = PaperTrader(spec, cost, risk, "B", out_dir=tmp_path, initial_equity=250_040.0,
-                     lookback_5m=20, clock=lambda: 1_794_225_901.0)
+                     lookback_bars=20, clock=lambda: 1_794_225_901.0)
     tr.attach(hist, BOOK)                                  # 결정 시점 호가
     bar = Bar(t0, 100_000, 100_000, 100_000, 100_000, 1, False)
     for nb in hist.append(bar):

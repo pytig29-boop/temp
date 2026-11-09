@@ -40,7 +40,7 @@ from btc_quant.live.ws_collector import Collector, CollectorConfig
 from btc_quant.strategy.spec import StrategySpec
 
 from .bars import (DEFAULT_WARMUP_DAYS, MAX_WARMUP_DAYS, M1History, MinuteBarBuilder, fetch_warmup,
-                   minute_ts, required_lookback_bars, window_minutes)
+                   minute_ts, required_lookback_bars, spec_aux, window_minutes)
 from .fills import DEFAULT_NOTIONAL
 from .trader import PaperTrader, strategy_key
 
@@ -201,14 +201,26 @@ class PaperService:
         self.clock = clock
         self.cost = COSTS[self.cfg.cost]
         self.cfg.out.mkdir(parents=True, exist_ok=True)
+        # 업비트 보조 데이터(ctx.aux["upbit"]): 필요한 전략이 있을 때만 업비트 1분봉 이력을 만든다
+        self.need_upbit = any("upbit" in spec_aux(s.spec) for s in slots)
+        if self.need_upbit and "upbit" not in self.cfg.exchanges:
+            raise ValueError("a strategy needs upbit aux data but upbit stream is disabled")
+        self.aux_builders: dict[str, MinuteBarBuilder] = {}
+        self.aux_hist: dict[str, M1History] = {}
+        if self.need_upbit:
+            self.aux_builders["upbit"] = MinuteBarBuilder(self.cfg.grace_seconds)
+            self.aux_hist["upbit"] = M1History(max_rows=1)   # 크기는 아래에서 재설정
         self.traders: dict[str, PaperTrader] = {}
         for s in slots:
             self.traders[s.key] = self._make_trader(s)
-        self.lookback_min = max(window_minutes(t.lookback_5m) for t in self.traders.values())
+        self.lookback_min = max(t.window_min for t in self.traders.values())
         self.builder = MinuteBarBuilder(self.cfg.grace_seconds)
         self.hist = M1History(max_rows=self.lookback_min + 2 * 1440)
+        for h in self.aux_hist.values():
+            h.max_rows = self.hist.max_rows
         self.ready = False
         self.pending: list = []
+        self.aux_pending: dict[str, list] = {}
         self.book: dict | None = None
         self.ref_price: float | None = None
         self.ref_recv: float | None = None
@@ -241,15 +253,16 @@ class PaperService:
         lb = required_lookback_bars(s.spec, default_days=self.cfg.warmup_days,
                                     max_days=self.cfg.max_warmup_days)
         tr = PaperTrader(s.spec, self.cost, risk, s.grade, out_dir=out, initial_equity=self.cfg.notional,
-                         lookback_5m=lb, clock=self.clock)
+                         lookback_bars=lb, clock=self.clock, aux_hist=self.aux_hist)
         restored = tr.load_state()
         (out / "spec.yaml").write_text(s.spec.to_yaml(), encoding="utf-8")
         (out / "meta.json").write_text(json.dumps({
             "key": s.key, "role": s.role, "grade": s.grade, "source": s.source, "cost": self.cost.name,
             "limits": {f.name: getattr(s.limits, f.name) for f in fields(RiskLimits)},
-            "lookback_5m": lb, "restored": restored}, ensure_ascii=False, indent=1))
-        log.info("trader %s (%s, grade %s, lookback %d×5m, %s)", s.key, s.role, s.grade, lb,
-                 "restored" if restored else "fresh")
+            "timeframe": s.spec.timeframe, "lookback_bars": lb, "aux": list(spec_aux(s.spec)),
+            "restored": restored}, ensure_ascii=False, indent=1))
+        log.info("trader %s (%s, grade %s, timeframe %s, lookback %d bars, %s)", s.key, s.role, s.grade,
+                 s.spec.timeframe, lb, "restored" if restored else "fresh")
         return tr
 
     def _make_collector(self) -> Collector:
@@ -303,10 +316,11 @@ class PaperService:
                 self.book = row
             elif ex == "upbit" and kind == "trades":
                 self.ref_price, self.ref_recv = float(row["price"]), now
+                if "upbit" in self.aux_builders and self.builder.next_minute is not None:
+                    self.aux_builders["upbit"].on_trade(row["ts_exchange"], row["price"], row["qty"])
             elif ex == "coinone" and kind == "trades":
                 if self.first_trade_wall is None:
-                    self.first_trade_wall = now
-                    self.builder.start_at(int(now // 60) + 1)
+                    self._start_bars(int(now // 60) + 1, now)
                 self.builder.on_trade(row["ts_exchange"], row["price"], row["qty"])
                 ref = (self.ref_price if self.ref_recv is not None
                        and now - self.ref_recv <= self.cfg.ref_max_age else None)
@@ -322,9 +336,23 @@ class PaperService:
             self.errors += 1
             log.exception("on_event failed (%s/%s)", ex, kind)
 
+    def _start_bars(self, minute: int, now: float) -> None:
+        self.first_trade_wall = now
+        self.builder.start_at(minute)
+        for b in self.aux_builders.values():
+            b.start_at(minute)
+
     def process(self, now: float | None = None) -> int:
-        """닫을 수 있는 분을 닫아 트레이더에 전달. 처리한 봉 수."""
+        """닫을 수 있는 분을 닫아 트레이더에 전달. 처리한 봉 수.
+        보조(업비트) 봉을 먼저 닫아 이력에 넣으므로 결정 시점에 같은 분까지의 보조 데이터가 준비된다."""
         now = self.clock() if now is None else now
+        for k, b in self.aux_builders.items():
+            aux_bars = b.on_time(now)
+            if not self.ready:
+                self.aux_pending.setdefault(k, []).extend(aux_bars)
+            else:
+                for bar in aux_bars:
+                    self.aux_hist[k].append(bar)
         bars = self.builder.on_time(now)
         if not self.ready:
             self.pending += bars
@@ -353,8 +381,7 @@ class PaperService:
             if self.clock() - t0 > self.cfg.first_trade_timeout:
                 # 체결이 안 들어와도 시작은 한다(봉은 filled, 리스크가 stale 로 진입 차단)
                 m = int(self.clock() // 60) + 1
-                self.builder.start_at(m)
-                self.first_trade_wall = self.clock()
+                self._start_bars(m, self.clock())
                 log.warning("no coinone trades for %.0fs; starting bars at %s", self.cfg.first_trade_timeout,
                             minute_ts(m))
                 break
@@ -365,21 +392,13 @@ class PaperService:
             await asyncio.sleep(wait)
         end = minute_ts(m0)
         log.info("warm-up: fetching %d min of coinone 1m candles up to %s", self.lookback_min, end)
-        attempt = 0
-        while True:
-            try:
-                raw = await asyncio.to_thread(fetch_warmup, end, self.lookback_min, "KRW-BTC", self.fetch)
-                if raw is not None and len(raw):
-                    break
-                err = "empty response"
-            except Exception as e:     # 네트워크·요청 제한 등 → 재시도 (실시간 봉은 대기열에 쌓인다)
-                err = f"{type(e).__name__}: {e}"
-            attempt += 1
-            delay = min(60.0, 5.0 * 2 ** (attempt - 1))
-            log.warning("warm-up fetch failed (%s); retry %d in %.0fs", err, attempt, delay)
-            if attempt == 3:
-                self.notify(f"[paper] 워밍업 REST 실패 3회: {err}", "warning")
-            await asyncio.sleep(delay)
+        raw = await self._fetch_retry(end, "coinone")
+        for k in self.aux_hist:
+            araw = await self._fetch_retry(end, k)
+            self.aux_hist[k].seed(araw)
+            for bar in self.aux_pending.pop(k, []):
+                self.aux_hist[k].append(bar)
+            log.info("warm-up %s: %d bars → %s", k, len(self.aux_hist[k]), self.aux_hist[k].last_ts)
         n = self.hist.seed(raw)
         log.info("warm-up: %d bars (%s → %s)", n, self.hist.first_ts, self.hist.last_ts)
         for key, tr in self.traders.items():
@@ -393,6 +412,26 @@ class PaperService:
         self._feed(pending)
         self.notify(f"[paper] 시작: {', '.join(f'{s.key}({s.role},{s.grade})' for s in self.slots)} "
                     f"/ 워밍업 {n}봉, 비용 {self.cost.name}")
+
+    async def _fetch_retry(self, end: pd.Timestamp, exchange: str) -> pd.DataFrame:
+        fetch = self.fetch.get(exchange) if isinstance(self.fetch, dict) else (
+            self.fetch if exchange == "coinone" else None)
+        attempt = 0
+        while True:
+            try:
+                raw = await asyncio.to_thread(fetch_warmup, end, self.lookback_min, "KRW-BTC", fetch,
+                                              exchange)
+                if raw is not None and len(raw):
+                    return raw
+                err = "empty response"
+            except Exception as e:     # 네트워크·요청 제한 등 → 재시도 (실시간 봉은 대기열에 쌓인다)
+                err = f"{type(e).__name__}: {e}"
+            attempt += 1
+            delay = min(60.0, 5.0 * 2 ** (attempt - 1))
+            log.warning("warm-up fetch %s failed (%s); retry %d in %.0fs", exchange, err, attempt, delay)
+            if attempt == 3:
+                self.notify(f"[paper] 워밍업 REST({exchange}) 실패 3회: {err}", "warning")
+            await asyncio.sleep(delay)
 
     # ------------------------------------------------------------------ 하트비트·요약
     def heartbeat(self) -> dict:
@@ -620,7 +659,7 @@ def compare_trades(paper: pd.DataFrame, bt: pd.DataFrame, tol: float = 1e-9) -> 
 
 
 def build_report(key_dir: Path, start=None, end=None, m1: pd.DataFrame | None = None,
-                 fetch: Callable | None = None) -> dict:
+                 fetch: Callable | None = None, aux_m1: dict[str, pd.DataFrame] | None = None) -> dict:
     """페이퍼 vs 백테스트 (같은 기간·같은 스펙·같은 비용 모델). m1 이 없으면 코인원 REST 로 받는다.
 
     백테스트에는 리스크 게이트가 없으므로 게이트로 막힌 진입은 backtest_only 로 나타난다(blocked_by_risk 참조).
@@ -628,6 +667,8 @@ def build_report(key_dir: Path, start=None, end=None, m1: pd.DataFrame | None = 
     from btc_quant.backtest.reference import run_reference
     from btc_quant.backtest.types import TRADE_COLUMNS
     from btc_quant.data import quality
+    from btc_quant.strategy.blocks.base import Context
+    from btc_quant.strategy.features import to_tf
 
     from .fills import slippage_stats
 
@@ -639,12 +680,22 @@ def build_report(key_dir: Path, start=None, end=None, m1: pd.DataFrame | None = 
     end = pd.Timestamp(end) if end is not None else pd.Timestamp(st["last_ts"]) + pd.Timedelta("1min")
     start = start.tz_localize("UTC") if start.tzinfo is None else start.tz_convert("UTC")
     end = end.tz_localize("UTC") if end.tzinfo is None else end.tz_convert("UTC")
+    lb = int(st.get("lookback_bars") or required_lookback_bars(spec))
+    minutes = (int((end - start) / pd.Timedelta("1min")) + window_minutes(lb, spec.tf_min)
+               + spec.exit.max_hold_min + 5)
+    fetch_end = end + pd.Timedelta(minutes=spec.exit.max_hold_min + 5)
     if m1 is None:
-        lb = int(st.get("lookback_5m") or required_lookback_bars(spec))
-        minutes = int((end - start) / pd.Timedelta("1min")) + window_minutes(lb) + spec.exit.max_hold_min + 5
-        raw = fetch_warmup(end + pd.Timedelta(minutes=spec.exit.max_hold_min + 5), minutes, fetch=fetch)
+        raw = fetch_warmup(fetch_end, minutes, fetch=fetch)
         m1 = quality.regularize(quality.clean_wicks(raw))
-    bt = run_reference(spec, m1, cost, start, end).trades
+    ctx = None
+    keys = spec_aux(spec)
+    if keys:
+        aux_m1 = dict(aux_m1 or {})
+        for k in keys:
+            if k not in aux_m1:
+                aux_m1[k] = quality.regularize(quality.clean_wicks(fetch_warmup(fetch_end, minutes, exchange=k)))
+        ctx = Context(aux={k: to_tf(aux_m1[k], spec.tf_min) for k in keys})
+    bt = run_reference(spec, m1, cost, start, end, ctx=ctx).trades
     trades = [t for t in read_jsonl(key_dir / "trades.jsonl")
               if start <= pd.Timestamp(t["entry_time"]) < end]
     paper = pd.DataFrame(trades, columns=TRADE_COLUMNS + ["live", "book_net_ret"])

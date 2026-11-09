@@ -1,7 +1,8 @@
 # AI 연구 체계 — 연구 모드 운용 가이드
 
-> PLAN §3.3(AI 권한), §5(캠페인·관문·잠금), §6(레지스트리), §8(AI 연구 체계)의 Claude Code 쪽 구현.
+> PLAN §3.3(AI 권한), §5(캠페인·관문·잠금), §6(레지스트리), §8(AI 연구 체계), §10b(v4 개선)의 Claude Code 쪽 구현.
 > 구성 파일: `.claude/settings.json`, `.claude/hooks/guard.py`, `.claude/agents/*.md`, `.claude/skills/*/SKILL.md`.
+> 연구 입력: `research/knowledge/`(사전 지식, 노출 태그), `research/lessons/`(오답노트, `btc_quant.research.lessons`).
 
 ## 1. 개요
 
@@ -9,13 +10,14 @@
 |---|---|---|
 | Hook (PreToolUse) | `.claude/hooks/guard.py` | 연구 모드에서 보호 경로 쓰기·사람 전용 명령·잠금 데이터 읽기 차단, 모든 도구 호출 로그 |
 | 권한 규칙 | `.claude/settings.json` `permissions.deny` | 모드와 무관하게 항상: `.env`, `runtime/secrets/**`, 키 파일, `~/.ssh` 읽기 금지, 강제 push 금지 등 |
-| Subagent | `researcher` | 가설 → 캠페인 실행 → 리포트 (연구 도구만 사용) |
-| | `skeptic` | 후보를 깨뜨리려 시도, 구조화된 판정 출력 (파일 쓰기 도구 없음) |
-| | `data-steward` | 데이터 품질·커버리지 점검 |
-| Skill | `research-campaign` | 가설 사전등록 → 격자·예산 고정 → 실행 → 관문 → 기여도 → 리포트 |
-| | `candidate-review` | 반대 논리 심사 체크리스트 + 리포트 양식 |
-| | `block-authoring` | 새 블록 제안(계약·인과성 테스트·BLOCKS.md) — 사람 머지 필요 |
-| | `daily-report` | 아침 리포트 |
+| Subagent | `researcher` | 지식 베이스·오답노트·유사 탐색 → 메커니즘·반대편 → 신호 선별 → 검정력 → 원칙적 청산 캠페인 → 관문 → 견고성 → 오답노트 → 리포트 |
+| | `skeptic` | **결과를 보기 전에 예상 실패 유형을 먼저 기록**, 자동 견고성 묶음을 증거로 판정(수치 인용 필수). 파일 쓰기 도구 없음 |
+| | `data-steward` | 데이터 품질·커버리지 점검 (코인원 봇성 체결 오염 주의) |
+| Skill | `research-campaign` | v4 캠페인 전체 절차 (§5) |
+| | `lessons-review` | 오답노트: 사실 기록·해석(미검증)·검증 표시·파생 가설·유사 탐색·사후분석·주간 점검 (§6) |
+| | `candidate-review` | 예상 실패 유형 사전 기록 + 견고성 묶음 + 반대 논리 체크리스트 + 리포트 양식 |
+| | `block-authoring` | 새 블록 = 실험 블록(D11, 자동 수용 검사), 근거에 메커니즘·노출 표기 |
+| | `daily-report` | 아침 리포트 (오답노트·주간 예산 포함) |
 
 MCP 서버(`list_blocks`, `register_hypothesis`, `create_campaign`, `run_campaign`, `run_gates`, `run_ablation`,
 `query_ledger`, `compare`, `request_lockbox_eval`, `write_report`)는 이후 마일스톤에서 구현된다.
@@ -61,6 +63,7 @@ claude -p "daily-report skill로 오늘 아침 리포트 작성"
 | `strategies/{active,review,retired}/**` | 승인·운용 전략은 레지스트리 코드 + 사람 승인으로만 변경 (§6) |
 | `config/gates.yaml`, `config/splits.yaml`, `config/risk*.yaml` | 관문·분할·리스크 공식은 고정, 변경은 사람만 (§2.1, §5.2, §7) |
 | `research/ledger/**` | 원장은 append-only, `Ledger` Python API로만 추가 |
+| `research/lessons/*.jsonl`, `research/lessons/.lock`, `research/lessons/LESSONS.md` (README.md 제외) | 오답노트 사실은 불변, 해석·표시·사후분석은 `btc_quant.research.lessons` API로만 추가, LESSONS.md는 생성물 |
 | `research/lockbox_approvals/**`, `research/activation_approvals/**` | 사람 승인 기록 |
 | `src/btc_quant/{backtest,evaluation,registry,data}/**` | 엔진·관문·레지스트리·데이터 코드는 AI 수정 불가 (§3.3) |
 | `data/raw/**` | 원천 데이터는 수집기만 기록 |
@@ -69,7 +72,7 @@ claude -p "daily-report skill로 오늘 아침 리포트 작성"
 
 허용: `src/btc_quant/strategy/blocks/**`(새 블록 **제안** — block-authoring skill이 테스트·문서를 요구하고
 사람이 머지), `tests/**`, `strategies/draft/**` 등 나머지 상태 폴더(전이는 레지스트리 코드가 검증),
-`research/reports/**`, `docs/BLOCKS.md` 등.
+`research/reports/**`, `research/knowledge/**`, `research/lessons/README.md`, `docs/BLOCKS.md` 등.
 
 ### 4.2 명령 차단 (Bash)
 - 사람 전용 관리 CLI: `admin_cli`(읽기 전용 `status` 포함), `approve-lockbox`, `activate`, `rollback`,
@@ -96,7 +99,59 @@ claude -p "daily-report skill로 오늘 아침 리포트 작성"
 `.env`·`.env.*` 읽기/편집, `runtime/secrets/**`, `runtime/**/*.key|*.pem`, `~/.ssh`, `~/.aws` 읽기,
 `git push --force/-f`, `rm -rf /`·`rm -rf ~`. 일반 개발 작업은 막지 않는다.
 
-## 5. 한계 (정직하게)
+## 5. v4 연구 절차 (PLAN §10b)
+
+```
+⓪ 지식 베이스 + 오답노트 + find_similar + 주간 예산 ─▶ ① 가설: 메커니즘·반대편·범위·노출 표기
+   ─▶ ② 신호 선별(이벤트 스터디, 청산 없음) ─▶ ③ 검정력 계산 ─▶ ④ 전략 캠페인(진입 고정, ATR 청산 ≤ 6)
+   ─▶ ⑤ G0~G5 → 기여도 → 견고성 묶음 → skeptic → G6(Val, 결과 코드만) ─▶ ⑥ 오답노트 사실·해석 → 리포트
+```
+| 단계 | 내용 | API |
+|---|---|---|
+| ⓪ 읽기 | `research/knowledge/*.md`(잠금·Val 노출 태그), `research/lessons/LESSONS.md`, 원장 계열 시도 수 | `LessonBook().find_similar(template=, text=)`, `trial_budget(family)` |
+| ① 가설 | 한 문장 + **메커니즘 + 반대편(누가 잃어 주나)** + 무엇이 죽이나 + 범위. 교훈에서 나온 가설은 파생 가설(계열 상속) | `derive_hypothesis` → `apply_derivation` → `check_template` |
+| ② 신호 선별 | 진입(+필터) 이벤트 스터디 vs 매칭 귀무, 계열 단위 다중검정(BH). 통과 신호만 전략화 | `btc_quant.research.signal_study.screen`, `record_facts_from_screen` |
+| ③ 검정력 | 계획 격자의 실질 시도 수에서 G5 통과 최소 Sharpe | `btc_quant.research.power` (CLI `--days --grid --family --target`) |
+| ④ 전략 캠페인 | 진입·필터 고정, 청산 = ATR 배수 SL/TP + 정보 지평 기반 최대 보유, **청산 변형 ≤ 6** | `research.cli run <template>` |
+| ⑤ 관문·견고성 | G0~G6 파이프라인(Val 예산·누적 Holm), 견고성 묶음(지연·상위 거래 제거·연도 제외·비용 ×1.5·국면·알파·거래소 재현), skeptic | `pipeline.run_pipeline`, `robustness.robustness_for_spec` |
+| ⑥ 오답노트 | 사실 자동 기록 → 해석 0~3개(미검증) → 이전 해석 검증/반박 표시 → 사후분석 | `record_facts_from_pipeline`, `add_interpretation`, `mark`, `postmortem`, `render_markdown` |
+
+## 6. 오답노트 (`research/lessons/`, `btc_quant.research.lessons`)
+
+비판적 검토에서 나온 요구를 코드로 강제한다. 상세: `research/lessons/README.md`.
+
+| 요구 | 구현 |
+|---|---|
+| 사실과 해석 분리 | 사실 = pipeline.json·신호 선별 결과에서 자동 추출, 수정 API 없음, 줄마다 내용 해시(`verify()`), 연구 모드에서 파일 직접 쓰기 차단. 해석 = AI 작성, 항상 `unverified`로 시작, 신뢰도·근거 필수 |
+| 검증 표시 | `mark(int_id, verified/refuted, by_campaign)` — 사실이 기록된 **후속 캠페인**(원 캠페인과 다르고 해석보다 나중)만 근거 |
+| 자동 실패 분류 | G0→IMPL_OR_DATA_ISSUE, G1→LOW_SAMPLE, G2→NO_SIGNAL(비용 전 +·비용 후 −면 COST_EATEN), G3→PARAM_SPIKE, G4→UNSTABLE, G5→SELECTION_BIAS, G6→VAL_FAIL(엔진 불일치는 IMPL_OR_DATA_ISSUE 추가), 견고성: 상위 거래→OUTLIER_DEPENDENT, 연도·국면·거래소→REGIME_DEPENDENT, 지연→LATENCY_SENSITIVE, 비용→COST_EATEN, 알파→NO_SIGNAL, 그 밖→UNCLASSIFIED |
+| 파생 가설 시도 비용 상속 | `derive_hypothesis(parent, …)` 는 부모 계열을 강제(`FamilyInheritanceError`). 새 계열 이름은 `human_override=True` + 사유, **연구 모드에서는 거부**. 템플릿에 `[derived-from drv-…]` 태그 → `check_template`·사실 기록 때 계열 일치 점검(`family_check`) |
+| Val/잠금은 결과 코드만 | 사실 기록기는 G6/G7·grade_checks·risk_limits·val_* 필드를 제거하고 `val_outcome`·`val_aggregate`(정수)·`lockbox_outcome` 만 남김. AI 입력(해석·근거·사후분석)은 Val/잠금 수치 문장을 거부(`RestrictedInfoError`, 휴리스틱) |
+| 범위·만료 | 사실마다 scope(거래소·시간축·구간·블록·스냅샷·커밋), `review_after`(180일), `reexamine_if` |
+| 과정 사후분석 | `postmortem(...)` 별도 레코드(근본 원인·재발 방지). 실제 사건 4건 기록됨: Phase 0 잠금 노출, G2 귀무 거래 수 편향, `.gitignore` data/ 패턴, DSR 검정력(청산 격자 ×80 → v4) |
+| 중복 방지 | `find_similar`: 같은 진입·필터 블록 + 모든 격자 겹침 → exact, 블록만 같음 → same_blocks/same_entry, 텍스트 토큰 Jaccard → fuzzy. 결과(사실 기록의 taxonomy)·계열 누적 시도 수를 함께 보여 줌 |
+
+통합: 파이프라인 끝에서 `btc_quant.research.lessons.record_facts_from_pipeline(out_or_path, root=…)`
+(멱등, LESSONS.md 재생성). 선별은 `record_facts_from_screen(result)`.
+
+## 7. 주간 시도 예산 (계열별 배분 규칙)
+
+`LessonBook().trial_budget(family)` 가 계산한다(자문용 — 코드가 실행을 막지는 않지만 researcher 는 지켜야 한다).
+시도 = 원장 runs 의 고유 (campaign_id, logic_hash), 최근 7일 기준.
+
+| 규칙 | 값 |
+|---|---|
+| 전역 상한 | 2,000 새 시도 / 7일 |
+| 기본 계열 | 600 / 7일 |
+| 새 계열(사실 기록 없음) | 300 / 7일 — 신호 선별부터 |
+| 유망 계열(최근 캠페인에 Dev 생존자 또는 Val 통과) | 900 / 7일 |
+| 동결 계열(최근 2개 캠페인 주 실패 유형이 모두 NO_SIGNAL·COST_EATEN) | 0 — 재검토 조건 충족 또는 사람 해제까지 |
+| 남은 예산 | min(계열 허용 − 계열 사용, 전역 상한 − 전역 사용) |
+
+근거: 실질 시도가 늘수록 G5 통과에 필요한 Sharpe 가 오른다(PLAN §10b 표). 예산은 "많이 돌려 하나 걸리기"를
+막고, 신호 선별(구성당 1시도)과 원칙적 청산(≤ 6)으로 시도를 아끼게 한다.
+
+## 8. 한계 (정직하게)
 
 - **hook은 경보선(tripwire)이지 샌드박스가 아니다.** Bash 검사는 명령 문자열에 대한 정규식 휴리스틱이다.
   `cd config && sed -i … gates.yaml`, 변수·글롭으로 조립한 경로, Python 코드 안에서 문자열을 만들어
@@ -114,9 +169,14 @@ claude -p "daily-report skill로 오늘 아침 리포트 작성"
 - hook은 `.claude/settings.json`에 등록되어 있으므로, 이 파일이 로드되지 않는 실행 방식(설정 파일을
   무시하는 옵션, 프로젝트 밖에서 시작 등)에서는 동작하지 않는다.
 
-## 6. 개발자용
+- 오답노트의 Val/잠금 문장 필터는 정규식 휴리스틱이다(지표 단어 + Val/잠금 단어 + 숫자). 우회 가능하므로
+  규칙 자체(결과 코드만)를 지키는 것이 우선이다. 주간 예산은 자문 값이며 실행을 막지 않는다.
+- 계열 override 의 연구 모드 거부는 `BTCQ_RESEARCH_MODE` 환경 변수에 의존한다(셸에서 unset 가능 — 경보선).
 
-- 테스트: `uv run pytest -q tests/test_guard_hook.py` (hook을 하위 프로세스로 실행, 모드 on/off·허용/거부 사례).
+## 9. 개발자용
+
+- 테스트: `uv run pytest -q tests/test_guard_hook.py` (hook을 하위 프로세스로 실행, 모드 on/off·허용/거부 사례),
+  `uv run pytest -q tests/test_research_lessons.py` (오답노트: 분류·불변성·계열 상속·Val 차단·유사 탐색·사후분석).
 - 보호 경로 추가: `guard.py`의 `PROTECTED_WRITE` 목록에 (정규식, 이유) 추가 후 테스트 보강.
 - hook 프로토콜 참고: <https://code.claude.com/docs/en/hooks> (PreToolUse 입력 `tool_name`/`tool_input`/`cwd`,
   출력 `hookSpecificOutput.permissionDecision = "deny"` + `permissionDecisionReason`),
