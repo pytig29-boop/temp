@@ -59,6 +59,17 @@ class BlockDef:
     rationale: str = ""             # 메커니즘/가설: 왜 이 신호가 미래 수익과 관련될 수 있는가
     # 선택: 파라미터 → 마지막 봉 값을 정확히 재현하는 데 필요한 최소 봉 수 (후행 창 평가용, paper/)
     lookback_bars: Callable[[dict], int] | None = None
+    # 결정 주기 호환성 (docs/BLOCKS.md "결정 주기 호환성"): 봉 길이(분)가 max_tf_min 을 넘으면 의미가 없어
+    # 검증(`Registry.check(..., tf_min=)` ← StrategySpec.validate)에서 거부. None = 제한 없음.
+    max_tf_min: int | None = None
+    tf_note: str = ""               # 긴 봉에서의 의미 변화·주의 (거부 사유 또는 '거칠어짐' 경고)
+
+    def tf_problem(self, tf_min: int) -> str | None:
+        """결정 주기 tf_min(분)에서 이 블록이 무의미하면 그 사유, 아니면 None."""
+        if self.max_tf_min is not None and int(tf_min) > int(self.max_tf_min):
+            return (f"block {self.name} is meaningless at a {int(tf_min)}-minute decision bar "
+                    f"(max {self.max_tf_min} min): {self.tf_note or 'see docs/BLOCKS.md'}")
+        return None
 
     @property
     def experimental(self) -> bool:
@@ -88,7 +99,8 @@ class Registry:
     def register(self, kind: str, grid: dict[str, list], description: str,
                  requires: tuple[str, ...] = (), live_ready: bool = True, name: str | None = None, *,
                  status: str = "official", author: str = "", created: str = "", rationale: str = "",
-                 lookback_bars: Callable[[dict], int] | None = None):
+                 lookback_bars: Callable[[dict], int] | None = None,
+                 max_tf_min: int | None = None, tf_note: str = ""):
         if kind not in KINDS:
             raise ValueError(kind)
         if status not in STATUSES:
@@ -105,7 +117,7 @@ class Registry:
                 raise ValueError(f"duplicate block {n}")
             self._defs[n] = BlockDef(n, kind, fn, grid, description, requires, live_ready,
                                      status=status, author=author, created=created, rationale=rationale,
-                                     lookback_bars=lookback_bars)
+                                     lookback_bars=lookback_bars, max_tf_min=max_tf_min, tf_note=tf_note)
             return fn
         return deco
 
@@ -113,11 +125,12 @@ class Registry:
                               author: str, created: str, rationale: str,
                               requires: tuple[str, ...] = (), live_ready: bool = True,
                               name: str | None = None,
-                              lookback_bars: Callable[[dict], int] | None = None):
+                              lookback_bars: Callable[[dict], int] | None = None,
+                              max_tf_min: int | None = None, tf_note: str = ""):
         """실험 블록 등록 (출처 필수). `blocks/experimental/*.py` 에서 사용."""
         return self.register(kind, grid, description, requires=requires, live_ready=live_ready, name=name,
                              status="experimental", author=author, created=created, rationale=rationale,
-                             lookback_bars=lookback_bars)
+                             lookback_bars=lookback_bars, max_tf_min=max_tf_min, tf_note=tf_note)
 
     # ------------------------------------------------------------ 조회
     def get(self, name: str) -> BlockDef:
@@ -158,7 +171,12 @@ class Registry:
         raise PromotionError(PROMOTION_STEPS.format(name=name, module=getattr(d.fn, "__module__", "?")))
 
     # ------------------------------------------------------------ 검증·평가
-    def check(self, ref, kind: str, *, allow_experimental: bool = True) -> None:
+    def tf_problem(self, ref, tf_min: int) -> str | None:
+        """ref(이름 또는 BlockRef)가 결정 주기 tf_min(분)에서 무의미하면 사유, 아니면 None."""
+        return self._defs[self._name(ref)].tf_problem(tf_min)
+
+    def check(self, ref, kind: str, *, allow_experimental: bool = True, tf_min: int | None = None) -> None:
+        """tf_min: 결정 주기(분). 주면 그 주기에서 무의미한 블록(`BlockDef.max_tf_min`)을 거부한다."""
         if ref.block not in self._defs:
             raise KeyError(f"unknown block {ref.block}")
         d = self._defs[ref.block]
@@ -169,6 +187,10 @@ class Registry:
             raise ValueError(f"{ref.block}: unknown params {unknown}")
         if d.experimental and not allow_experimental:
             raise ValueError(f"{ref.block} is experimental (not allowed here; needs human review/promotion)")
+        if tf_min is not None:
+            prob = d.tf_problem(tf_min)
+            if prob:
+                raise ValueError(prob)
 
     def evaluate(self, ref, bars: pd.DataFrame, ctx: Context | None = None) -> pd.Series:
         d = self._defs[ref.block]

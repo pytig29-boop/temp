@@ -22,6 +22,10 @@
   같은 방식(regularize(clean_wicks) → to_tf, 대상 봉에 reindex, ffill 없음)으로 ctx.aux 를 만든다.
 - 7일 이상 창을 쓰는 블록(vol_regime 순위 등)은 워밍업 직후 백테스트보다 짧은 이력을 본다
   (G6 Val 과 같은 한계). 일정 기간이 지나면 사라진다.
+- **긴 결정 주기(15m/1h/4h)**: 14일은 4h 봉 84개뿐이라 지표가 덜 데워진다. 결정 주기 ≥ 15분인 스펙은
+  워밍업 = max(G8.forward_warmup_days, ⌈페이퍼 `required_lookback_bars(spec)` × B / 1440⌉일) (상한
+  `paper.bars.MAX_WARMUP_DAYS` = 120일)로 늘리고 그동안 status=warming_up 을 낸다(`spec_warmup_days`).
+  예: 4h donchian_breakout(288) → 290봉 ≈ 49일. 1m/5m 스펙은 기존 그대로(설정 일수).
 
 기대 구간 (vs backtest)
 - 원장의 Dev 실행(같은 logic_hash, 전략 캠페인의 primary 비용) 지표 mean_daily·std_daily·
@@ -229,8 +233,20 @@ def forward_aux_context(env: ResearchEnv, spec, fwd_start: pd.Timestamp, window_
     return aux_context(aux_m1, spec.tf_min), rows
 
 
+def spec_warmup_days(spec, base_days: int) -> int:
+    """Forward 워밍업 일수. 결정 주기 ≤ 5분은 base_days 그대로(기존 동작). 15m/1h/4h 는 지표에 필요한 봉 수
+    (`paper.bars.required_lookback_bars`, 120일 상한)를 일수로 환산해 base_days 와 큰 쪽."""
+    tf = int(spec.tf_min)
+    if tf <= 5:
+        return int(base_days)
+    from btc_quant.paper.bars import required_lookback_bars
+    need = required_lookback_bars(spec, default_days=0.0)
+    return max(int(base_days), int(math.ceil(need * tf / 1440.0)))
+
+
 def evaluate(env: ResearchEnv, fs: ForwardStrategy, fwd_start: pd.Timestamp, window_end: pd.Timestamp,
              warmup_days: int, band: float) -> dict:
+    warmup_days = spec_warmup_days(fs.spec, warmup_days)
     eval_start = fwd_start + pd.Timedelta(days=warmup_days)
     base = {"strategy_id": fs.id, "version": fs.version, "state": fs.state, "exchange": fs.exchange,
             "cost": fs.cost, "campaign_id": fs.campaign_id,

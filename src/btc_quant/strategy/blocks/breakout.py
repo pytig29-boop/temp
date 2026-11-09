@@ -39,6 +39,9 @@ def atr_channel_breakout(bars: pd.DataFrame, ctx: Context, span: int = 24, mult:
     description=("수축 후 돌파: 직전 lookback봉 범위폭 (max high-min low)/close 의 1일(5분봉 288봉/1분봉 1440봉) "
                  "백분위 ≤ squeeze_pct "
                  "이고 close_t > 직전 lookback봉 최고가."),
+    max_tf_min=60,
+    tf_note=("the 1-day percentile window has only 1440/B bars: 6 at 4h (rank resolution 1/6, squeeze_pct 0.1 "
+             "can never fire, lookback 12–48 bars = 2–8 days ≫ the 1-day ranking window) — needs ≥ 24 bars/day"),
 )
 def range_compression_break(bars: pd.DataFrame, ctx: Context, lookback: int = 24,
                             squeeze_pct: float = 0.2) -> pd.Series:

@@ -4,7 +4,7 @@
 진입 신호(+필터) 하나당 시도 1회만 쓰는 값싼 선별로 '정보가 있는 신호'만 전략화 단계로 넘긴다.
 방법 상세·근거는 docs/SIGNAL_STUDY.md.
 
-이벤트 정의 (ENGINE_SPEC 과 같은 시각 규약, 결정 봉 크기 `bar_minutes` 는 5 또는 1 등 임의)
+이벤트 정의 (ENGINE_SPEC 과 같은 시각 규약, 결정 봉 크기 `bar_minutes` ∈ {1, 5, 15, 60, 240})
 - 결정 봉 s (index = 봉 시작 시각) 가 닫히는 시각 t = s + bar_minutes 에 결정.
   트리거 = entry[s] & AND(filters[s]) & complete[s].
 - 진입 기준가 = 1분봉 t 의 시가 o_t (1분봉 t 가 없거나 filled 면 이벤트 아님 — 엔진과 동일).
@@ -54,12 +54,36 @@ from scipy import stats
 from btc_quant.backtest.types import CostModel
 from btc_quant.evaluation.inference import holm_reject
 from btc_quant.strategy.blocks import REGISTRY, Context, Registry
-from btc_quant.strategy.spec import MAX_FILTERS, BlockRef, ExitSpec, StrategySpec
+from btc_quant.strategy.spec import MAX_FILTERS, TIMEFRAMES, BlockRef, ExitSpec, StrategySpec, tf_name
 
 DEFAULT_HORIZONS = (5, 15, 30, 60, 120, 240)
 DEFAULT_PRIMARY = (30, 60, 120)
 MAX_PRIMARY = 3
 DEFAULT_MIN_GAP_MIN = 60
+# 결정 봉 길이(분) → 기본 (지평, 사전등록 주 지평, 최소 간격). 1m/5m 는 위 기본값 그대로(하위 호환).
+# 긴 봉(스윙 연구, PLAN §10): 지평은 봉 1개 이상 ~ 1~2일, 군집 제거 간격 = max(60분, 2·B)
+# (상태형 진입이 연속 봉에서 같은 움직임을 거듭 세지 않게; 남은 겹침은 HAC 가 처리).
+HORIZON_PRESETS: dict[int, dict] = {
+    1: {"horizons": DEFAULT_HORIZONS, "primary": DEFAULT_PRIMARY, "min_gap_min": DEFAULT_MIN_GAP_MIN},
+    5: {"horizons": DEFAULT_HORIZONS, "primary": DEFAULT_PRIMARY, "min_gap_min": DEFAULT_MIN_GAP_MIN},
+    15: {"horizons": (15, 30, 60, 120, 240, 480), "primary": (60, 120, 240), "min_gap_min": 60},
+    60: {"horizons": (60, 120, 240, 480, 1440), "primary": (240, 480, 1440), "min_gap_min": 120},
+    240: {"horizons": (240, 480, 1440, 2880), "primary": (480, 1440, 2880), "min_gap_min": 480},
+}
+
+
+def horizon_preset(bar_minutes: int) -> dict:
+    """결정 봉 길이 → {horizons, primary, min_gap_min} 기본값. 표에 없는 길이는 max(60, 2·B) 간격·B 배수 지평."""
+    bm = int(bar_minutes)
+    if bm in HORIZON_PRESETS:
+        return dict(HORIZON_PRESETS[bm])
+    hs = tuple(bm * k for k in (1, 2, 4, 8, 16))
+    return {"horizons": hs, "primary": hs[1:4], "min_gap_min": max(DEFAULT_MIN_GAP_MIN, 2 * bm)}
+
+
+def hold_step(bar_minutes: int) -> int:
+    """제안·자리표시 최대보유 반올림 단위: 5분(1m/5m, 기존) 또는 결정 봉 길이(15m 이상 — 스펙 검증상 B 의 배수)."""
+    return 5 if int(bar_minutes) <= 5 else int(bar_minutes)
 DEFAULT_N_NULL = 1000
 DEFAULT_ALPHA = 0.10
 DEFAULT_METHOD = "bh"
@@ -435,7 +459,8 @@ def study_events(m1: pd.DataFrame, bars_index: pd.DatetimeIndex, entry, filter_o
     sugg = None
     if info_h is not None:
         k = horizons.index(info_h)
-        hold = int(math.ceil(info_h / 5.0) * 5)
+        step = hold_step(bm)
+        hold = int(math.ceil(info_h / step) * step)
         sugg = {"max_hold_min": hold, "basis_horizon": info_h,
                 "tp_pct_q50_mfe": float(np.quantile(mfe[:, k], TP_QUANTILE) * 100),
                 "sl_pct_q75_absmae": float(np.quantile(-mae[:, k], SL_QUANTILE) * 100)}
@@ -461,10 +486,16 @@ def study_events(m1: pd.DataFrame, bars_index: pd.DatetimeIndex, entry, filter_o
 
 
 def study_signal(m1: pd.DataFrame, entry_ref: BlockRef, filter_refs=(), bar_minutes: int = 5,
-                 horizons=DEFAULT_HORIZONS, cost_round_trip=0.0, n_null: int = DEFAULT_N_NULL,
+                 horizons=None, cost_round_trip=0.0, n_null: int = DEFAULT_N_NULL,
                  seed: int = 0, ctx: Context | None = None, registry: Registry = REGISTRY,
                  bars: pd.DataFrame | None = None, block_cache: dict | None = None, **kw) -> dict:
-    """블록 참조로 이벤트 스터디. m1 은 DataAccess 로 읽은 1분봉(regularize 권장). kw → study_events."""
+    """블록 참조로 이벤트 스터디. m1 은 DataAccess 로 읽은 1분봉(regularize 권장). kw → study_events.
+    horizons 를 생략하면 결정 봉 길이의 기본값(`horizon_preset`: 지평·주 지평·최소 간격; 1m/5m 는 기존 기본값)."""
+    if horizons is None:
+        pre = horizon_preset(bar_minutes)
+        horizons = pre["horizons"]
+        kw.setdefault("primary_horizons", pre["primary"])
+        kw.setdefault("min_gap_min", pre["min_gap_min"])
     m1 = _regular_m1(m1)
     bars = decision_bars(m1, bar_minutes) if bars is None else bars
     ctx = ctx or Context()
@@ -562,8 +593,13 @@ class ScreenTemplate:
                 fsets.append([_block_grid(_grid_from(f), "filter", registry) for f in fs])
             sigs.append((eg, fsets))
         st = d.get("study") or {}
-        horizons = sorted({int(h) for h in st.get("horizons", DEFAULT_HORIZONS)})
-        primary = sorted({int(h) for h in st.get("primary_horizons", DEFAULT_PRIMARY)})
+        bm = int(d.get("bar_minutes", 5))
+        if bm not in TIMEFRAMES.values():
+            raise CampaignError(f"bar_minutes must be one of {sorted(TIMEFRAMES.values())} "
+                                "(decision bar minutes: 1/5 = D10, 15/60/240 = swing research, PLAN §10)")
+        pre = horizon_preset(bm)            # 지평·주 지평·최소 간격 기본값은 결정 봉 길이별
+        horizons = sorted({int(h) for h in st.get("horizons", pre["horizons"])})
+        primary = sorted({int(h) for h in st.get("primary_horizons", pre["primary"])})
         if not primary or len(primary) > MAX_PRIMARY or not set(primary) <= set(horizons):
             raise CampaignError(f"study.primary_horizons must be 1..{MAX_PRIMARY} of horizons")
         stratify = str(st.get("stratify", "hour_vol"))
@@ -584,14 +620,11 @@ class ScreenTemplate:
         budget = d.get("budget")
         if not isinstance(budget, int) or budget <= 0:
             raise CampaignError("budget must be a positive integer")
-        bm = int(d.get("bar_minutes", 5))
-        if bm not in (1, 5):
-            raise CampaignError("bar_minutes must be 1 or 5 (PLAN D10)")
         tpl = cls(name=name, hypothesis={k: hyp[k] for k in ("text", "rationale", "success_criteria")},
                   exchange=exchange, symbol=str(data.get("symbol", "BTC-KRW")),
                   timeframe=str(data.get("timeframe", "1m")), bar_minutes=bm, signals=sigs,
                   horizons=horizons, primary_horizons=primary,
-                  min_gap_min=float(st.get("min_gap_min", DEFAULT_MIN_GAP_MIN)),
+                  min_gap_min=float(st.get("min_gap_min", pre["min_gap_min"])),
                   n_null=int(st.get("n_null", DEFAULT_N_NULL)), seed=int(st.get("seed", 0)),
                   min_events=int(st.get("min_events", DEFAULT_MIN_EVENTS)), stratify=stratify,
                   costs=costs, method=method, alpha=alpha, budget=budget,
@@ -637,12 +670,13 @@ class ScreenTemplate:
     def trial_spec(self, entry: BlockRef, filters: tuple[BlockRef, ...]) -> StrategySpec:
         """원장 기록용 스펙: 자리표시 청산(SL=TP=999%, 최대보유=최장 지평). 결정 봉은 spec 에 timeframe
         필드가 있으면 거기에, 없으면 id 접미사로 남는다."""
-        hold = int(math.ceil(max(self.horizons) / 5.0) * 5)
+        step = hold_step(self.bar_minutes)
+        hold = int(math.ceil(max(self.horizons) / step) * step)
         ex = ExitSpec(SENTINEL_SL_TP, SENTINEL_SL_TP, hold)
         kw = {}
         names = {f.name for f in dataclasses.fields(StrategySpec)}
         if "timeframe" in names:
-            kw["timeframe"] = f"{self.bar_minutes}m"
+            kw["timeframe"] = tf_name(self.bar_minutes)
         tmp = StrategySpec("x", entry, ex, tuple(filters), **kw)
         return StrategySpec(f"{self.name}_sig{self.bar_minutes}m_{tmp.logic_hash()[:10]}", entry, ex,
                             tuple(filters), **kw)
@@ -949,6 +983,7 @@ __all__ = [
     "decision_bars",
     "decluster",
     "hac_se_mean",
+    "horizon_preset",
     "normalize_costs",
     "prior_screen_pvalues",
     "render_screen_markdown",

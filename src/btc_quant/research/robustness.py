@@ -108,8 +108,8 @@ class Candidate:
 
     @classmethod
     def from_spec(cls, spec, ctx=None, other_ctx=None) -> Candidate:
-        tf = str(getattr(spec, "timeframe", "5m") or "5m")
-        bar = int(pd.Timedelta(tf.replace("m", "min")).total_seconds() // 60) if tf.endswith("m") else 5
+        from btc_quant.strategy.spec import tf_minutes
+        bar = tf_minutes(str(getattr(spec, "timeframe", "5m") or "5m"))
         ex = spec.exit
         return cls(lambda m1, _c=ctx: fast.prepare_spec(spec, m1, _c), ex.sl, ex.tp,
                    int(ex.max_hold_min), max(bar, 1), spec.id, ex.atr_bars if ex.is_atr else None)

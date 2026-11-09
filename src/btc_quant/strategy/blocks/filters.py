@@ -27,6 +27,9 @@ VOL_RANK_LOOKBACK = 7 * 288                  # 5분봉 기준 값 (하위 호환
     grid={"session": list(SESSIONS)},
     description=("KST 시간대 필터: 봉 종료 시각(index+봉길이)의 KST 시가 SESSIONS[session]에 속함. "
                  + "; ".join(f"{k}={list(v)}" for k, v in SESSIONS.items())),
+    max_tf_min=60,
+    tf_note=("4h decision times fall on only 6 KST hours (01,05,09,13,17,21): us_open never fires and the "
+             "other sessions collapse to one decision per day — a bar selector, not a session filter"),
 )
 def session_kst(bars: pd.DataFrame, ctx: Context, session: str = "active") -> pd.Series:
     hours = (bars.index + bar_delta(bars.index, ctx)).tz_convert("Asia/Seoul").hour
@@ -38,6 +41,8 @@ def session_kst(bars: pd.DataFrame, ctx: Context, session: str = "active") -> pd
     grid={"window": [12, 24, 48], "min_pct": [0.2, 0.33, 0.5, 0.67, 0.8]},
     description=("고변동 국면: 실현변동성 rv = std(1봉 로그수익률, window봉)의 직전 7일(5분봉 2016봉/1분봉 "
                  "10080봉, 최소 1일) 롤링 백분위 ≥ min_pct."),
+    tf_note=("coarse at 4h: the 7-day rank window is 42 bars (min 6) and window=48 bars (8 days) exceeds it "
+             "— allowed, but the percentile is a slow vol-trend measure there"),
 )
 def vol_regime(bars: pd.DataFrame, ctx: Context, window: int = 24, min_pct: float = 0.5) -> pd.Series:
     rv = log_ret(bars["close"]).rolling(window, min_periods=window).std()
@@ -64,6 +69,10 @@ def volume_z(bars: pd.DataFrame, ctx: Context, window: int = 96, min_z: float = 
     grid={"span": [12, 24, 48, 168]},
     description=("1시간 추세: 마지막 '완료된' 1시간봉 종가 > EMA(1시간 종가, span시간). "
                  "봉 t의 판정 시각 t+봉길이 기준 floor(t+봉길이,'h')-1h 시간봉을 사용 (미완성 시간봉 미사용)."),
+    max_tf_min=60,
+    tf_note=("needs bars ≤ 1h: on 4h bars the hourly resample has one close per 4 hours and the 'last completed "
+             "hour' (t+3h) never exists → always False. On 1h bars it is exactly close_t > EMA(span) of the "
+             "decision bars themselves (span in hours = bars)"),
 )
 def trend_regime_1h(bars: pd.DataFrame, ctx: Context, span: int = 24) -> pd.Series:
     hc = bars["close"].resample("1h", label="left", closed="left").last().dropna()

@@ -2,7 +2,7 @@
 
 의미론은 docs/ENGINE_SPEC.md. 빠른 엔진(fast.py)과 거래 목록이 정확히 일치해야 한다.
 
-구동 방법 (실시간/재생 공통). B = 결정 주기 봉 길이(분, 기본 5):
+구동 방법 (실시간/재생 공통). B = 결정 주기 봉 길이(분, 기본 5; 1/15/60/240 도 가능):
     eng = ReferenceEngine(sl_pct, tp_pct, max_hold_min, cost, start, end)        # 5분·고정 % (기존)
     eng = ReferenceEngine.from_exit(spec.exit, cost, start, end, spec.timeframe)   # 일반
     매 B분 경계 t (봉 t-B 확정 직후):  eng.on_decision(t, entry_ok, exit_sig[, atr])
@@ -34,9 +34,23 @@ from btc_quant.strategy.spec import ExitSpec, StrategySpec, tf_minutes
 ONE_MIN = pd.Timedelta(minutes=1)
 
 
+_NS_PER_MIN = 60_000_000_000
+
+
 def is_boundary(ts: pd.Timestamp, tf_min: int = 5) -> bool:
-    """결정 시점(B분 경계) 여부. B=1 이면 모든 정각 분."""
-    return ts.minute % tf_min == 0 and ts.second == 0 and ts.microsecond == 0 and ts.nanosecond == 0
+    """결정 시점(B분 경계) 여부 — UTC epoch 분 % B == 0 (빠른 엔진 `signals.boundary_mask` 와 같은 정의).
+    B=1 이면 모든 정각 분. B ≤ 60 이면 '시각의 분 % B == 0' 과 같고, B=240 이면 00/04/08… UTC 정각."""
+    ts = pd.Timestamp(ts)
+    if ts.second or ts.microsecond or ts.nanosecond:
+        return False
+    return (ts.value // _NS_PER_MIN) % int(tf_min) == 0
+
+
+def _ceil_boundary(t: pd.Timestamp, tf_min: int) -> pd.Timestamp:
+    """t 이상인 첫 B분 경계 (UTC epoch 기준; 시간대와 무관)."""
+    step = int(tf_min) * _NS_PER_MIN
+    v = -(-pd.Timestamp(t).value // step) * step
+    return pd.Timestamp(v, tz="UTC").tz_convert(t.tz) if t.tz is not None else pd.Timestamp(v)
 
 
 @dataclass(frozen=True)
@@ -213,8 +227,10 @@ class ReferenceEngine:
         b = int(self.timeframe_min)
         if b == 5:
             self.cooldown_until = t_eff.ceil("5min") + FIVE_MIN
-        else:
-            self.cooldown_until = t_eff.ceil(f"{b}min") + pd.Timedelta(minutes=b)
+        elif b == 1:
+            self.cooldown_until = t_eff.ceil("1min") + ONE_MIN
+        else:   # 15m/1h/4h: epoch 정렬 올림 (Timestamp.ceil 은 tz-aware 에서 벽시계 기준이라 쓰지 않는다)
+            self.cooldown_until = _ceil_boundary(t_eff, b) + pd.Timedelta(minutes=b)
         return FillEvent(ts, "sell", ref_price, exit_fill, reason)
 
     def trades_frame(self) -> pd.DataFrame:

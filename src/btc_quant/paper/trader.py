@@ -92,6 +92,8 @@ def evaluate_signals(spec: StrategySpec, m1_window: pd.DataFrame, bar: pd.Timest
     tf = spec.tf_min
     bars = to_tf(m1_window, tf)
     ctx = ctx or Context()
+    if ctx.bar is None and tf >= 15:   # 긴 봉: 봉 길이를 명시 (캠페인 aux_context 와 같음; 짧은 창에서 추론 오류 방지)
+        ctx = Context(aux=dict(ctx.aux), bar=pd.Timedelta(minutes=tf))
     if aux_m1:
         aux = dict(ctx.aux)
         for k, df in aux_m1.items():

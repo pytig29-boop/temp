@@ -53,7 +53,9 @@ def test_timeframe_1m_changes_hash_and_roundtrips(tmp_path):
 def test_timeframe_validation():
     assert tf_minutes("5m") == 5 and tf_minutes("1m") == 1
     with pytest.raises(ValueError):
-        StrategySpec("a", BlockRef("e"), ExitSpec(0.7, 1.0, 60), timeframe="15m").validate()
+        StrategySpec("a", BlockRef("e"), ExitSpec(0.7, 1.0, 60), timeframe="30m").validate()
+    with pytest.raises(ValueError):
+        StrategySpec("a", BlockRef("e"), ExitSpec(0.7, 1.0, 60), timeframe="60m").validate()   # 정식 이름은 "1h"
     # 1m: max_hold_min 은 임의의 양의 정수 분, 5m: 5의 배수
     StrategySpec("a", BlockRef("e"), ExitSpec(0.7, 1.0, 7), timeframe="1m").validate()
     with pytest.raises(ValueError):

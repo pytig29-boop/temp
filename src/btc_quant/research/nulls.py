@@ -35,6 +35,7 @@ from btc_quant.backtest.signals import period_bounds
 from btc_quant.backtest.types import CostModel
 from btc_quant.evaluation.metrics import ANN, exp_weights
 from btc_quant.strategy.blocks.null import _splitmix64
+from btc_quant.strategy.spec import tf_name
 
 
 def weighted_sharpe_rows(mat: np.ndarray, days: pd.DatetimeIndex, half_life_days: float = 365,
@@ -72,7 +73,7 @@ class RandomEntryNull:
         base = pd.Series(np.asarray(filter_ok, bool), index=bars_index)
         self.atr_bars = atr_bars
         # cand = 필터 통과 결정 위치. ATR 청산이면 같은 결정 행 ATR 비율(후보 스펙과 동일 배열)
-        self.prepared = fast.prepare(m1, base, None, timeframe=f"{int(tf_min)}m", atr_bars=atr_bars,
+        self.prepared = fast.prepare(m1, base, None, timeframe=tf_name(int(tf_min)), atr_bars=atr_bars,
                                      bars=bars)
         self.pos = self.prepared.cand
         bar_times = pd.DatetimeIndex(m1.index[self.pos] - pd.Timedelta(minutes=int(tf_min)))

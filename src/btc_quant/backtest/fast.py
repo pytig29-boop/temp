@@ -160,6 +160,14 @@ def _finish(raw, side_cost: float, fee_rate: float) -> TradeArrays:
     return TradeArrays(e_idx, x_idx, reason, e_ref, x_ref, ef, xf, gross, net, hold)
 
 
+def reprice(tr: TradeArrays, cost: CostModel) -> TradeArrays:
+    """같은 거래(진입·청산 시각·기준가)를 다른 비용 모델로 다시 계산한다 — 경로는 비용과 무관하고
+    (익절 트리거의 tick 만 경로에 영향 → 원래 실행의 tick 이 그대로 반영됨) 체결가·수익만 바뀐다.
+    zero-cost(`CostModel(…, 0, 0, 0, tick)`)면 net_ret == gross_ret (비트 단위) — 캠페인 gross 지표용."""
+    raw = (tr.entry_idx, tr.exit_idx, tr.entry_ref, tr.exit_ref, tr.reason, tr.hold_min)
+    return _finish(raw, cost.side_cost, cost.fee_rate)
+
+
 def simulate(o, h, l, c, ts_min, entry_decision, exit_decision, sl_pct: float, tp_pct: float,
              max_hold_min: int, side_cost: float, fee_rate: float, tick: float,
              start_idx: int, end_idx: int, *, timeframe_min: int = 5,

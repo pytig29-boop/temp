@@ -63,7 +63,7 @@ GATE_TAXONOMY: dict[str, str] = {
     "G0": "IMPL_OR_DATA_ISSUE",
     "G1": "LOW_SAMPLE",
     "G2": "NO_SIGNAL",            # 비용 전 수익 양(+)·비용 후 음(−)이면 COST_EATEN
-    "G3": "PARAM_SPIKE",
+    "G3": "PARAM_SPIKE",          # 인접 조합이 비용 전 양(+)·비용 후 음(−)이면 COST_EATEN (`_g3_cost_eaten`)
     "G4": "UNSTABLE",
     "G5": "SELECTION_BIAS",
     "G6": "VAL_FAIL",
@@ -247,6 +247,22 @@ def _gross_positive(c: dict) -> bool:
     return False
 
 
+def _num(v) -> float | None:
+    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v == v else None
+
+
+def _g3_cost_eaten(c: dict, d: dict) -> bool:
+    """G3 실패가 비용 때문인가: 비용 후(net)로는 선택 Sharpe 또는 인접 중앙값이 ≤ 0 인데 비용 전(gross,
+    같은 거래를 zero-cost 로 — campaign.gross_metrics)으로는 인접 중앙값이 > 0 (없으면 후보의 gross 지표가 > 0).
+    = 고원은 비용 전에는 있었는데 비용 바닥에 먹힘 (int-000004 유형)."""
+    nm, sel = _num(d.get("neighbor_median")), _num(d.get("selected"))
+    net_neg = (nm is not None and nm <= 0) or (sel is not None and sel <= 0)
+    if not net_neg:
+        return False
+    ng = _num(d.get("neighbor_median_gross"))
+    return ng > 0 if ng is not None else _gross_positive(c)
+
+
 def classify_candidate(c: dict) -> dict:
     """후보 하나의 관문·견고성 결과 → {primary, codes, reasons}. 결정적 규칙."""
     gates = c.get("gates") or {}
@@ -258,6 +274,7 @@ def classify_candidate(c: dict) -> dict:
             codes.append(code)
         reasons.setdefault(code, []).append(why)
 
+    gate_codes: dict[str, str] = {}
     for g in GATE_ORDER:
         passed = _gate_passed(gates.get(g))
         if passed is None or passed:
@@ -268,7 +285,15 @@ def classify_candidate(c: dict) -> dict:
             sr = d.get("sharpe_w")
             if d.get("ok_positive") is False and _gross_positive(c):
                 code = "COST_EATEN"
-            add(code, f"G2 failed (sharpe_w={sr}, p_value={d.get('p_value')})")
+            gate_codes[g] = code
+            add(code, f"G2 failed (sharpe_w={sr}, p_value={d.get('p_value')})"
+                + (" with positive gross (zero-cost) Sharpe" if code == "COST_EATEN" else ""))
+        elif g == "G3":
+            if _g3_cost_eaten(c, d):
+                code = "COST_EATEN"
+            gate_codes[g] = code
+            add(code, "G3 failed" + (f" (net neighbor median {d.get('neighbor_median')} ≤ 0, gross neighbor "
+                                     f"median {d.get('neighbor_median_gross')})" if code == "COST_EATEN" else ""))
         elif g == "G6":
             if d.get("val_status") == "exhausted" or (d.get("val_budget") or {}).get("exhausted"):
                 add("UNCLASSIFIED", "Val budget exhausted — not evaluated (roll Val: human)")
@@ -286,10 +311,12 @@ def classify_candidate(c: dict) -> dict:
         if _gate_passed(gc.get(g)) is False:
             add("COST_EATEN", f"{g} fails under the grade (Upbit) cost model → cost grade B")
     first = c.get("first_failed")
-    if first in GATE_TAXONOMY and first != "G2":
+    if first in GATE_TAXONOMY and first not in ("G2", "G3"):
         primary = GATE_TAXONOMY[first]
     elif first == "G2":
         primary = "COST_EATEN" if "COST_EATEN" in codes and "NO_SIGNAL" not in codes else "NO_SIGNAL"
+    elif first == "G3":
+        primary = gate_codes.get("G3", GATE_TAXONOMY["G3"])
     elif "VAL_FAIL" in codes:
         primary = "VAL_FAIL"
     elif any("Val budget exhausted" in r for r in reasons.get("UNCLASSIFIED", [])):
@@ -322,7 +349,9 @@ def classify_pipeline(p: dict, candidate_tax: list[dict] | None = None) -> dict:
         return {"primary": None, "counts": dict(counts), "outcome": "validated"}
     fa = p.get("funnel_all") or {}
     if fa.get("n_specs") and fa.get("sharpe_w_positive") == 0:
-        prim = "COST_EATEN" if any(_gross_positive(c) for c in cands) else "NO_SIGNAL"
+        gpos = fa.get("gross_sharpe_w_positive")
+        prim = "COST_EATEN" if (any(_gross_positive(c) for c in cands)
+                                or (isinstance(gpos, int) and gpos > 0)) else "NO_SIGNAL"
         return {"primary": prim, "counts": dict(counts), "outcome": "failed"}
     if not counts:
         return {"primary": "UNCLASSIFIED", "counts": {}, "outcome": "failed"}
@@ -337,13 +366,13 @@ _GATE_KEYS = {
     "G1": ("n_trades", "recent_n_trades"),
     "G2": ("sharpe_w", "p_value", "percentile", "n_null", "calibration", "candidate_n_trades",
            "n_trades_median", "sharpe_w_median", "sharpe_w_p95", "ok_positive", "ok_null", "cost"),
-    "G3": ("selected", "neighbor_median", "required", "n_neighbors"),
+    "G3": ("selected", "neighbor_median", "required", "n_neighbors", "neighbor_median_gross"),
     "G4": ("rolling_frac_positive", "rolling_n_windows", "recent_sharpe", "ok_rolling", "ok_recent"),
     "G5": ("dsr", "pbo", "sr", "sr0", "n_trials", "ok_dsr", "ok_pbo"),
 }
 _METRIC_KEYS = ("sharpe_w", "sharpe", "n_trades", "recent_n_trades", "recent_sharpe",
                 "rolling_frac_positive", "max_dd", "total_return", "trades_per_day", "n_days",
-                "sharpe_w_gross", "gross_sharpe_w")
+                "sharpe_w_gross", "gross_sharpe_w", "gross_expectancy")
 _STATS_KEYS = ("n_campaign_specs", "k_eff_clusters", "n_family_trials", "n_global_trials", "n_trials_dsr",
                "pbo", "cluster_threshold")
 

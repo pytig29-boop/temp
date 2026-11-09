@@ -12,7 +12,9 @@ research.campaign.prepare_m1 과 같은 함수).
   같으므로 전체 이력에 적용한 결과와 동일), 빈 분은 직전 종가 평탄 봉(`quality.regularize` 와 동일), 긴 공백 직후
   워밍업 봉은 `quality.gap_warmup_mask` 와 같은 정의로 증분 표시.
 - `required_lookback_bars(spec)`: 블록 파라미터로부터 "후행 창 평가 = 전체 이력 평가"가 성립하는 데
-  필요한 결정 주기 봉 수(스펙 timeframe: 5분/1분). 유한 창(rolling/shift) 블록은 정확히, EMA 계열은 초기값
+  필요한 결정 주기 봉 수(스펙 timeframe: 1m/5m/15m/1h/4h). 상한은 MAX_WARMUP_DAYS(120일)의 봉 수 — 4h 에서
+  EMA 계열 큰 span(예: ema_slope span 96 → 1,425봉 ≈ 238일)은 상한에 걸려 근사가 되고 경고를 남긴다
+  (120일 = 720봉이면 초기값 잔존 가중 ≈ (1−2/97)^720 ≈ 3e-7). 유한 창(rolling/shift) 블록은 정확히, EMA 계열은 초기값
   영향이 EMA_TOL 이하가 되는 길이로 계산한다. 블록이 `lookback_bars` 를 제공하면 그것을 쓴다.
 """
 from __future__ import annotations
@@ -158,8 +160,9 @@ def required_lookback_bars(spec: StrategySpec, registry: Registry = REGISTRY,
 
 
 def window_minutes(lookback_bars: int, tf_min: int = 5) -> int:
-    """결정 주기 봉 lookback → 1분봉 창 길이(시각 정렬 여유 1시간 포함)."""
-    return int(lookback_bars) * int(tf_min) + 60
+    """결정 주기 봉 lookback → 1분봉 창 길이(시각 정렬 여유 포함: max(1시간, 봉 1개)).
+    B ≤ 60 이면 기존과 같은 +60분. 4h 는 +240분 → 창의 가장 오래된 봉도 완전한 봉(부분 봉 없음)."""
+    return int(lookback_bars) * int(tf_min) + max(60, int(tf_min))
 
 
 # --------------------------------------------------------------------------------------------

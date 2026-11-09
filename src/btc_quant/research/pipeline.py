@@ -409,8 +409,11 @@ class Pipeline:
         g1 = [G.check_g1(r, self.cfg)[0] for r in rows.to_dict("records")]
         g4 = [G.check_g4(r, self.cfg)[0] for r in rows.to_dict("records")]
         pos = rows["sharpe_w"] > self.cfg["G2"]["min_weighted_sharpe"]
-        return {"n_specs": int(len(rows)), "g1_pass": int(np.sum(g1)), "sharpe_w_positive": int(pos.sum()),
-                "g4_pass": int(np.sum(g4)), "g1_g4_positive": int(np.sum(np.array(g1) & np.array(g4) & pos.to_numpy()))}
+        out = {"n_specs": int(len(rows)), "g1_pass": int(np.sum(g1)), "sharpe_w_positive": int(pos.sum()),
+               "g4_pass": int(np.sum(g4)), "g1_g4_positive": int(np.sum(np.array(g1) & np.array(g4) & pos.to_numpy()))}
+        if "gross_sharpe_w" in rows:      # 비용 전(zero-cost) 가중 Sharpe > 0 인 스펙 수 (COST_EATEN 판정 근거)
+            out["gross_sharpe_w_positive"] = int((rows["gross_sharpe_w"] > 0).sum())
+        return out
 
     # ---------------------------------------------------------- 후보별 Dev 관문
     def g2(self, spec: StrategySpec, observed: dict, cost_name: str) -> dict:
@@ -431,16 +434,24 @@ class Pipeline:
 
     def g3(self, spec: StrategySpec, sel: float) -> dict:
         nbs = neighbor_specs(self.cr, spec)
-        vals, desc, missing = [], [], []
+        vals, gvals, desc, missing = [], [], [], []
+        has_gross = "gross_sharpe_w" in self.prim.columns
         for label, nsp in nbs:
             lh = nsp.logic_hash()
             if lh in self.prim.index:
                 v = float(self.prim.at[lh, "sharpe_w"])
                 vals.append(v)
-                desc.append({"change": label, "logic_hash": lh, "sharpe_w": v})
+                row = {"change": label, "logic_hash": lh, "sharpe_w": v}
+                if has_gross:
+                    gv = float(self.prim.at[lh, "gross_sharpe_w"])
+                    gvals.append(gv)
+                    row["gross_sharpe_w"] = gv
+                desc.append(row)
             else:
                 missing.append(label)
         ok, d = G.check_g3(sel, vals, self.cfg)
+        if has_gross and gvals:   # 비용 전 인접 중앙값 (오답노트: 비용 전 고원은 있는데 비용 후 무너지면 COST_EATEN)
+            d["neighbor_median_gross"] = float(np.median(gvals))
         return _gate(ok, **d, neighbors=desc, missing=missing)
 
     def g5(self, lh: str, stats: dict) -> dict:

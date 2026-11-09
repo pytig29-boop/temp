@@ -19,7 +19,8 @@ PLAN §5.1 ①~③. 관문(④~⑥)은 `pipeline.py`, 리포트는 `report.py`.
 5. 진입·필터 블록 신호는 (블록, 파라미터)마다 한 번씩만 계산·캐시(결정 주기 봉 `to_tf(m1, B)`),
    (진입 파라미터 × 필터 파라미터) 조합마다 `prepare` 한 번, 청산 격자는 `simulate_many` 로 스윕
    (고정 % 또는 ATR 배수 — `exits.mode`).
-6. 스펙 × 평가 비용(primary + grade)마다 `metrics.summarize` → 원장 runs 에 모두 기록
+6. 스펙 × 평가 비용(primary + grade)마다 `metrics.summarize` + 비용 전 지표(`gross_metrics`: 같은 거래를
+   zero-cost 로 → gross_sharpe_w, gross_expectancy; 오답노트 COST_EATEN 분류) → 원장 runs 에 모두 기록
    (`Ledger.record_runs`, 스냅샷 id, 코드 커밋 포함).
 7. research/campaigns/<campaign_id>/ 에 결과 저장 (README 참조: 무엇을 git 에 넣는지).
 """
@@ -50,7 +51,7 @@ from btc_quant.registry.strategies import StrategyRegistry
 from btc_quant.strategy.blocks import REGISTRY, Context, Registry
 from btc_quant.strategy.features import to_tf
 from btc_quant.strategy.spec import (DEFAULT_ATR_BARS, DEFAULT_TIMEFRAME, MAX_FILTERS, TIMEFRAMES, BlockRef,
-                                     ExitSpec, StrategySpec, tf_minutes)
+                                     ExitSpec, StrategySpec, tf_minutes, tf_name)
 
 # 비용 모델은 버전 관리되는 레지스트리(config/costs.yaml, `btc_quant.params.cost_model`)에서 읽는다
 # (docs/PARAMS.md §4). 예전 모듈 상수 COST_MODELS / UPBIT_STRESS 는 없어졌다 — `get_cost(name)` 를 쓴다.
@@ -63,6 +64,19 @@ EXIT_MODES = ("pct", "atr")
 HALF_LIFE_DAYS = 365          # PLAN D1
 # 실시간으로 만들 수 있는 보조 데이터 (paper.bars.LIVE_AUX 와 같은 값). 바이낸스는 실시간 수신 불가 → 캠페인 불가.
 LIVE_AUX = ("upbit",)
+# 비용 전(gross) 지표 (오답노트 COST_EATEN 분류용): 같은 스윕의 같은 거래를 zero-cost CostModel 로 다시 계산
+GROSS_KEYS = ("gross_sharpe_w", "gross_expectancy")
+
+
+def gross_metrics(p: fast.Prepared, tr: fast.TradeArrays, cost: CostModel, start, end) -> dict:
+    """같은 거래를 zero-cost(수수료·스프레드·슬리피지 0, tick 은 원래 실행 값)로 → {gross_sharpe_w, gross_expectancy}.
+    gross_sharpe_w = 가중 Sharpe(`metrics.summarize` 의 sharpe_w 와 같은 식), gross_expectancy = 평균 gross 거래 수익."""
+    zero = CostModel("zero_cost", 0.0, 0.0, 0.0, cost.tick)
+    tr0 = fast.reprice(tr, zero)
+    days, mat = fast.daily_returns_matrix(p, [tr0], start, end)
+    ws = M.weighted_sharpe(pd.Series(mat[0], index=days), HALF_LIFE_DAYS)
+    return {"gross_sharpe_w": float(ws.sharpe),
+            "gross_expectancy": float(tr0.net_ret.mean()) if len(tr0.net_ret) else 0.0}
 
 
 class CampaignError(ValueError):
@@ -494,7 +508,7 @@ class SignalCache:
 
     @property
     def timeframe(self) -> str:
-        return f"{self.tf_min}m"
+        return tf_name(self.tf_min)
 
     def block(self, ref: BlockRef) -> np.ndarray:
         k = json.dumps([ref.block, ref.params], sort_keys=True, default=str)
@@ -780,7 +794,7 @@ def run_campaign(template: CampaignTemplate | str | Path, root: str | Path | Non
                 lh = spec.logic_hash()
                 specs[lh] = spec
                 res = fast.to_result(p, tr, cost, start, end, spec.id, lh)
-                met = M.summarize(res, HALF_LIFE_DAYS)
+                met = {**M.summarize(res, HALF_LIFE_DAYS), **gross_metrics(p, tr, cost, start, end)}
                 if cost_name == tpl.costs["primary"]:
                     ret_cols[lh] = mat[xi]
                 rows.append({"logic_hash": lh, "spec_id": spec.id, "filter_set": set_idx,

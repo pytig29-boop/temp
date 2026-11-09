@@ -230,6 +230,7 @@ class ResearchTools:
     @tool
     def list_blocks(self, kind: str | None = None, include_experimental: bool = True) -> dict[str, Any]:
         from btc_quant.strategy.blocks import KINDS, REGISTRY
+        from btc_quant.strategy.spec import TIMEFRAMES
         if kind is not None and kind not in KINDS:
             raise ToolFailure("invalid_argument", f"kind must be one of {KINDS}")
         rows = []
@@ -242,6 +243,8 @@ class ResearchTools:
             rows.append({"name": d.name, "kind": d.kind, "status": d.status, "grid": d.grid,
                          "defaults": {k: v for k, v in defaults.items() if k in d.grid},
                          "requires": list(d.requires), "live_ready": d.live_ready, "description": d.description,
+                         "timeframes": [tf for tf, b in TIMEFRAMES.items() if d.tf_problem(b) is None],
+                         **({"timeframe_note": d.tf_note} if d.tf_note else {}),
                          **({"author": d.author, "created": d.created, "rationale": d.rationale,
                              "note": "experimental: candidates using it need human block review before a "
                                      "lockbox request (D11)"} if d.experimental else {})})

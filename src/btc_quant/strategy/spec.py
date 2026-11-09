@@ -1,7 +1,9 @@
 """전략 스펙 — 블록 조합 (계약 모듈: 여러 모듈이 공유하므로 변경 시 전체 영향).
 
 전략 = 진입 블록 1 + 필터 블록 0~2 + 청산(손절·익절·최대보유 + 선택적 신호 청산).
-결정 주기(`timeframe`)는 "5m"(기본) 또는 "1m" — 블록은 이 주기의 봉으로 평가된다.
+결정 주기(`timeframe`)는 "5m"(기본) · "1m" · (스윙 연구, PLAN §10 대안) "15m" · "1h" · "4h" — 블록은 이 주기의 봉으로
+평가된다. 봉은 UTC epoch 기준 정렬(4h = 00/04/08/12/16/20 UTC = KST 09/13/17/21/01/05시, docs/ENGINE_SPEC.md).
+긴 봉에서 무의미한 블록(`BlockDef.max_tf_min`)은 `validate(registry)` 가 거부한다.
 
 청산 모드 (정확히 하나):
 - 고정 %   : `stop_loss_pct`, `take_profit_pct` (기존)
@@ -22,17 +24,29 @@ import yaml
 MAX_FILTERS = 2
 MAX_PARAMS = 8  # 청산 3개 포함 (ATR 모드: 손절 배수·익절 배수·최대보유 = 3, atr_bars 가 기본값이 아니면 +1)
 
-TIMEFRAMES: dict[str, int] = {"5m": 5, "1m": 1}   # 결정 주기 → 봉 길이(분)
+# 결정 주기 → 봉 길이(분). 15m/1h/4h 는 스윙 연구용 (PLAN §10 "아무것도 통과하지 못하면": 4시간~1일 지평).
+# 모든 값은 1440 의 약수 → UTC 자정(= epoch) 정렬 봉.
+TIMEFRAMES: dict[str, int] = {"5m": 5, "1m": 1, "15m": 15, "1h": 60, "4h": 240}
 DEFAULT_TIMEFRAME = "5m"
 DEFAULT_ATR_BARS = 14
 
 
 def tf_minutes(timeframe: str) -> int:
-    """'5m' → 5, '1m' → 1."""
+    """'5m' → 5, '1m' → 1, '1h' → 60, '4h' → 240."""
     try:
         return TIMEFRAMES[timeframe]
     except KeyError:
         raise ValueError(f"timeframe must be one of {list(TIMEFRAMES)}, got {timeframe!r}") from None
+
+
+def tf_name(minutes: int) -> str:
+    """봉 길이(분) → 정식 timeframe 이름 (5 → '5m', 60 → '1h', 240 → '4h'). 모르는 길이는 ValueError.
+    f"{B}m" 로 이름을 만들면 '60m' 처럼 TIMEFRAMES 에 없는 이름(→ 다른 logic_hash)이 생기므로 항상 이 함수를 쓴다."""
+    m = int(minutes)
+    for k, v in TIMEFRAMES.items():
+        if v == m:
+            return k
+    raise ValueError(f"no timeframe with {m}-minute bars; one of {TIMEFRAMES}")
 
 
 @dataclass(frozen=True)
@@ -118,7 +132,7 @@ class StrategySpec:
     exit: ExitSpec
     filters: tuple[BlockRef, ...] = ()
     version: int = 1
-    timeframe: str = DEFAULT_TIMEFRAME     # 결정 주기 "5m" | "1m"
+    timeframe: str = DEFAULT_TIMEFRAME     # 결정 주기 TIMEFRAMES 키 ("5m" | "1m" | "15m" | "1h" | "4h")
 
     @property
     def tf_min(self) -> int:
@@ -139,12 +153,12 @@ class StrategySpec:
             raise ValueError(f"params {self.n_params()} > {MAX_PARAMS}")
         e = self.exit
         e.validate(tf)
-        if registry is not None:
-            registry.check(self.entry, "entry")
+        if registry is not None:   # tf_min: 이 결정 주기에서 무의미한 블록 거부 (BlockDef.max_tf_min)
+            registry.check(self.entry, "entry", tf_min=tf)
             for f in self.filters:
-                registry.check(f, "filter")
+                registry.check(f, "filter", tf_min=tf)
             if e.signal_exit:
-                registry.check(e.signal_exit, "exit_signal")
+                registry.check(e.signal_exit, "exit_signal", tf_min=tf)
 
     # ---- 직렬화 ----
     def to_dict(self) -> dict:
