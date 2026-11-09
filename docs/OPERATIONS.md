@@ -1,0 +1,217 @@
+# 운영 가이드 (VPS)
+
+> 대상: 실시간 수집기(collector) + 페이퍼 엔진 + 야간 연구 캠페인을 VPS 한 대에서 상시 운용.
+> 관련: `docs/PLAN.md` §7(리스크 한도), §9(운용 계층). 코드: `src/btc_quant/live/`.
+
+---
+
+## 1. VPS 선택
+
+| 항목 | 권장 | 이유 |
+|---|---|---|
+| 리전 | **서울** (AWS ap-northeast-2, GCP asia-northeast3, Vultr/Linode Seoul, NCP/KT Cloud) | 코인원·업비트 서버와 왕복 지연 수 ms. 해외 리전은 수십~수백 ms + 일부 거래소 IP 제한 위험 |
+| CPU | 2 vCPU (최소), 야간 연구를 돌리면 **4 vCPU** | 수집기는 1코어의 수 %. 야간 격자 탐색(numba)이 CPU를 대부분 사용 |
+| 메모리 | **8 GB** (최소 4 GB) | 수집기 ~150 MB, 페이퍼 ~300 MB, 연구 캠페인이 1분봉 5년치를 메모리에 올림(수 GB) |
+| 디스크 | **SSD 80 GB 이상** | 아래 용량 추정 + 1분봉 이력 + 백업 여유 |
+| OS | Ubuntu 24.04 LTS | Docker 공식 지원 |
+
+### 디스크 사용량 추정 (2026-11-09 60초 실측 기준)
+
+| 채널 | 메시지율 | 저장 행 | 하루 저장량(대략) |
+|---|---|---|---|
+| 코인원 체결 | ~8.5건/초 | 전부 | 약 70만 행 → 15~25 MB |
+| 업비트 체결 | ~0.5건/초 | 전부 | 약 4만 행 → 1~2 MB |
+| 코인원 호가 | ~6.8건/초 | 1초 1개 샘플 | 86,400 행 × 60개 가격/수량 → 25~40 MB |
+| 업비트 호가 | ~8.4건/초 | 1초 1개 샘플 | 같은 규모 25~40 MB |
+
+→ 하루 약 **0.1 GB**, 한 달 약 **3 GB**. 1년 보관 시 40 GB 안팎. 오래된 파일은 월 단위로 압축 병합하거나 외부 저장소로 옮긴다.
+
+---
+
+## 2. 최초 설치
+
+```bash
+# 1) Docker 설치 (Ubuntu)
+curl -fsSL https://get.docker.com | sudo sh
+sudo usermod -aG docker $USER && newgrp docker
+
+# 2) 시간대 / 시간 동기화 (KST 경계가 리스크 한도의 기준)
+sudo timedatectl set-timezone Asia/Seoul
+timedatectl status          # "System clock synchronized: yes" 확인
+
+# 3) 코드 받기
+git clone <repo-url> btc-quant && cd btc-quant
+
+# 4) 데이터/런타임 디렉터리 — 컨테이너는 uid 10001(비루트)로 실행된다
+mkdir -p data runtime research logs
+sudo chown -R 10001:10001 data runtime
+
+# 5) 비밀값
+cp deploy/.env.example deploy/.env
+chmod 600 deploy/.env
+vi deploy/.env              # TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID 등
+
+# 6) 빌드·기동
+docker compose -f deploy/docker-compose.yml up -d --build
+```
+
+**빌드 컨텍스트 주의**: compose 의 빌드 컨텍스트는 저장소 루트다. `data/` 가 커지면 빌드가 느려지므로
+저장소 루트에 `.dockerignore`(내용: `data/`, `runtime/`, `logs/`, `research/`, `.venv/`, `**/__pycache__`)를
+두는 것을 권장한다.
+
+### 텔레그램 봇 준비
+1. 텔레그램에서 `@BotFather` → `/newbot` → 토큰을 `TELEGRAM_BOT_TOKEN` 에 넣는다.
+2. 봇에게 아무 메시지를 보낸 뒤 `https://api.telegram.org/bot<토큰>/getUpdates` 에서 `chat.id` 를 확인해
+   `TELEGRAM_CHAT_ID` 에 넣는다.
+3. 확인: `docker compose -f deploy/docker-compose.yml run --rm collector python -m btc_quant.live notify-test`
+
+값을 비워 두면 알림은 로그로만 남는다(동작에는 영향 없음). 알림은 분당 20건, 같은 문구는 5분에 1회로 제한된다.
+
+---
+
+## 3. Docker Compose 사용법
+
+모든 명령은 저장소 루트에서 실행. 줄여 쓰려면 `alias dc='docker compose -f deploy/docker-compose.yml'`.
+
+| 작업 | 명령 |
+|---|---|
+| 기동 / 갱신 후 재기동 | `dc up -d --build` |
+| 상태(헬스 포함) | `dc ps` |
+| 로그 따라가기 | `dc logs -f --tail 200 collector` |
+| 중지 (버퍼 flush 후 종료) | `dc stop collector` (SIGTERM → 최대 30초 대기) |
+| 재시작 | `dc restart collector` |
+| 헬스체크 수동 실행 | `dc exec collector python -m btc_quant.live healthcheck` |
+| 하트비트 내용 | `cat runtime/collector.heartbeat \| python3 -m json.tool` |
+| 코드 업데이트 | `git pull && dc up -d --build` |
+
+### 수집기 동작 요약
+- 코인원 `wss://stream.coinone.co.kr`, 업비트 `wss://api.upbit.com/websocket/v1` 에서 KRW-BTC 체결·호가 구독.
+- 저장: `data/raw/exchange=<ex>/symbol=BTC-KRW/{trades,orderbook}/date=YYYY-MM-DD/HH-<part>.parquet`
+  (**날짜·시각은 UTC**, `ts_recv` 기준). 기본 5분마다 새 part 파일이 생긴다.
+- 호가는 1초에 1개로 샘플링해 저장(상위 15단계 + 최우선 매수/매도, 스프레드 bp).
+- 30초 동안 메시지가 없으면 재연결, 실패 시 지수 백오프(최대 60초) + 지터.
+  5회 연속 실패하면 텔레그램 알림.
+- 끊긴 구간은 `runtime/collector_gaps.jsonl` 에 기록된다(추후 REST 백필 대상).
+- 10초마다 `runtime/collector.heartbeat` 갱신 → Docker 헬스체크가 90초 이상 미갱신 또는
+  거래소별 마지막 메시지 300초 초과 시 unhealthy.
+- `restart: unless-stopped` 는 프로세스가 **죽었을 때만** 재시작한다. unhealthy 상태 자동 재시작이
+  필요하면 `willfarrell/autoheal` 같은 보조 컨테이너를 쓰거나 cron 으로
+  `docker ps --filter health=unhealthy -q | xargs -r docker restart` 를 5분마다 실행한다.
+
+---
+
+## 4. 로그 로테이션
+
+- 컨테이너 로그: compose 에 `json-file` 드라이버 `max-size: 20m`, `max-file: 5` 설정(서비스당 최대 100 MB).
+- 데몬 전체 기본값도 두려면 `/etc/docker/daemon.json`:
+  ```json
+  { "log-driver": "json-file", "log-opts": { "max-size": "20m", "max-file": "5" } }
+  ```
+  변경 후 `sudo systemctl restart docker`.
+- `runtime/collector_gaps.jsonl` 은 크기가 작지만 월 1회 정리(백업 후 비우기).
+- 호스트의 cron/백업 스크립트 로그는 `logs/` 에 쓰고 `logrotate` 로 관리:
+  ```
+  /home/<user>/btc-quant/logs/*.log {
+      weekly
+      rotate 8
+      compress
+      missingok
+      notifempty
+      copytruncate
+  }
+  ```
+  (`/etc/logrotate.d/btc-quant` 로 저장)
+
+---
+
+## 5. 백업
+
+| 대상 | 중요도 | 방법 | 주기 |
+|---|---|---|---|
+| `research/` (원장·잠금 원장·리포트) | **최상** — 잠금 구간 개봉 이력은 재생성 불가 | git 커밋 + 외부 저장소 동기화 | 매일 |
+| `runtime/` (리스크 상태 JSON, 하트비트, 끊김 기록) | 높음 — 재시작 시 일/주 손익·고점 복원 | 외부 동기화 | 매시간 |
+| `data/raw/` 실시간 체결·호가 | 중 — 재수집 불가(과거 호가는 REST로 못 받음) | 외부 동기화(증분) | 매일 |
+| `data/raw/.../timeframe=1m` 캔들 | 낮음 — REST로 재수집 가능 | 선택 | — |
+| `deploy/.env` | 비밀값 | 비밀번호 관리자에 별도 보관 (백업 저장소에 올리지 말 것) | 변경 시 |
+
+예시 (rclone, S3 호환 저장소):
+
+```bash
+# crontab -e
+15 * * * *  rclone sync  ~/btc-quant/runtime  remote:btcq/runtime  >> ~/btc-quant/logs/backup.log 2>&1
+40 4 * * *  rclone copy  ~/btc-quant/data/raw remote:btcq/data/raw --min-age 2h >> ~/btc-quant/logs/backup.log 2>&1
+50 4 * * *  rclone sync  ~/btc-quant/research remote:btcq/research >> ~/btc-quant/logs/backup.log 2>&1
+```
+
+- `data/raw` 는 `copy`(삭제 전파 안 함) + `--min-age 2h`(작성 중인 시각은 제외).
+- 월 1회 복원 연습: 다른 디렉터리로 받아 `duckdb` 로 행 수를 확인.
+
+---
+
+## 6. 킬스위치
+
+리스크 관리자(`btc_quant.live.risk.RiskManager`)는 매 판단마다 `runtime/` 의 파일을 확인한다.
+
+| 파일 | 효과 | 설정 | 해제 |
+|---|---|---|---|
+| `runtime/KILL` | **신규 진입 금지**. 보유 포지션은 전략 청산 규칙대로 | `dc exec collector python -m btc_quant.live kill --reason "..."` 또는 `touch runtime/KILL` | `python -m btc_quant.live resume` 또는 `rm runtime/KILL` |
+| `runtime/FLATTEN` | 진입 금지 + **즉시 시장가 청산** | `... kill --flatten --reason "..."` | 같은 방법으로 삭제 |
+
+- 파일만 있으면 효과가 나므로 컨테이너 밖에서 `touch` 해도 된다(볼륨 공유).
+- `kill` 명령은 텔레그램으로도 알린다.
+- 텔레그램 명령으로 킬스위치를 거는 기능은 아직 없다(§10 미결).
+
+---
+
+## 7. 리스크 정지 수준 (PLAN §7 구현 요약)
+
+| 수준 | 원인 | 효과 | 해제 |
+|---|---|---|---|
+| PAUSE | 체결 2분 이상 미수신, API 3회 연속 오류, 참조가 괴리 초과 | 진입 금지 | 조건 해소 시 자동 |
+| DAY | 일일 손실 한도, 일일 거래 횟수 한도 | 진입 금지 | 다음 **KST 00:00** 자동 |
+| WEEK | 주간 손실 한도 | 진입 금지 + 알림 | 다음 **KST 월요일 00:00** 자동 |
+| HUMAN | 누적 낙폭, 성능 저하(CUSUM), B등급 전략의 수수료 변경 | 진입 금지 + 청산 | **사람만** (`clear_human_halt`) |
+| KILL | 킬스위치 파일 | 진입 금지 (FLATTEN 은 청산) | 파일 삭제 |
+
+- 일/주 손익은 평가자산(현금+보유 시가평가) 기준, 경계 직전 마지막 평가자산을 기준값으로 쓴다.
+- 일/주 손실 정지는 보유 포지션을 강제 청산하지 않는다. 데이터 이상(PAUSE)에서도 청산하지 않는다
+  (가격을 믿을 수 없을 때 시장가 매도는 더 위험).
+- A등급 전략은 수수료 변경 시 계속 운용하되 플래그·알림. B등급은 즉시 정지.
+- 상태는 `runtime/` 의 JSON 으로 저장되어 재시작 후에도 이어진다.
+
+---
+
+## 8. 알림별 대응
+
+| 알림 | 의미 | 할 일 |
+|---|---|---|
+| `[collector] <ex>: N회 연속 재연결 실패` | 거래소 WS 접속 불가 | ① 거래소 공지/점검 확인 ② `dc logs collector` 에서 오류 확인(DNS, TLS, 4xx) ③ VPS 네트워크 확인 `curl -I https://api.upbit.com` ④ 장시간이면 `runtime/collector_gaps.jsonl` 구간을 나중에 백필 |
+| 헬스체크 unhealthy | 하트비트 미갱신(프로세스 멈춤) 또는 데이터 300초 이상 없음 | `dc ps`, `dc logs`, `dc restart collector`. 디스크 가득 참(`df -h`) 여부 확인 |
+| 데이터 지연 PAUSE | 체결 2분 이상 없음 | 수집기 상태 확인. 업비트/코인원 한쪽만이면 해당 거래소 문제. 자동 해제됨 |
+| API 오류 3회 연속 | 주문/잔고 API 실패 | API 키 만료·권한, 요청 제한(429), 거래소 점검 확인. 성공 1회로 자동 해제 |
+| 가격 이상 | 거래 거래소 vs 참조가 괴리 초과 | 양쪽 호가 직접 확인. 거래소 단독 급변/오류일 수 있음 — 해소 전 수동 개입 금지 |
+| 일일 손실 한도 | 당일 진입 중지 | 대응 불필요(자정 자동 해제). 원인 거래를 일지에 기록 |
+| 주간 손실 한도 | 그 주 진입 중지 | 주간 리뷰에서 백테스트 분포와 비교. 월요일 자동 해제 |
+| 누적 낙폭 / 성능 저하 | 전략 정지(HUMAN), 청산 | 전략 검토 필수. 재개는 레지스트리 절차(새 버전 → 관문 재통과) 또는 명시적 `clear_human_halt` |
+| 수수료 변경 | 코인원 0% 이벤트 종료 가능성 | 코인원 공지 확인. B등급 전략은 정지 상태 유지, A등급은 업비트 비용 가정으로 재평가. 대체 경로(업비트) 검토 |
+| 킬스위치 설정/해제 | 사람이 조작함 | 본인 조작이 아니면 즉시 VPS 접근 기록 확인(`last`, `journalctl`) |
+
+---
+
+## 9. 정기 점검
+
+- **매일**: 텔레그램 알림 확인, `dc ps` 헬스, 디스크 `df -h`.
+- **매주**: `runtime/collector_gaps.jsonl` 끊김 합계, 수집 행 수(아래), 백업 로그.
+  ```bash
+  uv run python -c "import duckdb;print(duckdb.sql(\"select count(*) from read_parquet('data/raw/exchange=coinone/symbol=BTC-KRW/trades/**/*.parquet')\"))"
+  ```
+- **매월**: 백업 복원 연습, 보안 업데이트(`sudo apt upgrade`, `dc build --pull`), 코인원 수수료 공지 확인.
+
+---
+
+## 10. 미결 / 알려진 제한
+
+- 끊긴 구간의 REST 자동 백필은 아직 없다(끊김 기록만 남김).
+- 업비트 WS 는 연결 직후 최근 체결 1건을 SNAPSHOT 으로 보내며, 코인원 호가 첫 메시지의 `ts` 는 수 초 전일 수 있다
+  (지연 분석 시 첫 메시지 제외 권장).
+- 텔레그램 → 킬스위치 명령 수신은 미구현.
