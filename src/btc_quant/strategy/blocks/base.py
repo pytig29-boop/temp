@@ -71,8 +71,12 @@ class Registry:
 
     def evaluate(self, ref, bars: pd.DataFrame, ctx: Context | None = None) -> pd.Series:
         d = self._defs[ref.block]
-        out = d.fn(bars, ctx or Context(), **ref.params)
-        return out.reindex(bars.index).fillna(False).astype(bool)
+        ctx = ctx or Context()
+        missing = [k for k in d.requires if k not in ctx.aux]
+        if missing:
+            raise KeyError(f"block {ref.block} requires ctx.aux {missing}")
+        out = d.fn(bars, ctx, **ref.params)
+        return out.reindex(bars.index, fill_value=False).astype(bool)
 
 
 REGISTRY = Registry()
