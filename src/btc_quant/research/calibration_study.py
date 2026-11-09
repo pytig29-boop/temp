@@ -128,6 +128,7 @@ class StudyConfig:
     jobs: int = 1
     override_null_runs: bool = False       # quick: config G2.null_runs 를 n_null 로 낮춤
     n_breakeven_markets: int = 0           # '손익분기' 귀무: S* 의 참 비용후 Sharpe = 0 (k 역보간)
+    plant_lookback: int = PLANT_LOOKBACK   # 48 = 칼날 엣지(S* 만), 24 = 완만한 엣지(인접 lookback 도 공유)
 
     def to_record(self) -> dict:
         d = asdict(self)
@@ -140,6 +141,14 @@ def quick_config(jobs: int = 1) -> StudyConfig:
                        grid="g4", decay_grids=(), decay_strength=3.0, n_decay_markets=0, n_null_decay=0,
                        n_null=100, top_k=2, pilot_ks=(0.0, 0.04, 0.1), pilot_seeds=1, pilot_years=1.0,
                        jobs=jobs, override_null_runs=True)
+
+
+def smooth_config(jobs: int = 4) -> StudyConfig:
+    """완만한 엣지 변형: 드리프트를 lookback 24 돌파 전체에 심음 → S*(48) 와 인접 lookback 이 엣지를 공유
+    (G3 고원이 '칼날' 설계 때문에 떨어지는지 분리). 귀무·격자 실험은 full 과 같으므로 생략."""
+    return StudyConfig("full-smooth", FULL_LAYOUT, strengths=(0.5, 1.0, 2.0, 3.0), n_null_markets=0,
+                       n_planted_markets=8, grid="g12", decay_grids=(), decay_strength=2.0, n_decay_markets=0,
+                       n_null_decay=0, n_null=1000, jobs=jobs, plant_lookback=24, seed0=5000)
 
 
 def full_config(jobs: int = 4) -> StudyConfig:
@@ -206,14 +215,16 @@ def _gen(n1, minute0, seed, k_edge, lookback, hold5, h_target, alpha, beta, seas
     return o, hi, lo, c
 
 
-def gen_market(start: str, end: str, seed: int, k_edge: float = 0.0) -> pd.DataFrame:
-    """[start, end) 1분봉 합성 시장 (start 는 자정 정렬 권장)."""
+def gen_market(start: str, end: str, seed: int, k_edge: float = 0.0,
+               plant_lookback: int = PLANT_LOOKBACK) -> pd.DataFrame:
+    """[start, end) 1분봉 합성 시장 (start 는 자정 정렬 권장). plant_lookback = 드리프트를 심는 돌파 lookback
+    (48 = S* 에만 있는 '칼날' 엣지, 24 = lookback 24 돌파 전체(48·96 돌파 포함)에 있는 '완만한' 엣지)."""
     idx = pd.date_range(start, end, freq="1min", tz="UTC", inclusive="left", name="ts")
     minute0 = int(idx[0].value // 60_000_000_000)
     if minute0 % 5:
         raise ValueError("start must be aligned to 5 minutes")
     h_target = ANNUAL_VOL ** 2 / (365 * 24)
-    o, h, lo, c = _gen(len(idx), minute0, int(seed), float(k_edge), PLANT_LOOKBACK, PLANT_HOLD5, h_target,
+    o, h, lo, c = _gen(len(idx), minute0, int(seed), float(k_edge), int(plant_lookback), PLANT_HOLD5, h_target,
                        GARCH_ALPHA, GARCH_BETA, season_profile(), T_DF, WICK)
     rng = np.random.default_rng(seed)
     vol = rng.lognormal(0.0, 0.5, len(idx))
@@ -233,16 +244,16 @@ def planted_sharpe(m1: pd.DataFrame, start, end) -> float:
 
 
 def _pilot_one(args) -> tuple[float, int, float]:
-    k, seed, years = args
+    k, seed, years, plb = args
     start = pd.Timestamp("2010-01-01", tz="UTC")
     end = start + pd.Timedelta(days=round(365.25 * years))
-    m1 = _engine_m1(gen_market(str(start), str(end), seed, k))
+    m1 = _engine_m1(gen_market(str(start), str(end), seed, k, plb))
     return k, seed, planted_sharpe(m1, start + pd.Timedelta(days=3), end)
 
 
 def pilot_edge_map(cfg: StudyConfig, pool=None) -> dict:
     """k → S* 연 Sharpe (seed 평균). 단조 보정(누적 최대) 후 목표 Sharpe 를 k 로 역보간."""
-    tasks = [(k, cfg.seed0 + 50_000 + s, cfg.pilot_years) for k in cfg.pilot_ks for s in range(cfg.pilot_seeds)]
+    tasks = [(k, cfg.seed0 + 50_000 + s, cfg.pilot_years, cfg.plant_lookback) for k in cfg.pilot_ks for s in range(cfg.pilot_seeds)]
     rows = list(pool.map(_pilot_one, tasks)) if pool else [_pilot_one(t) for t in tasks]
     ks = np.array(cfg.pilot_ks, float)
     sr = np.array([np.mean([r[2] for r in rows if r[0] == k]) for k in ks])
@@ -275,11 +286,11 @@ def template_for(grid: str, name: str) -> dict:
             "filters": g["filters"], "exits": g["exits"], "budget": 10_000, "family": f"calib_{grid}"}
 
 
-def make_root(tmp: Path, layout: Layout, seed: int, k_edge: float) -> Path:
+def make_root(tmp: Path, layout: Layout, seed: int, k_edge: float, plant_lookback: int = PLANT_LOOKBACK) -> Path:
     from btc_quant.data.store import write_ohlcv
     (tmp / "config").mkdir(parents=True, exist_ok=True)
     (tmp / "config" / "splits.yaml").write_text(yaml.safe_dump(layout.splits()))
-    df = gen_market(layout.data_start, layout.val_end, seed, k_edge)
+    df = gen_market(layout.data_start, layout.val_end, seed, k_edge, plant_lookback)
     write_ohlcv(df, "coinone", "BTC-KRW", "1m", root=tmp / "data" / "raw")
     return tmp
 
@@ -307,7 +318,7 @@ def run_market(task: dict) -> dict:
     layout = Layout(**task["layout"])
     tmp = Path(tempfile.mkdtemp(prefix="calib_"))
     try:
-        make_root(tmp, layout, task["seed"], task["k"])
+        make_root(tmp, layout, task["seed"], task["k"], task.get("plant_lookback", PLANT_LOOKBACK))
         env = ResearchEnv.at(tmp)
         tpl = CampaignTemplate.from_dict(template_for(task["grid"], f"calib_{task['grid']}"))
         cr = run_campaign(tpl, env=env)
@@ -354,7 +365,15 @@ def run_market(task: dict) -> dict:
             "star_outcome": "not_selected" if rep is None else rep[1],
             "star_val_sharpe": None if not g6 else g6.get("sharpe"),
             "star_val_p": None if not g6 else g6.get("val_p_value"),
+            "star_val_stress_mdd": None if not g6 else g6.get("stress_mdd"),
+            "star_val_mc_mdd95": None if not g6 else g6.get("mc_mdd95"),
+            "star_trades_per_day": float(prim.at[lh_star, "trades_per_day"]),
+            "plant_lookback": task.get("plant_lookback", PLANT_LOOKBACK),
             "outcomes": pd.Series(labels, dtype=object).value_counts().to_dict() if labels else {},
+            "validated_specs": [{"entry": c["spec"]["entry"], "filters": c["spec"]["filters"],
+                                 "exit": {k: c["spec"]["exit"][k] for k in ("stop_loss_pct", "take_profit_pct",
+                                                                            "max_hold_min")},
+                                 "trades_per_day": c["metrics"].get("trades_per_day")} for c in validated],
             "k_eff": out["campaign_stats"]["k_eff_clusters"], "pbo": out["campaign_stats"].get("pbo"),
             "runtime_sec": round(time.time() - t0, 1),
         }
@@ -366,7 +385,7 @@ def run_market(task: dict) -> dict:
 # ============================================================== 연구
 def build_tasks(cfg: StudyConfig, k_for: dict, k_breakeven: float = 0.0) -> list[dict]:
     base = {"layout": asdict(cfg.layout), "n_null": cfg.n_null, "top_k": cfg.top_k,
-            "override_null_runs": cfg.override_null_runs}
+            "override_null_runs": cfg.override_null_runs, "plant_lookback": cfg.plant_lookback}
     tasks, seed = [], cfg.seed0
     for s in cfg.strengths:
         n = cfg.n_null_markets if s <= 0 else cfg.n_planted_markets
@@ -539,11 +558,12 @@ def main(argv=None) -> int:
     m = ap.add_mutually_exclusive_group()
     m.add_argument("--quick", action="store_true")
     m.add_argument("--full", action="store_true")
+    m.add_argument("--full-smooth", action="store_true", help="완만한 엣지(plant_lookback=24) 검정력만")
     ap.add_argument("--jobs", type=int, default=min(4, os.cpu_count() or 1))
     ap.add_argument("--out", default=None, help="markdown report path")
     ap.add_argument("--json", default=None, help="raw result json path")
     a = ap.parse_args(argv)
-    cfg = full_config(a.jobs) if a.full else quick_config(a.jobs)
+    cfg = (full_config(a.jobs) if a.full else smooth_config(a.jobs) if a.full_smooth else quick_config(a.jobs))
     res = run_study(cfg)
     if a.json:
         Path(a.json).parent.mkdir(parents=True, exist_ok=True)
