@@ -1,0 +1,7 @@
+label,family,entry,filters,n_events,p_signal,best_h,excess_bp,z,net_bp[coinone_conservative],net_bp[upbit_conservative],info_h,profile,significant,passed,fail_reason
+"bollinger_z_revert(window=24,z=2.5)",liq_meanrev,bollinger_z_revert,-,2058,0.00896835,240,8.28695,2.74894,4.86681,-9.1302,30,peaked,True,True,
+"bollinger_z_revert(window=24,z=2.5) & trend_regime_1h(span=24)",liq_meanrev,bollinger_z_revert,trend_regime_1h,495,0.0428151,120,10.3838,2.18974,6.37438,-7.62474,30,peaked,True,True,
+"bollinger_z_revert(window=24,z=2.5) & trend_regime_1h(span=168)",liq_meanrev,bollinger_z_revert,trend_regime_1h,879,0.145778,120,5.05279,1.65865,2.31139,-11.6821,30,peaked,False,False,not significant after correction
+"bollinger_z_revert(window=96,z=2.5)",liq_meanrev,bollinger_z_revert,-,1965,0.0836543,60,3.63977,1.91283,-0.338755,-14.3285,60,peaked,False,False,not significant after correction
+"bollinger_z_revert(window=96,z=2.5) & trend_regime_1h(span=24)",liq_meanrev,bollinger_z_revert,trend_regime_1h,44,1,120,-12.0049,-0.618689,-15.651,-29.6193,,none (excess ≤ 0 at all horizons),False,False,not significant after correction
+"bollinger_z_revert(window=96,z=2.5) & trend_regime_1h(span=168)",liq_meanrev,bollinger_z_revert,trend_regime_1h,501,0.666291,60,2.38973,0.76513,-1.52155,-15.5096,60,peaked,False,False,not significant after correction

@@ -1,0 +1,5 @@
+label,family,entry,filters,n_events,p_signal,best_h,excess_bp,z,net_bp[coinone_conservative],net_bp[upbit_conservative],info_h,profile,significant,passed,fail_reason
+donchian_breakout(lookback=24),vol_breakout,donchian_breakout,-,401,0.00284973,1440,52.169,3.10546,62.4993,48.4216,1440,peaked,True,True,
+donchian_breakout(lookback=48),vol_breakout,donchian_breakout,-,303,0.00052901,1440,67.0553,3.57318,77.0952,62.9971,1440,peaked,True,True,
+"atr_channel_breakout(span=24,mult=3.0)",vol_breakout,atr_channel_breakout,-,360,0.00084507,480,30.2792,3.44866,30.1827,16.1503,480,peaked,True,True,
+"ema_slope(span=24,min_slope_bp=5.0)",vol_breakout,ema_slope,-,2171,0.0122514,480,8.63654,2.64506,8.20619,-5.7955,480,peaked,True,True,

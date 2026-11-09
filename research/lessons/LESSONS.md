@@ -3,7 +3,7 @@
 > `btc_quant.research.lessons.render_markdown()` 생성물. **직접 편집 금지** (원본: `research/lessons/*.jsonl`).
 > 사실(Facts)은 파이프라인 결과에서 자동 추출되어 불변이다. 해석(Interpretations)은 AI 작성이며
 > 후속 캠페인으로 verified/refuted 되기 전까지 **unverified** 이다. Val/잠금은 결과 코드만.
-> 생성: 2026-11-09T22:51:38+00:00 · 사실 8 · 해석 5 · 사후분석 5 · 파생 3
+> 생성: 2026-11-09T23:32:17+00:00 · 사실 13 · 해석 5 · 사후분석 5 · 파생 9
 
 ## 실패 유형 (자동 분류)
 
@@ -26,8 +26,8 @@
 
 | family | 캠페인 | 누적 시도 | 결과 | 주 실패 유형 |
 |---|---|---|---|---|
-| `liq_meanrev` | 3 | 30 | passed 1, failed 2 | `PARAM_SPIKE`×1, `UNSTABLE`×1 |
-| `vol_breakout` | 2 | 17 | passed 1, failed 1 | `PARAM_SPIKE`×1 |
+| `liq_meanrev` | 5 | 41 | passed 2, failed 3 | `PARAM_SPIKE`×1, `UNSTABLE`×1, `NO_SIGNAL`×1 |
+| `vol_breakout` | 5 | 37 | passed 3, failed 2 | `PARAM_SPIKE`×1, `VAL_FAIL`×1 |
 | `xvenue_upbit_lead` | 3 | 16 | failed 2, passed 1 | `COST_EATEN`×1, `LOW_SAMPLE`×1 |
 
 ## 교훈 (사실 → 해석)
@@ -186,6 +186,83 @@
   - 근거: fact-000008 candidates: trend spec 7cf92d03f9 sharpe 1.055 / sharpe_w 0.571, G4 rolling 0.64, G5 dsr 0.872 (n_trials 15), skew 2.41, kurtosis 44.5; unfiltered 728b01519b sharpe_w 0.594, rolling 0.45; ad-hoc Dev robustness_for_spec(c2_liq_meanrev_wide_atr_v1_7cf92d03f9), no ledger trial: regime FAIL, trend 'up' days carry 0.78 of PnL (Sharpe 2.44), 'sideways' days Sharpe -0.62; alpha FAIL (alpha_t 1.93, beta_t 5.3); leave-year-out: 2021 Sharpe 2.60, rest 0.40, 2025 0.03; top 1% of trades = 0.47 of PnL; latency / cost x1.5 / cross-venue (Upbit ratio 0.93) passed; camp-000005 runs (same entries, SL 3-5 / TP 3 ATR): z2.5+trend sharpe_w 0.18-0.61, so exits change little
   - 검증 방법: Side calculation (signal_study.study_signal, no ledger) of bollinger_z_revert(96,2.5)&trend_regime_1h(24), split by calendar year on Dev. Refuted if 2022-2025 each show positive excess at 120 min with z > 2. Alternatively, a pre-registered screen in family liq_meanrev that pairs the entry with a vol/trend-strength filter, testing whether the edge is conditional on regime rather than on the dislocation.
 
+### fact-000009 · signal_screen `camp-000009` · family `vol_breakout`
+
+**사실 (자동, 불변)**
+
+- 가설 hyp-000009: On Coinone BTC-KRW at 1h decisions, upside breakouts of multi-day highs (donchian_breakout 24/48/144 h), ATR-channel breakouts and persistent positive EMA slope (ema_slope span 48) are followed by 4-24 h returns above a matched (KST hour x vol) null, net of coinone_conservative cost; optionally only in high short-term vol (vol_regime 0.67) or above the 1-week EMA (trend_regime_1h 168).
+- 결과: **passed** · 주 실패 유형: `None` · 분포: `NO_SIGNAL`×2, `LOW_SAMPLE`×1
+- 깔때기(전체 None 스펙): G1 None · SR_w>0 None · G4 None | 상위 None:  · Dev 생존 None
+  - `donchian_breakout(lookback=24)` events=1361 p=0.005 best_h=1440 → PASS
+  - `donchian_breakout(lookback=24) & vol_regime(window=24,min_pct=0.67)` events=518 p=0.138 best_h=1440 → `NO_SIGNAL`
+  - `donchian_breakout(lookback=48)` events=952 p=0.010 best_h=1440 → PASS
+  - `donchian_breakout(lookback=48) & vol_regime(window=24,min_pct=0.67)` events=398 p=0.023 best_h=1440 → PASS
+  - `donchian_breakout(lookback=144)` events=583 p=0.000 best_h=1440 → PASS
+  - `donchian_breakout(lookback=144) & vol_regime(window=24,min_pct=0.67)` events=285 p=0.003 best_h=1440 → `LOW_SAMPLE`
+  - `atr_channel_breakout(span=24,mult=2.0)` events=2666 p=0.008 best_h=480 → PASS
+  - `atr_channel_breakout(span=24,mult=3.0)` events=1165 p=0.000 best_h=480 → PASS
+- 범위: coinone None 1m · dev 2021-01-01T00:00:00+00:00~2025-11-01T00:00:00+00:00 · 블록 ['atr_channel_breakout', 'donchian_breakout', 'ema_slope'] / None · 재검토 기한 2027-05-08
+- 재검토 조건: Dev data period changes; venue/cost model changes; decision interval changes (bar_minutes)
+
+### fact-000010 · signal_screen `camp-000010` · family `vol_breakout`
+
+**사실 (자동, 불변)**
+
+- 가설 hyp-000010: On Coinone BTC-KRW at 4h decisions, breakouts of 4-8 day highs (donchian_breakout 24/48 bars), ATR-channel breakouts (24, 3) and positive EMA slope (ema_slope 24, 5 bp/bar) are followed by 8-48 h returns above a matched (KST hour x vol) null, net of coinone_conservative cost.
+- 결과: **passed** · 주 실패 유형: `None` · 분포: –
+- 깔때기(전체 None 스펙): G1 None · SR_w>0 None · G4 None | 상위 None:  · Dev 생존 None
+  - `donchian_breakout(lookback=24)` events=401 p=0.003 best_h=1440 → PASS
+  - `donchian_breakout(lookback=48)` events=303 p=0.001 best_h=1440 → PASS
+  - `atr_channel_breakout(span=24,mult=3.0)` events=360 p=0.001 best_h=480 → PASS
+  - `ema_slope(span=24,min_slope_bp=5.0)` events=2171 p=0.012 best_h=480 → PASS
+- 범위: coinone None 1m · dev 2021-01-01T00:00:00+00:00~2025-11-01T00:00:00+00:00 · 블록 ['atr_channel_breakout', 'donchian_breakout', 'ema_slope'] / None · 재검토 기한 2027-05-08
+- 재검토 조건: Dev data period changes; venue/cost model changes; decision interval changes (bar_minutes)
+
+### fact-000011 · signal_screen `camp-000011` · family `liq_meanrev`
+
+**사실 (자동, 불변)**
+
+- 가설 hyp-000011: On Coinone BTC-KRW at 15m decisions, closes far below the rolling mean (bollinger_z_revert window 24/96, z 2.5) are followed by 1-4 h returns above a matched (KST hour x vol) null, net of coinone_conservative cost, with and without a 1h trend filter (trend_regime_1h 24) or a 1-week bull-regime filter (trend_regime_1h 168), and the excess is not concentrated in one Dev year.
+- 결과: **passed** · 주 실패 유형: `None` · 분포: `NO_SIGNAL`×4
+- 깔때기(전체 None 스펙): G1 None · SR_w>0 None · G4 None | 상위 None:  · Dev 생존 None
+  - `bollinger_z_revert(window=24,z=2.5)` events=2058 p=0.009 best_h=240 → PASS
+  - `bollinger_z_revert(window=24,z=2.5) & trend_regime_1h(span=24)` events=495 p=0.043 best_h=120 → PASS
+  - `bollinger_z_revert(window=24,z=2.5) & trend_regime_1h(span=168)` events=879 p=0.146 best_h=120 → `NO_SIGNAL`
+  - `bollinger_z_revert(window=96,z=2.5)` events=1965 p=0.084 best_h=60 → `NO_SIGNAL`
+  - `bollinger_z_revert(window=96,z=2.5) & trend_regime_1h(span=24)` events=44 p=1.000 best_h=120 → `NO_SIGNAL`
+  - `bollinger_z_revert(window=96,z=2.5) & trend_regime_1h(span=168)` events=501 p=0.666 best_h=60 → `NO_SIGNAL`
+- 범위: coinone None 1m · dev 2021-01-01T00:00:00+00:00~2025-11-01T00:00:00+00:00 · 블록 ['bollinger_z_revert'] / None · 재검토 기한 2027-05-08
+- 재검토 조건: Dev data period changes; venue/cost model changes; decision interval changes (bar_minutes)
+
+### fact-000012 · signal_screen `camp-000012` · family `liq_meanrev`
+
+**사실 (자동, 불변)**
+
+- 가설 hyp-000012: On Coinone BTC-KRW at 1h decisions, closes far below the rolling mean (bollinger_z_revert window 24/96 h, z 2.5) or RSI(14) crossing back above 25 are followed by 4-24 h returns above a matched (KST hour x vol) null, net of coinone_conservative cost, with and without a 1-week bull-regime filter (trend_regime_1h 168), and the excess is not concentrated in one Dev year.
+- 결과: **failed** · 주 실패 유형: `NO_SIGNAL` · 분포: `NO_SIGNAL`×5
+- 깔때기(전체 None 스펙): G1 None · SR_w>0 None · G4 None | 상위 None:  · Dev 생존 None
+  - `bollinger_z_revert(window=24,z=2.5)` events=691 p=0.787 best_h=240 → `NO_SIGNAL`
+  - `bollinger_z_revert(window=24,z=2.5) & trend_regime_1h(span=168)` events=141 p=1.000 best_h=240 → `NO_SIGNAL`
+  - `bollinger_z_revert(window=96,z=2.5)` events=835 p=1.000 best_h=240 → `NO_SIGNAL`
+  - `bollinger_z_revert(window=96,z=2.5) & trend_regime_1h(span=168)` events=1 p=1.000 best_h=240 → `NO_SIGNAL`
+  - `rsi_oversold_bounce(period=14,level=25)` events=284 p=1.000 best_h=240 → `NO_SIGNAL`
+- 범위: coinone None 1m · dev 2021-01-01T00:00:00+00:00~2025-11-01T00:00:00+00:00 · 블록 ['bollinger_z_revert', 'rsi_oversold_bounce'] / None · 재검토 기한 2027-05-08
+- 재검토 조건: Dev data period changes; venue/cost model changes; decision interval changes (bar_minutes)
+
+### fact-000013 · campaign `camp-000013` · family `vol_breakout`
+
+**사실 (자동, 불변)**
+
+- 가설 hyp-000013: Coinone BTC-KRW 1h: atr_channel_breakout(span 24, mult 3) with ATR exits (SL 2/3 ATR x TP 1.5/3 ATR, max hold 480 min = information horizon) earns positive coinone_conservative net returns that pass G0-G5 on Dev and the robustness suite.
+- 결과: **failed** · 주 실패 유형: `VAL_FAIL` · 분포: –
+- 파생: drv-000008 (계열 점검: ok)
+- 깔때기(전체 4 스펙): G1 4 · SR_w>0 4 · G4 4 | 상위 5: G0 1 · G1 1 · G2 1 · G3 1 · G4 1 · G5 1 · Dev 생존 1
+- 선택편향 입력: n_campaign_specs=4, k_eff_clusters=1, n_family_trials=37, n_global_trials=94, n_trials_dsr=9.250, pbo=0.058, cluster_threshold=0.500
+- Val(G6): 평가 1 · 통과 0 (결과 코드만) · 잠금: not_accessed
+  - #1 `c2b_vol_breakout_atrch_1h_atr_72bbc9dae5` SR_w=1.019 trades=610 first_failed=None → `VAL_FAIL` ['VAL_FAIL'] · val=fail
+- 범위: coinone BTC-KRW 1m · dev 2021-01-01T00:00:00+00:00~2025-11-01T00:00:00+00:00 · 블록 atr_channel_breakout / [[]] · 재검토 기한 2027-05-08
+- 재검토 조건: Dev data period or segment boundaries change (new data, lockbox rolled into Dev/Val); venue or cost model changes (e.g. Coinone 0% fee promotion ends, Upbit fee changes); timeframe / decision interval changes (5m ↔ 1m); a block used here is re-implemented (new block version) or an engine bug is fixed; review date 2027-05-08 passes
+
 ## 파생 가설 (계열 상속)
 
 | id | 부모 | family | override | 가설 |
@@ -193,6 +270,12 @@
 | drv-000001 | fact-000001 | `xvenue_upbit_lead` | – | On Coinone 1m, only large Upbit impulses (upbit_lead_impulse thr_bp 40, k 1/3, non-quiet KST hours) produce a Coinone catch-up larger than the 4 bp conservative round trip within 5-30 min. |
 | drv-000002 | fact-000005 | `liq_meanrev` | – | Coinone 5m bollinger_z_revert(96, 2.5) with/without trend_regime_1h(24), held 120-240 min with wide ATR exits (SL 6, TP 6 ATR) that approximate the event study's time exit, passes G0-G5 on Dev. |
 | drv-000003 | fact-000006 | `vol_breakout` | – | Coinone 5m donchian_breakout(288) carries materially more net information when 5m realised vol is in the top 20% of its trailing 7-day range (vol_regime min_pct 0.8). |
+| drv-000004 | fact-000006 | `vol_breakout` | – | On Coinone BTC-KRW at 1h decisions, upside breakouts of multi-day highs (donchian_breakout 24/48/144 h), ATR-channel breakouts and persistent positive EMA slope (ema_slope span 48) are followed by 4-24 h returns above a matched (KST hour x vol) null, net of coinone_conservative cost; optionally only in high short-term vol (vol_regime 0.67) or above the 1-week EMA (trend_regime_1h 168). |
+| drv-000005 | fact-000006 | `vol_breakout` | – | On Coinone BTC-KRW at 4h decisions, breakouts of 4-8 day highs (donchian_breakout 24/48 bars), ATR-channel breakouts (24, 3) and positive EMA slope (ema_slope 24, 5 bp/bar) are followed by 8-48 h returns above a matched (KST hour x vol) null, net of coinone_conservative cost. |
+| drv-000006 | fact-000008 | `liq_meanrev` | – | On Coinone BTC-KRW at 15m decisions, closes far below the rolling mean (bollinger_z_revert window 24/96, z 2.5) are followed by 1-4 h returns above a matched (KST hour x vol) null, net of coinone_conservative cost, with and without a 1h trend filter (trend_regime_1h 24) or a 1-week bull-regime filter (trend_regime_1h 168), and the excess is not concentrated in one Dev year. |
+| drv-000007 | fact-000008 | `liq_meanrev` | – | On Coinone BTC-KRW at 1h decisions, closes far below the rolling mean (bollinger_z_revert window 24/96 h, z 2.5) or RSI(14) crossing back above 25 are followed by 4-24 h returns above a matched (KST hour x vol) null, net of coinone_conservative cost, with and without a 1-week bull-regime filter (trend_regime_1h 168), and the excess is not concentrated in one Dev year. |
+| drv-000008 | fact-000009 | `vol_breakout` | – | Coinone BTC-KRW 1h: atr_channel_breakout(span 24, mult 3) with ATR exits (SL 2/3 ATR x TP 1.5/3 ATR, max hold 480 min = information horizon) earns positive coinone_conservative net returns that pass G0-G5 on Dev and the robustness suite. |
+| drv-000009 | fact-000009 | `vol_breakout` | – | Coinone BTC-KRW 1h: donchian_breakout(lookback 48/144 h) with ATR exits (SL 2.5/3.5 ATR x TP 2.5/5 ATR, max hold 1440 min = information horizon) earns positive coinone_conservative net returns that pass G0-G5 on Dev and the robustness suite. |
 
 ## 과정 사후분석 (버그·데이터·절차)
 

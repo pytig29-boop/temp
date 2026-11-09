@@ -1,0 +1,13 @@
+label,family,entry,filters,n_events,p_signal,best_h,excess_bp,z,net_bp[coinone_conservative],net_bp[upbit_conservative],info_h,profile,significant,passed,fail_reason
+donchian_breakout(lookback=24),vol_breakout,donchian_breakout,-,1361,0.00542295,1440,33.3818,2.90991,44.1248,30.0728,1440,rising (z still increasing at the longest horizon — information may persist longer),True,True,
+"donchian_breakout(lookback=24) & vol_regime(window=24,min_pct=0.67)",vol_breakout,donchian_breakout,vol_regime,518,0.1383,1440,30.514,1.6839,53.7533,39.6879,1440,rising (z still increasing at the longest horizon — information may persist longer),False,False,not significant after correction
+donchian_breakout(lookback=48),vol_breakout,donchian_breakout,-,952,0.0101898,1440,37.2426,2.70682,47.9794,33.9221,1440,rising (z still increasing at the longest horizon — information may persist longer),True,True,
+"donchian_breakout(lookback=48) & vol_regime(window=24,min_pct=0.67)",vol_breakout,donchian_breakout,vol_regime,398,0.023069,1440,51.9875,2.42332,73.6472,59.5539,1440,rising (z still increasing at the longest horizon — information may persist longer),True,True,
+donchian_breakout(lookback=144),vol_breakout,donchian_breakout,-,583,0.000207451,1440,69.9762,3.81119,80.7196,66.6165,1440,rising (z still increasing at the longest horizon — information may persist longer),True,True,
+"donchian_breakout(lookback=144) & vol_regime(window=24,min_pct=0.67)",vol_breakout,donchian_breakout,vol_regime,285,0.00321263,1440,80.2851,3.06984,103.364,89.2292,1440,rising (z still increasing at the longest horizon — information may persist longer),True,False,too few events
+"atr_channel_breakout(span=24,mult=2.0)",vol_breakout,atr_channel_breakout,-,2666,0.00796003,480,13.0322,2.7878,12.4869,-1.52073,480,peaked,True,True,
+"atr_channel_breakout(span=24,mult=3.0)",vol_breakout,atr_channel_breakout,-,1165,2.84969e-05,480,29.0521,4.27635,28.971,14.9402,480,peaked,True,True,
+"ema_slope(span=48,min_slope_bp=3.0)",vol_breakout,ema_slope,-,6612,0.00430358,480,9.38923,2.98143,8.71887,-5.28353,480,peaked,True,True,
+"ema_slope(span=48,min_slope_bp=3.0) & trend_regime_1h(span=168)",vol_breakout,ema_slope,trend_regime_1h,6017,0.0913326,480,6.03158,1.87431,9.64042,-4.36327,480,peaked,False,False,not significant after correction
+"ema_slope(span=48,min_slope_bp=5.0)",vol_breakout,ema_slope,-,4632,0.00272967,480,12.1663,3.11817,11.5674,-2.43897,480,peaked,True,True,
+"ema_slope(span=48,min_slope_bp=5.0) & trend_regime_1h(span=168)",vol_breakout,ema_slope,trend_regime_1h,4302,0.0665101,480,7.95334,2.01086,11.6613,-2.34526,60,decaying (z maximal at the shortest horizon),True,True,
