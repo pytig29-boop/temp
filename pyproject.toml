@@ -11,6 +11,9 @@ dependencies = [
     "requests>=2.31",
     "pyyaml>=6",
     "tabulate>=0.9",
+    "numba>=0.60",
+    "scipy>=1.13",
+    "websockets>=13",
 ]
 
 [project.scripts]
