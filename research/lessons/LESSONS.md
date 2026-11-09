@@ -3,7 +3,7 @@
 > `btc_quant.research.lessons.render_markdown()` 생성물. **직접 편집 금지** (원본: `research/lessons/*.jsonl`).
 > 사실(Facts)은 파이프라인 결과에서 자동 추출되어 불변이다. 해석(Interpretations)은 AI 작성이며
 > 후속 캠페인으로 verified/refuted 되기 전까지 **unverified** 이다. Val/잠금은 결과 코드만.
-> 생성: 2026-11-09T13:01:35+00:00 · 사실 0 · 해석 0 · 사후분석 4 · 파생 0
+> 생성: 2026-11-09T14:46:57+00:00 · 사실 0 · 해석 0 · 사후분석 5 · 파생 0
 
 ## 실패 유형 (자동 분류)
 
@@ -86,6 +86,19 @@ _(none)_
   - 캠페인 등록 전 검정력 계산기 (btc_quant.research.power) 로 필요 Sharpe 확인
   - 계열별 주간 시도 예산 (LessonBook.trial_budget)
 - 참고: docs/PLAN.md §10b
+
+### pm-000005 · [data] Coinone 1m stores synthesised no-trade bars without a filled flag (2026-11-09, mitigated)
+
+- **무슨 일**: Coinone 1m store is 100% complete: minutes with no trades (incl. maintenance windows up to 7.8h) are flat bars with volume=0. regularize() marked them filled=False, so engine and signal-study entries could fill at stale synthetic prices. 7.6% of Dev bars, 32 maintenance windows; the earlier real-data 1m smoke screen may be affected.
+- **근본 원인**: The source/collector regularises Coinone bars before writing; quality pipeline detected gaps only from missing rows.
+- **영향**: Possible spurious entries at stale prices in Coinone 1m research before the fix; no official ledger results affected (ledger empty).
+- **발견 경위**: data-steward audit research/reports/data_audit_20261109.md
+- **재발 방지**:
+  - regularize(zero_volume_as_filled=True) by default: zero-volume flat bars are filled (fixed 2026-11-09, test added)
+  - data-steward flags any series at 100.000% coverage with zero-volume flat bars
+  - re-run any Coinone 1m screen made before the fix
+  - follow-ups: Coinone-specific wick cleaning (k≈0.01 with Upbit confirmation); no Coinone 1m volume/range/ATR features; exclude KST 02-07 and 2023-07..10 for Coinone execution studies
+- 참고: research/reports/data_audit_20261109.md
 
 
 ## 무결성

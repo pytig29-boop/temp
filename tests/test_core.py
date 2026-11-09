@@ -209,3 +209,14 @@ def test_coinone_parse_chart_and_pair():
 def test_coinone_error_raises():
     with pytest.raises(RuntimeError):
         coinone.parse_chart({"result": "error", "error_code": "317"})
+
+
+
+def test_regularize_marks_zero_volume_flat_bars_filled():
+    m1 = flat_m1(n=6).drop(columns="filled")
+    m1.iloc[2, m1.columns.get_loc("volume")] = 0.0          # 코인원식 무거래 평탄 봉
+    m1.iloc[3, m1.columns.get_loc("volume")] = 0.0
+    m1.iloc[3, m1.columns.get_loc("high")] = 101.0           # 거래량 0 이지만 평탄하지 않음 → 그대로
+    out = quality.regularize(m1)
+    assert out["filled"].tolist() == [False, False, True, False, False, False]
+    assert not quality.regularize(m1, zero_volume_as_filled=False)["filled"].any()

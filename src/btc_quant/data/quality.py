@@ -100,11 +100,15 @@ def clean_wicks(df: pd.DataFrame, k: float = 0.03, window: int = 15) -> pd.DataF
     return out
 
 
-def regularize(df: pd.DataFrame, freq: str = "1min") -> pd.DataFrame:
+def regularize(df: pd.DataFrame, freq: str = "1min", zero_volume_as_filled: bool = True) -> pd.DataFrame:
     """빈 봉을 직전 종가로 채운 평탄 봉으로 메우고 `filled` 플래그를 남긴다.
 
     거래소 REST는 무거래 봉과 수집 실패를 구분해 주지 않으므로, 분석에서는
     filled 봉이 포함된 윈도를 제외하는 보수적 처리를 기본으로 한다.
+
+    `zero_volume_as_filled` (기본 True): 거래소가 무거래 분을 **거래량 0 평탄 봉**으로 채워 주는 경우
+    (코인원 1m — 2026-11-09 데이터 점검, 개발 구간 7.6%, 점검 시간 최대 7.8시간)도 filled 로 표시한다.
+    실시간 봉 생성기(paper/bars.py)는 무거래 분을 filled 로 만들므로 이 규칙이 백테스트=페이퍼 일치를 유지한다.
     """
     d = df[~df.index.duplicated(keep="last")].sort_index()
     full = pd.date_range(d.index[0], d.index[-1], freq=freq, name="ts")
@@ -114,4 +118,7 @@ def regularize(df: pd.DataFrame, freq: str = "1min") -> pd.DataFrame:
     for k in ("open", "high", "low"):
         out[k] = out[k].fillna(out["close"])
     out["volume"] = out["volume"].fillna(0.0)
+    if zero_volume_as_filled:
+        flat = (out["open"] == out["high"]) & (out["high"] == out["low"]) & (out["low"] == out["close"])
+        out["filled"] = out["filled"] | ((out["volume"] == 0) & flat)
     return out
