@@ -32,8 +32,8 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass, replace
-from typing import Callable
 
 import numpy as np
 import pandas as pd
@@ -81,7 +81,7 @@ class Candidate:
     name: str = ""
 
     @classmethod
-    def from_spec(cls, spec, ctx=None, other_ctx=None) -> "Candidate":
+    def from_spec(cls, spec, ctx=None, other_ctx=None) -> Candidate:
         tf = str(getattr(spec, "timeframe", "5m") or "5m")
         bar = int(pd.Timedelta(tf.replace("m", "min")).total_seconds() // 60) if tf.endswith("m") else 5
         ex = spec.exit
@@ -91,7 +91,7 @@ class Candidate:
     @classmethod
     def from_signals(cls, signal_fn: Callable[[pd.DataFrame], tuple[pd.Series, pd.Series | None]],
                      sl_pct: float, tp_pct: float, max_hold_min: int, bar_minutes: int = 5,
-                     name: str = "") -> "Candidate":
+                     name: str = "") -> Candidate:
         """signal_fn(m1) → (entry_ok 5분봉, exit_sig 5분봉|None). 테스트·직접 신호용."""
         def build(m1):
             e, x = signal_fn(m1)
@@ -183,7 +183,7 @@ def check_latency(eng: _Engine, base: _Run, cost: CostModel) -> dict:
     for d in delays:
         r = eng.run(cost, delay=d)
         sr = _sr(r.daily)
-        rows.append({"delay_min": d, "sharpe": sr, "retention": _ratio(sr, sr0), "n_trades": int(len(r.tr.net_ret)),
+        rows.append({"delay_min": d, "sharpe": sr, "retention": _ratio(sr, sr0), "n_trades": len(r.tr.net_ret),
                      "mean_net_ret": float(np.mean(r.tr.net_ret)) if len(r.tr.net_ret) else 0.0})
     if sr0 <= 0:
         return {"passed": False, "base_sharpe": sr0, "scenarios": rows, "reason": "base Sharpe <= 0"}
@@ -199,7 +199,7 @@ def check_outliers(eng: _Engine, base: _Run) -> dict:
         return {"passed": False, "reason": "no trades"}
     order = np.argsort(-net, kind="stable")
     rows = []
-    for label, k in (("top_1pct", max(1, int(math.ceil(OUTLIER_TOP_FRAC * n)))), ("top_5", OUTLIER_TOP_N)):
+    for label, k in (("top_1pct", max(1, math.ceil(OUTLIER_TOP_FRAC * n))), ("top_5", OUTLIER_TOP_N)):
         k = min(k, n)
         keep = np.ones(n, dtype=bool)
         keep[order[:k]] = False
@@ -355,7 +355,7 @@ def check_cross_venue(cand: Candidate, base: _Run, other_m1: pd.DataFrame | None
     passed = bool(sr0 > 0 and sr1 > 0 and ratio >= CROSS_VENUE_MIN_RATIO)
     return {"passed": passed, "other_venue": other_venue, "sharpe_target": sr0, "sharpe_other": sr1,
             "ratio": ratio, "same_sign": bool(np.sign(sr0) == np.sign(sr1)), "daily_corr": corr,
-            "n_trades_target": int(len(base.tr.net_ret)), "n_trades_other": int(len(r.tr.net_ret)),
+            "n_trades_target": len(base.tr.net_ret), "n_trades_other": len(r.tr.net_ret),
             "cost": cost.name}
 
 
@@ -389,8 +389,8 @@ def run_suite(cand: Candidate, m1: pd.DataFrame, start, end, cost: CostModel = C
     ws = M.weighted_sharpe(base.daily, half_life_days)
     return {
         "candidate": cand.name, "start": eng.s.isoformat(), "end": eng.e.isoformat(), "cost": cost.name,
-        "base": {"sharpe": _sr(base.daily), "sharpe_w": ws.sharpe, "n_trades": int(len(base.tr.net_ret)),
-                 "n_days": int(len(base.daily)),
+        "base": {"sharpe": _sr(base.daily), "sharpe_w": ws.sharpe, "n_trades": len(base.tr.net_ret),
+                 "n_days": len(base.daily),
                  "total_return": float(np.prod(1 + base.daily.to_numpy()) - 1)},
         "checks": res, "failed": failed, "skipped": skipped, "passed": bool(passed),
         "verdict": ("robust" if passed and not skipped else

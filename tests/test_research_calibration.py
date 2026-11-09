@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from btc_quant.research import calibration_study as C
 
@@ -48,10 +47,10 @@ def test_grids_contain_planted_spec():
 def test_wilson_and_summary():
     lo, hi = C.wilson(0, 20)
     assert lo == 0 and 0.1 < hi < 0.2
-    runs = [{"grid": "g4", "n_specs": 4, "strength": 0.0, "star_sharpe_dev": -1.0, "star_rank": 3,
+    runs = [{"grid": "g4", "n_specs": 4, "strength": 0.0, "kind": "null", "star_sharpe_dev": -1.0, "star_rank": 3,
              "any_validated": False, "star_validated": False, "any_dev_survivor": False,
              "star_dev_passed": False, "star_outcome": "G2", "star_is_candidate": True, "runtime_sec": 1.0},
-            {"grid": "g4", "n_specs": 4, "strength": 0.0, "star_sharpe_dev": -2.0, "star_rank": 1,
+            {"grid": "g4", "n_specs": 4, "strength": 0.0, "kind": "null", "star_sharpe_dev": -2.0, "star_rank": 1,
              "any_validated": True, "star_validated": False, "any_dev_survivor": True,
              "star_dev_passed": False, "star_outcome": "G5", "star_is_candidate": False, "runtime_sec": 1.0}]
     s = C.summarize_runs(runs)["by_strength"]

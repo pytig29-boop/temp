@@ -39,7 +39,7 @@ import shutil
 import tempfile
 import time
 from concurrent.futures import ProcessPoolExecutor
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from multiprocessing import get_context
 from pathlib import Path
 
@@ -112,7 +112,7 @@ class StudyConfig:
     mode: str
     layout: Layout
     strengths: tuple[float, ...]           # 목표 연 Sharpe (0 = 귀무)
-    n_null_markets: int
+    n_null_markets: int                    # 무작위 보행 귀무 (k=0)
     n_planted_markets: int                 # 세기마다
     grid: str                              # 주 실험 격자
     decay_grids: tuple[str, ...]           # 격자 크기 실험 (decay_strength 에서)
@@ -127,6 +127,7 @@ class StudyConfig:
     seed0: int = 1000
     jobs: int = 1
     override_null_runs: bool = False       # quick: config G2.null_runs 를 n_null 로 낮춤
+    n_breakeven_markets: int = 0           # '손익분기' 귀무: S* 의 참 비용후 Sharpe = 0 (k 역보간)
 
     def to_record(self) -> dict:
         d = asdict(self)
@@ -144,7 +145,8 @@ def quick_config(jobs: int = 1) -> StudyConfig:
 def full_config(jobs: int = 4) -> StudyConfig:
     return StudyConfig("full", FULL_LAYOUT, strengths=(0.0, 0.5, 1.0, 2.0, 3.0), n_null_markets=20,
                        n_planted_markets=10, grid="g12", decay_grids=("g4", "g48", "g405"),
-                       decay_strength=2.0, n_decay_markets=10, n_null_decay=10, n_null=1000, jobs=jobs)
+                       decay_strength=2.0, n_decay_markets=10, n_null_decay=10, n_null=1000, jobs=jobs,
+                       n_breakeven_markets=10)
 
 
 # ============================================================== 합성 시장
@@ -175,8 +177,7 @@ def _gen(n1, minute0, seed, k_edge, lookback, hold5, h_target, alpha, beta, seas
         hod = (m // 60) % 24
         if k > 0 and m % 60 == 0:      # 시간 경계: GARCH 갱신
             h = omega + alpha * r_hour * r_hour + beta * h
-            if h > 25.0 * h_target:
-                h = 25.0 * h_target
+            h = min(h, 25.0 * h_target)
             r_hour = 0.0
         sig = np.sqrt(h / 60.0) * season[hod]
         z = np.random.randn() / np.sqrt(np.random.chisquare(df_t) / df_t) * t_scale
@@ -189,8 +190,7 @@ def _gen(n1, minute0, seed, k_edge, lookback, hold5, h_target, alpha, beta, seas
         c[k] = price
         hi[k] = max(op, price) * (1.0 + abs(np.random.randn()) * sig * wick)
         lo[k] = min(op, price) * (1.0 - abs(np.random.randn()) * sig * wick)
-        if hi[k] > bar_hi:
-            bar_hi = hi[k]
+        bar_hi = max(bar_hi, hi[k])
         if m % 5 == 4:                 # 5분봉 종료
             t = k // 5
             hi5[t] = bar_hi
@@ -200,8 +200,7 @@ def _gen(n1, minute0, seed, k_edge, lookback, hold5, h_target, alpha, beta, seas
             if k_edge != 0.0 and t >= lookback and drift_left == 0:
                 mx = -1.0
                 for q in range(t - lookback, t):
-                    if hi5[q] > mx:
-                        mx = hi5[q]
+                    mx = max(mx, hi5[q])
                 if price > mx:          # 돌파 확정 → 다음 hold5 개 5분봉 동안 드리프트
                     drift_left = hold5
     return o, hi, lo, c
@@ -236,7 +235,7 @@ def planted_sharpe(m1: pd.DataFrame, start, end) -> float:
 def _pilot_one(args) -> tuple[float, int, float]:
     k, seed, years = args
     start = pd.Timestamp("2010-01-01", tz="UTC")
-    end = start + pd.Timedelta(days=int(round(365.25 * years)))
+    end = start + pd.Timedelta(days=round(365.25 * years))
     m1 = _engine_m1(gen_market(str(start), str(end), seed, k))
     return k, seed, planted_sharpe(m1, start + pd.Timedelta(days=3), end)
 
@@ -258,8 +257,10 @@ def pilot_edge_map(cfg: StudyConfig, pool=None) -> dict:
             k_for[s] = float(ks[-1] + (s - sr_mono[-1]) / slope)
         else:
             k_for[s] = float(np.interp(s, sr_mono, ks))
+    k_be = float(np.interp(0.0, sr_mono, ks)) if sr_mono[0] < 0 < sr_mono[-1] else 0.0
     return {"ks": ks.tolist(), "sharpe_mean": sr.tolist(), "per_seed": [list(r) for r in rows],
-            "pilot_years": cfg.pilot_years, "pilot_seeds": cfg.pilot_seeds, "k_for_strength": k_for}
+            "pilot_years": cfg.pilot_years, "pilot_seeds": cfg.pilot_seeds, "k_for_strength": k_for,
+            "k_breakeven": k_be}
 
 
 # ============================================================== 시장 1개 실행
@@ -340,7 +341,7 @@ def run_market(task: dict) -> dict:
         g6 = rep[0]["gates"].get("G6") if rep else None
         rec = {
             **{k: task[k] for k in ("kind", "strength", "k", "grid", "seed")},
-            "n_specs": int(len(prim)), "n_candidates": len(cands), "n_validated": len(validated),
+            "n_specs": len(prim), "n_candidates": len(cands), "n_validated": len(validated),
             "n_dev_survivors": out["n_dev_survivors"],
             "any_validated": bool(validated), "any_dev_survivor": out["n_dev_survivors"] > 0,
             "star_rank": rank_star,
@@ -363,7 +364,7 @@ def run_market(task: dict) -> dict:
 
 
 # ============================================================== 연구
-def build_tasks(cfg: StudyConfig, k_for: dict) -> list[dict]:
+def build_tasks(cfg: StudyConfig, k_for: dict, k_breakeven: float = 0.0) -> list[dict]:
     base = {"layout": asdict(cfg.layout), "n_null": cfg.n_null, "top_k": cfg.top_k,
             "override_null_runs": cfg.override_null_runs}
     tasks, seed = [], cfg.seed0
@@ -373,6 +374,10 @@ def build_tasks(cfg: StudyConfig, k_for: dict) -> list[dict]:
             tasks.append({**base, "kind": "null" if s <= 0 else "planted", "strength": float(s),
                           "k": float(k_for[s]), "grid": cfg.grid, "seed": seed, "study": "main"})
             seed += 1
+    for _ in range(cfg.n_breakeven_markets):
+        tasks.append({**base, "kind": "breakeven", "strength": 0.0, "k": float(k_breakeven), "grid": cfg.grid,
+                      "seed": seed, "study": "main"})
+        seed += 1
     for g in cfg.decay_grids:
         for _ in range(cfg.n_decay_markets):
             tasks.append({**base, "kind": "planted", "strength": float(cfg.decay_strength),
@@ -402,9 +407,10 @@ def summarize_runs(runs: list[dict]) -> dict:
     out: dict = {"by_strength": [], "by_grid": []}
     if df.empty:
         return out
-    for (grid, s), g in df.groupby(["grid", "strength"], sort=True):
+    for (grid, kind, s), g in df.groupby(["grid", "kind", "strength"], sort=True):
         n = len(g)
-        row = {"grid": grid, "n_specs": int(g["n_specs"].iloc[0]), "strength": float(s), "n_markets": n,
+        row = {"grid": grid, "kind": kind, "n_specs": int(g["n_specs"].iloc[0]), "strength": float(s),
+               "n_markets": n,
                "star_sharpe_dev_mean": float(g["star_sharpe_dev"].mean()),
                "star_sharpe_dev_sd": float(g["star_sharpe_dev"].std(ddof=1)) if n > 1 else float("nan"),
                "star_rank_median": float(g["star_rank"].median())}
@@ -428,7 +434,7 @@ def run_study(cfg: StudyConfig, progress=print) -> dict:
         progress(f"[calib] pilot edge map ({len(cfg.pilot_ks)} k × {cfg.pilot_seeds} seeds × {cfg.pilot_years}y)")
         edge = pilot_edge_map(cfg, pool)
         progress(f"[calib] k for strengths: {edge['k_for_strength']}  (pilot SR {np.round(edge['sharpe_mean'], 2)})")
-        tasks = build_tasks(cfg, edge["k_for_strength"])
+        tasks = build_tasks(cfg, edge["k_for_strength"], edge["k_breakeven"])
         progress(f"[calib] {len(tasks)} markets")
         runs = []
         it = pool.map(run_market, tasks) if pool else map(run_market, tasks)
@@ -448,33 +454,39 @@ def run_study(cfg: StudyConfig, progress=print) -> dict:
 
 # ============================================================== 리포트 (표 자동 생성; 해석은 사람이/AI가 덧붙임)
 def _pct(x: float) -> str:
-    return "—" if x != x else f"{100 * x:.0f}%"
+    return "—" if math.isnan(x) else f"{100 * x:.0f}%"
 
 
 def _ci(t) -> str:
     return "" if t[0] != t[0] else f" [{100 * t[0]:.0f}–{100 * t[1]:.0f}]"
 
 
+def _label(r: dict) -> str:
+    return {"null": "0 (귀무: 무작위 보행)", "breakeven": "0 (귀무: 손익분기 엣지)"}.get(r["kind"], f"{r['strength']:g}")
+
+
 def tables_markdown(result: dict) -> str:
     rows = result["summary"]["by_strength"]
     cfg = result["config"]
-    main = [r for r in rows if r["grid"] == cfg["grid"]]
-    L = ["| 목표 연 Sharpe (S*) | 측정 Dev Sharpe (평균±sd) | 시장 수 | 오탐/검정력: 아무 후보 validated | "
-         "S* validated | S* Dev 생존(G0~G5) | S* 순위 중앙값 | S* 첫 실패 관문 |",
+    order = {"null": 0, "breakeven": 1, "planted": 2}
+    main = sorted([r for r in rows if r["grid"] == cfg["grid"]], key=lambda r: (order[r["kind"]], r["strength"]))
+    L = [("| 목표 연 Sharpe (S*) | 측정 Dev Sharpe (평균±sd) | 시장 수 | 오탐/검정력: 아무 후보 validated | "
+          "S* validated | S* Dev 생존(G0~G5) | S* 순위 중앙값 | S*(또는 같은 군집 대표) 결과 |"),
          "|---|---|---|---|---|---|---|---|"]
     for r in main:
         ff = ", ".join(f"{k}:{v}" for k, v in sorted(r["star_outcome"].items(), key=lambda kv: -kv[1]))
-        L.append(f"| {r['strength']:g}{' (귀무)' if r['strength'] == 0 else ''} | "
+        L.append(f"| {_label(r)} | "
                  f"{r['star_sharpe_dev_mean']:.2f} ± {r['star_sharpe_dev_sd']:.2f} | {r['n_markets']} | "
                  f"{_pct(r['any_validated'])}{_ci(r['any_validated_ci'])} | "
                  f"{_pct(r['star_validated'])}{_ci(r['star_validated_ci'])} | "
                  f"{_pct(r['star_dev_passed'])} | {r['star_rank_median']:.0f} | {ff} |")
     out = "\n".join(L)
-    dec = [r for r in rows if r["grid"] != cfg["grid"] or (cfg["decay_grids"] and r["strength"] == cfg["decay_strength"])]
+    dec = [r for r in rows if r["kind"] != "breakeven" and (r["grid"] != cfg["grid"] or (
+        cfg["decay_grids"] and r["strength"] == cfg["decay_strength"]))]
     if cfg["decay_grids"]:
         L = ["", f"격자 크기별 (목표 Sharpe {cfg['decay_strength']:g} 및 귀무):", "",
-             "| 격자 | 스펙 수 | 목표 Sharpe | 시장 수 | 아무 후보 validated | S* validated | S* Dev 생존 | "
-             "S* 순위 중앙값 | S* 첫 실패 관문 |", "|---|---|---|---|---|---|---|---|---|"]
+             ("| 격자 | 스펙 수 | 목표 Sharpe | 시장 수 | 아무 후보 validated | S* validated | S* Dev 생존 | "
+              "S* 순위 중앙값 | S*(대표) 결과 |"), "|---|---|---|---|---|---|---|---|---|"]
         for r in sorted(dec, key=lambda r: (r["strength"], r["n_specs"])):
             ff = ", ".join(f"{k}:{v}" for k, v in sorted(r["star_outcome"].items(), key=lambda kv: -kv[1]))
             L.append(f"| {r['grid']} | {r['n_specs']} | {r['strength']:g} | {r['n_markets']} | "
@@ -486,7 +498,8 @@ def tables_markdown(result: dict) -> str:
     out += ("\n\n엣지 세기 보정(파일럿, S* 를 " + f"{e['pilot_years']:g}년 × {e['pilot_seeds']} seed 에서 실행):\n\n"
             "| k (σ 배수 드리프트) | S* 연 Sharpe (평균) |\n|---|---|\n"
             + "\n".join(f"| {k:g} | {s:.2f} |" for k, s in zip(e["ks"], e["sharpe_mean"])))
-    out += "\n\n목표 Sharpe → k: " + ", ".join(f"{float(s):g}→{k:.4f}" for s, k in e["k_for_strength"].items())
+    out += ("\n\n목표 Sharpe → k: " + ", ".join(f"{float(s):g}→{k:.4f}" for s, k in e["k_for_strength"].items())
+            + f"; 손익분기(S* 참 Sharpe 0) k = {e.get('k_breakeven', 0.0):.4f}")
     return out
 
 

@@ -54,6 +54,8 @@ class FillEvent:
     ref_price: float       # 비용 전 기준가
     fill_price: float      # 비용 반영 체결가
     reason: str            # "entry" | "sl" | "tp" | "signal" | "time" | "end"
+    sl: float | None = None   # buy 이벤트: 진입 시 확정된 손절·익절 레벨 (같은 봉 청산으로
+    tp: float | None = None   # position 이 이미 None 이어도 알 수 있게). sell 이벤트는 None
 
 
 @dataclass
@@ -188,7 +190,8 @@ class ReferenceEngine:
             expiry=ts + pd.Timedelta(minutes=int(self.max_hold_min)),
             atr_frac=frac if self.atr_mode else None,
         )
-        return FillEvent(ts, "buy", ref, self.position.entry_price, "entry")
+        pos = self.position
+        return FillEvent(ts, "buy", ref, pos.entry_price, "entry", sl=pos.sl, tp=pos.tp)
 
     def _close(self, ts: pd.Timestamp, ref_price: float, reason: str, at_open: bool) -> FillEvent:
         pos = self.position

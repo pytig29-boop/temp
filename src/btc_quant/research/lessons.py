@@ -77,6 +77,7 @@ ROBUSTNESS_TAXONOMY: list[tuple[str, str]] = [
     (r"lookahead|causal|engine|reference|data.?quality|integrity", "IMPL_OR_DATA_ISSUE"),
     (r"plateau|neighbo|param", "PARAM_SPIKE"),
     (r"rolling|stabil", "UNSTABLE"),
+    (r"alpha|beta", "NO_SIGNAL"),     # 수익이 BTC 베타로 설명됨 = 진입 정보 없음
 ]
 VAL_OUTCOMES = {"pass", "fail", "not_run", "engine_mismatch", "budget_exhausted"}
 LOCKBOX_OUTCOMES = {"not_accessed", "pending", "pass", "fail"}
@@ -196,8 +197,8 @@ def _restricted_value(key: str, v: Any, mode: str, path: str) -> Any:
 
 # ============================================================== 분류
 def _gate_passed(g) -> bool | None:
-    if not isinstance(g, dict) or "passed" not in g:
-        return None
+    if not isinstance(g, dict) or g.get("passed") is None:
+        return None             # 없음 / 판정 불가(skipped)
     return bool(g["passed"])
 
 
@@ -205,8 +206,8 @@ def _robustness_items(rob) -> list[tuple[str, bool | None, dict]]:
     """견고성 결과 정규화: dict{name: {passed…}} | {"checks": [...]} | list[{name, passed}]."""
     if not rob:
         return []
-    if isinstance(rob, dict) and isinstance(rob.get("checks"), list):
-        rob = rob["checks"]
+    if isinstance(rob, dict) and isinstance(rob.get("checks"), (list, dict)):
+        rob = rob["checks"]       # btc_quant.research.robustness.run_suite 형식
     items = []
     if isinstance(rob, dict):
         for name, v in rob.items():
@@ -590,7 +591,8 @@ class LessonBook:
                     problems.append(f"{t}: line {i} has id {r.get('id')!r} (expected {pfx}-{i:06d})")
                 if r.get("content_hash") != _content_hash(r):
                     problems.append(f"{t}: {r.get('id')} content hash mismatch (edited outside the API)")
-        seen = Counter((f.get("kind"), f.get("campaign_id") or f.get("study_id")) for f in self._read("facts"))
+        seen = Counter((f.get("kind"), f.get("campaign_id") or f.get("study_id"), f.get("family"))
+                       for f in self._read("facts"))
         problems += [f"facts: duplicate fact for {k}" for k, n in seen.items() if n > 1]
         return problems
 
@@ -737,6 +739,89 @@ class LessonBook:
         }, "strip")
         with self.lock():
             return self._append_locked("facts", rec)
+
+    def record_facts_from_screen(self, screen, scope: dict | None = None) -> list[dict]:
+        """신호 선별 캠페인(`signal_study.screen` 의 ScreenResult 또는 signal_screen.json 경로) → 계열별 사실 1건.
+        구성별 결과 코드: 통과 → 없음, 보정 후 유의하지 않음 → NO_SIGNAL, 이벤트 부족 → LOW_SAMPLE,
+        유의하지만 primary 비용 순평균 ≤ 0 → COST_EATEN. Dev 전용 결과."""
+        if isinstance(screen, (str, Path)):
+            pth = Path(screen)
+            if pth.is_dir():
+                pth = pth / "signal_screen.json"
+            d = json.loads(pth.read_text(encoding="utf-8"))
+            cid, hid, decision = d["campaign_id"], d.get("hypothesis_id"), d.get("decision") or {}
+            rows = []
+            for st in d.get("studies") or []:
+                dec = st.get("decision") or {}
+                rows.append({"label": st.get("label"), "family": st.get("family"),
+                             "entry": (st.get("entry") or {}).get("block"),
+                             "filters": "+".join(f.get("block") for f in st.get("filters") or []) or "-",
+                             "n_events": st.get("n_events"), "p_signal": st.get("p_signal"),
+                             "best_h": st.get("best_primary_horizon"), "info_h": st.get("info_horizon"),
+                             "significant": dec.get("significant"), "passed": dec.get("passed"),
+                             "fail_reason": dec.get("fail_reason")})
+            period, snap, commit, src = d.get("period") or {}, d.get("data_snapshot"), d.get("code_commit"), str(pth)
+            tpl_rec = None
+        else:
+            cid, hid, decision = screen.campaign_id, screen.hypothesis_id, dict(screen.decision)
+            rows = screen.table.to_dict("records")
+            period, snap, commit, src = {}, None, None, str(getattr(screen, "dir", "") or "")
+            tpl_rec = screen.template
+        camp = self.ledger.get("campaigns", cid) or {}
+        period = period or camp.get("period") or {}
+        out = []
+        by_fam: dict[str, list] = {}
+        for r in rows:
+            by_fam.setdefault(r.get("family") or camp.get("family") or "?", []).append(r)
+        for fam, rs in by_fam.items():
+            cfgs = []
+            for r in rs:
+                reason = str(r.get("fail_reason") or "")
+                if r.get("passed"):
+                    code = None
+                elif "few events" in reason:
+                    code = "LOW_SAMPLE"
+                elif "net mean" in reason:
+                    code = "COST_EATEN"
+                elif "not significant" in reason or r.get("significant") is False:
+                    code = "NO_SIGNAL"
+                else:
+                    code = "UNCLASSIFIED"
+                cfgs.append({**_scalar_subset(r, ("label", "entry", "filters", "n_events", "p_signal", "best_h",
+                                                  "info_h", "excess_bp", "z", "significant", "passed",
+                                                  "fail_reason", "profile")),
+                             **{k: v for k, v in r.items() if k.startswith("net_bp[") and isinstance(v, (int, float))},
+                             "code": code})
+            counts = Counter(c["code"] for c in cfgs if c["code"])
+            n_pass = sum(1 for c in cfgs if c.get("passed"))
+            prim = None if n_pass else (sorted(counts, key=lambda k: (-counts[k], k))[0] if counts else "UNCLASSIFIED")
+            with self.lock():
+                again = [f for f in self._read("facts") if f.get("kind") == "signal_screen"
+                         and f.get("campaign_id") == cid and f.get("family") == fam]
+                if again:
+                    out.append(copy.deepcopy(again[0]))
+                    continue
+                hyp = self.ledger.get("hypotheses", hid) if hid else None
+                rec = sanitize({
+                    "kind": "signal_screen", "campaign_id": cid, "hypothesis_id": hid,
+                    "hypothesis_text": (hyp or {}).get("text"), "family": fam,
+                    "scope": {"exchange": getattr(tpl_rec, "exchange", None), "timeframe": getattr(tpl_rec, "timeframe", None),
+                              "bar_minutes": getattr(tpl_rec, "bar_minutes", None), "segment": "dev",
+                              "period": {"start": period.get("start"), "end": period.get("end")},
+                              "data_snapshot": snap or period.get("data_snapshot"), "code_commit": commit,
+                              "entry_block": sorted({c.get("entry") for c in cfgs if c.get("entry")}),
+                              "review_after": (_today() + timedelta(days=DEFAULT_REVIEW_DAYS)).isoformat(),
+                              "reexamine_if": ["Dev data period changes", "venue/cost model changes",
+                                               "decision interval changes (bar_minutes)"],
+                              **(scope or {})},
+                    "configs": cfgs, "decision": _scalar_subset(decision, ("method", "alpha", "m_current", "m_prior",
+                                                                           "m_total", "n_passed")),
+                    "funnel": {"n_configs": len(cfgs), "n_passed": n_pass},
+                    "outcome": "passed" if n_pass else "failed",
+                    "taxonomy": {"primary": prim, "counts": dict(counts)},
+                    "lockbox_outcome": "not_accessed", "source": src, "author": "auto"}, "strip")
+                out.append(self._append_locked("facts", rec))
+        return out
 
     # ---------------------------------------------------------- 해석
     def add_interpretation(self, fact_id: str, text: str, confidence: str | float,
@@ -1124,6 +1209,9 @@ class LessonBook:
                 L.append(f"  - #{c.get('rank')} `{c.get('spec_id')}` SR_w={_fmt(m.get('sharpe_w'))} "
                          f"trades={_fmt(m.get('n_trades'))} first_failed={c.get('first_failed')} "
                          f"→ `{t.get('primary')}` {t.get('codes')} · val={c.get('val_outcome')}")
+            for c in (f.get("configs") or [])[:8]:
+                L.append(f"  - `{c.get('label')}` events={_fmt(c.get('n_events'))} p={_fmt(c.get('p_signal'))} "
+                         f"best_h={_fmt(c.get('best_h'))} → {'PASS' if c.get('passed') else '`' + str(c.get('code')) + '`'}")
             if f.get("summary"):
                 L.append("- 요약: " + ", ".join(f"{k}={_fmt(v)}" for k, v in list(f["summary"].items())[:12]))
             L.append(f"- 범위: {sc.get('exchange')} {sc.get('symbol')} {sc.get('timeframe')} · "

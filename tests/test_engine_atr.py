@@ -292,3 +292,17 @@ def test_with_atr_and_missing_window_error():
         p2.atr_frac[14], atr_frac_decisions(atr_series(to_tf(m1, 5), 14), m1.open, m1.index, 5))
     # 결정 행이 아닌 곳은 NaN
     assert np.isnan(p2.atr_frac[14][m1.index.minute % 5 != 0]).all()
+
+
+def test_buy_fill_event_carries_levels():
+    eng = ReferenceEngine.from_exit(ExitSpec(stop_loss_atr=1.0, take_profit_atr=2.0, max_hold_min=10),
+                                    ZERO, timeframe="1m")
+    eng.on_decision(t("00:07"), True, False, 0.5)
+    ev = eng.on_bar_1m(t("00:07"), 100, 100, 98, 99)      # 진입 봉에서 바로 SL → position None
+    assert [e.side for e in ev] == ["buy", "sell"] and eng.position is None
+    assert (ev[0].sl, ev[0].tp) == (100 * (1 - 0.005), 100 * (1 + 2 * 0.005))
+    assert (ev[1].sl, ev[1].tp) == (None, None)
+    pct = ReferenceEngine(1.0, 2.0, 10, ZERO)
+    pct.on_decision(t("00:05"), True, False)
+    (buy,) = pct.on_bar_1m(t("00:05"), 100, 100, 100, 100)
+    assert (buy.sl, buy.tp) == (100 * (1 - 1.0 / 100), 100 * (1 + 2.0 / 100))

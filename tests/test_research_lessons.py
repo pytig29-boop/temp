@@ -411,3 +411,44 @@ def test_val_budget_exhausted_is_not_a_hypothesis_failure():
     t = classify_candidate(c)
     assert t["primary"] == "UNCLASSIFIED" and "VAL_FAIL" not in t["codes"]
     assert LS._candidate_fact(c, t)["val_outcome"] == "budget_exhausted"
+
+
+def test_robustness_suite_format():
+    """btc_quant.research.robustness.run_suite 출력 형식 ({"checks": {name: {...}}})."""
+    rob = {"checks": {"latency": {"passed": False, "min_retention": 0.2}, "outliers": {"passed": True},
+                      "leave_year_out": {"passed": False}, "cost": {"passed": None},
+                      "alpha": {"passed": False}, "cross_venue": {"passed": False}},
+           "passed": False}
+    c = cand(first_failed=None, gates={"G2": gate(True), "G6": gate(True)}, robustness=rob)
+    t = classify_candidate(c)
+    assert set(t["codes"]) == {"LATENCY_SENSITIVE", "REGIME_DEPENDENT", "NO_SIGNAL"}
+    assert LS._candidate_fact(c, t)["robustness_dev"]["cost"] is None
+
+
+def test_screen_facts_from_json(env):
+    book, h, c = env
+    d = book.campaigns_dir / "camp-000009"
+    d.mkdir(parents=True)
+    studies = [
+        {"label": "donchian(48)", "family": "donchian_breakout", "entry": {"block": "donchian_breakout"},
+         "filters": [], "n_events": 900, "p_signal": 0.4, "best_primary_horizon": 60,
+         "decision": {"significant": False, "passed": False, "fail_reason": "not significant after correction"}},
+        {"label": "donchian(96)", "family": "donchian_breakout", "entry": {"block": "donchian_breakout"},
+         "filters": [{"block": "vol_regime"}], "n_events": 700, "p_signal": 0.001, "best_primary_horizon": 60,
+         "decision": {"significant": True, "passed": False, "fail_reason": "net mean ≤ 0 under coinone_conservative"}},
+        {"label": "rsi(14)", "family": "rsi_oversold_bounce", "entry": {"block": "rsi_oversold_bounce"},
+         "filters": [], "n_events": 20, "p_signal": 0.3, "best_primary_horizon": 30,
+         "decision": {"significant": False, "passed": False, "fail_reason": "too few events"}},
+    ]
+    (d / "signal_screen.json").write_text(json.dumps({"campaign_id": "camp-000009", "hypothesis_id": h,
+                                                     "period": {"start": "2021-01-01", "end": "2025-11-01"},
+                                                     "decision": {"method": "bh", "n_passed": 0},
+                                                     "studies": studies}))
+    fs = book.record_facts_from_screen(d)
+    # 동률(NO_SIGNAL 1, COST_EATEN 1)은 코드 이름순 → 결정적
+    assert {f["family"]: f["taxonomy"]["primary"] for f in fs} == {"donchian_breakout": "COST_EATEN",
+                                                                    "rsi_oversold_bounce": "LOW_SAMPLE"}
+    assert sorted(x["code"] for x in fs[0]["configs"]) == ["COST_EATEN", "NO_SIGNAL"]
+    assert [f["id"] for f in book.record_facts_from_screen(d)] == [f["id"] for f in fs]
+    assert book.verify() == []
+    assert "donchian(96)" in book.render_markdown().read_text()

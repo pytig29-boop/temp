@@ -194,6 +194,7 @@ def test_spec_api_and_structure():
     import json
 
     from test_research_synth import make_market
+
     from btc_quant.data.quality import regularize
     m1 = regularize(make_market(True, seed=3))
     spec = StrategySpec("brk", BlockRef("donchian_breakout", {"lookback": 48}), ExitSpec(1.0, 1.2, 60))
