@@ -64,6 +64,7 @@ def test_dev_mode_is_noop(tmp_path, tool, ti):
     "research/ledger/experiments.jsonl",
     "research/lockbox_approvals/c1.json",
     "research/activation_approvals/c1.json",
+    "research/lockbox_requests/x_v1.yaml",
     "src/btc_quant/backtest/fast.py",
     "src/btc_quant/evaluation/gates.py",
     "src/btc_quant/registry/ledger.py",
@@ -182,6 +183,21 @@ def test_search_elsewhere_allowed(tmp_path):
 def test_mcp_tool_logged_and_lockbox_arg_denied(tmp_path):
     assert run("mcp__btcq__query_ledger", {"campaign": "c1"}, tmp_path=tmp_path) is None
     assert denied(run("mcp__btcq__x", {"path": LOCK}, tmp_path=tmp_path))
+
+
+@pytest.mark.parametrize("tool", ["mcp__btcq__approve_lockbox", "mcp__other__activate_strategy",
+                                  "mcp__btcq__rollback", "mcp__x__open_lockbox", "mcp__ex__place_order",
+                                  "mcp__btcq__promote_block", "mcp__vault__get_api_key"])
+def test_mcp_human_only_names_denied(tmp_path, tool):
+    assert denied(run(tool, {}, tmp_path=tmp_path))
+    assert run(tool, {}, research=False, tmp_path=tmp_path) is None     # 개발 세션은 무관
+
+
+@pytest.mark.parametrize("tool", ["mcp__btcq__list_blocks", "mcp__btcq__request_lockbox_eval",
+                                  "mcp__btcq__create_and_run_campaign", "mcp__btcq__forward_status",
+                                  "mcp__btcq__propose_block", "mcp__btcq__registry_status"])
+def test_mcp_research_tools_allowed(tmp_path, tool):
+    assert run(tool, {"campaign_id": "camp-000001"}, tmp_path=tmp_path) is None
 
 
 # ---- logging & robustness ---------------------------------------------------

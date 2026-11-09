@@ -37,17 +37,17 @@ fail — goes into the ledger, the lessons notebook and the report unchanged.
 
 ## Stage 1 — Signal screening (before any exits)
 - Template per docs/SIGNAL_STUDY.md §7 (entry grid × filter sets, primary horizons ≤ 3, BH q=0.10, budget).
-- `from btc_quant.research.signal_study import screen; res = screen("research/campaign_templates/<x>_screen.yaml")`
-  (pre-registers itself, Dev only, one trial per signal config, family-wide multiple-testing correction).
-- `LessonBook().record_facts_from_screen(res)`.
+- MCP `screen_signals(template="research/campaign_templates/<x>_screen.yaml")` (pre-registers itself, Dev only,
+  one trial per signal config, family-wide multiple-testing correction, records lessons facts; refuses when the
+  weekly budget is exhausted). Fallback: `campaign.run_screen(path)` (records facts too).
 - Only configs with `passed=True` continue. None ⇒ report NO CANDIDATE (taxonomy NO_SIGNAL / COST_EATEN /
   LOW_SAMPLE is recorded automatically) and stop.
 - Take from the passing config: information horizon → `max_hold_min`; MFE/MAE in ATR units → centre of
   the ATR-multiple SL/TP patterns.
 
 ## Stage 2 — Power check
-`uv run python -m btc_quant.research.power --days <dev days> --grid <planned specs> --family <family> --target <S>`
-(or `power.budget_report(...)`). If the Sharpe the screened signal can plausibly deliver (net mean ×
+MCP `power_check(template=…)` or `power_check(n_grid=…, family=…, target_sharpe=…)`
+(fallback `uv run python -m btc_quant.research.power --days … --grid … --family … --target …`). If the Sharpe the screened signal can plausibly deliver (net mean ×
 frequency) is below the required Sharpe at the estimated effective trials, shrink the grid or stop.
 
 ## Stage 3 — Strategy campaign (principled exits)
@@ -56,8 +56,9 @@ frequency) is below the required Sharpe at the estimated effective trials, shrin
   information horizon. **≤ 6 exit variants in total** (e.g. SL {1.0, 1.5} × TP {1.5, 2.5} + 2 hold variants).
   Fixed-% exit grids ×80 are not allowed (PM `dsr-power-exit-grid`).
 - Template format: `research/campaigns/README.md`. Budget = grid size.
-- Run: `uv run python -m btc_quant.research.cli run <template.yaml> --max-candidates 5`
-  (registers hypothesis+campaign before running, records every run, runs the pipeline and the report).
+- Run: MCP `create_and_run_campaign(template=…, max_candidates=5)` — template must set `from_screen` and
+  `power.target_sharpe`; registers hypothesis+campaign before running, records every run, runs the pipeline and
+  the base report, returns the summary (fallback: `uv run python -m btc_quant.research.cli run <template.yaml>`).
 
 ## Stage 4 — Gates, ablation, robustness, Val
 - Pipeline (`btc_quant.research.pipeline.run_pipeline`): G0 → G1 → G2 (trade-count-matched random-entry null)
@@ -67,7 +68,8 @@ frequency) is below the required Sharpe at the estimated effective trials, shrin
   record you pass to the lessons notebook (`candidate["robustness"]`) — failures map to OUTLIER_DEPENDENT,
   LATENCY_SENSITIVE, REGIME_DEPENDENT, COST_EATEN, NO_SIGNAL (alpha).
 - Survivors → `skeptic` subagent (`candidate-review`; it writes predicted failure modes first). Fatal ⇒ reject.
-- Lockbox request only after skeptic SURVIVES; a human approves. Never open it yourself.
+- Lockbox request only after skeptic SURVIVES: MCP `request_lockbox_eval(strategy_id, version, justification,
+  review_report="research/reports/review_<id>.md")`; a human approves. Never open it yourself.
 
 ## Stage 5 — Lessons & report
 1. `LessonBook().record_facts_from_pipeline("research/campaigns/<cmp>/pipeline.json")` (idempotent).
@@ -77,19 +79,25 @@ frequency) is below the required Sharpe at the estimated effective trials, shrin
 3. `LessonBook().render_markdown()`.
 4. Report `research/reports/campaign_<cmp>.md` (the CLI writes the base report; add the sections below).
 
-## Interface map
-| Step | MCP tool (planned) | Python today |
+## Interface map (MCP server `btcq`, docs/MCP.md — use the tools first)
+Tool names in Claude Code are `mcp__btcq__<tool>`. Every result is JSON `{"ok": true, …}` or
+`{"ok": false, "error": {"code", "message"}}` — read the error code, do not retry blindly.
+| Step | MCP tool | Python fallback |
 |---|---|---|
-| knowledge / lessons | – | `research/knowledge/*.md`, `btc_quant.research.lessons.LessonBook` |
-| list blocks | `list_blocks` | `from btc_quant.strategy.blocks import REGISTRY; REGISTRY.all("entry")`, docs/BLOCKS.md |
-| ① hypothesis + ② campaign | `register_hypothesis`, `create_campaign` | done by `research.cli run` / `signal_study.screen` from the template; manual: `Ledger().register_hypothesis`, `Ledger().create_campaign(..., family=…)` |
-| screen | – | `btc_quant.research.signal_study.screen` |
-| power | – | `btc_quant.research.power.budget_report`, `required_sharpe` |
-| ③ run + ④ gates | `run_campaign`, `run_gates` | `btc_quant.research.campaign.run_campaign`, `btc_quant.research.pipeline.run_pipeline` |
-| robustness | – | `btc_quant.research.robustness.robustness_for_spec` |
-| ledger query | `query_ledger` / `compare` | `Ledger().records(...)`, `Ledger().query("SELECT …")`, `Ledger().trials_count(family=…)` |
-| lockbox | `request_lockbox_eval` | write the request in the report; a **human** runs `admin_cli approve-lockbox` |
-| report | `write_report` | `btc_quant.research.report.write_report` |
+| knowledge / lessons | `lessons_view`, `find_similar` | `research/knowledge/*.md`, `LessonBook().facts/find_similar/trial_budget` |
+| data coverage | `get_data_summary` | `DataAccess().read("dev"|"val", …)` |
+| list blocks | `list_blocks` | `REGISTRY.all(kind, include_experimental=True)`, docs/BLOCKS.md |
+| ① hypothesis | `register_hypothesis` (standalone pre-registration); screens/campaigns register their template hypothesis themselves | `Ledger().register_hypothesis` |
+| derived hypothesis | `lessons_derive_hypothesis` (with `template=` → applied + checked) | `derive_hypothesis` → `apply_derivation` → `check_template` |
+| ② screen | `screen_signals` (weekly budget enforced) | `campaign.run_screen` / `research.cli screen` |
+| ③ power | `power_check` | `power.budget_report`, `research.power` CLI |
+| ④ campaign + gates + robustness + base report | `create_and_run_campaign` (screen-gated, budget, strict power, repeat check enforced) | `research.cli run <template>` |
+| results | `get_campaign_report`, `list_campaigns` (G6 = pass/fail only) | `research/campaigns/<id>/pipeline.json` |
+| extra robustness on a spec | – | `robustness.robustness_for_spec(spec)` |
+| ledger query | `query_ledger` (whitelisted; `table="trials"` for counts) | `Ledger().records(...)`, `trials_count(family=…)` |
+| lessons | `lessons_add_interpretation`, `lessons_mark` | `LessonBook().add_interpretation/mark/postmortem/render_markdown` |
+| lockbox | `request_lockbox_eval` (files a request; never opens) | a **human** runs `admin_cli approve-lockbox` |
+| registry / Val budget | `registry_status`, `forward_status` | `StrategyRegistry().status()`, `DataAccess().lockbox_status()` |
 
 ## Report template additions (`research/reports/campaign_<cmp>.md`)
 ```

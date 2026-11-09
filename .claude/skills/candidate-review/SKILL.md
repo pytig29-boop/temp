@@ -10,9 +10,11 @@ Goal: find the reason the candidate fails live. Default verdict is REJECT unless
 evidence. Do **not** modify the candidate: any change is a new campaign. Use Dev/Val only via
 `btc_quant.registry.splits.DataAccess`; the lockbox is off-limits.
 
-Intended MCP tools (later milestone): `query_ledger`, `compare`, `run_gates`, `run_ablation`.
-Python equivalents today: `btc_quant.registry.ledger.Ledger`, `btc_quant.backtest.{fast,reference}`,
-`btc_quant.evaluation.{metrics,gates,selection,inference,montecarlo}`.
+MCP tools (`btcq`, read-only use only — docs/MCP.md): `get_campaign_report` (Dev gates per candidate, ablation,
+robustness, G6 as pass/fail), `query_ledger` (pre-registration timestamps, runs, `table="trials"`), `find_similar`,
+`lessons_view`, `list_blocks`, `get_data_summary`, `registry_status`.
+Python fallback (recomputation): `btc_quant.backtest.{fast,reference}`, `btc_quant.evaluation.{metrics,gates,selection,
+inference,montecarlo}`, `btc_quant.research.robustness.robustness_for_spec`.
 
 ## Step 0 — Predicted failure modes (before looking at any result numbers)
 From the hypothesis (mechanism, counterparty), the spec, the family's lessons facts

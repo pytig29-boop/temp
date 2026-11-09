@@ -14,7 +14,9 @@ argument-hint: "<block_name> <kind>"
 > block (`spec_uses_experimental`) needs **human review before a lockbox request**; promotion to official is a
 > human code change (`Registry.promote` explains the steps). The `rationale` must name the mechanism and
 > counterparty (`research/knowledge/mechanisms.md`) and the lockbox/Val exposure of the evidence that motivated
-> it. Tests: `uv run pytest -q tests/test_blocks.py tests/test_blocks_experimental.py`. The older text below
+> it. Tests: `uv run pytest -q tests/test_blocks.py tests/test_blocks_experimental.py`. After writing the module and
+> the docs row, run MCP `propose_block(path="src/btc_quant/strategy/blocks/experimental/<name>.py")` (acceptance
+> report; on pass the block is loaded into the MCP server for this session) and `list_blocks` to confirm. The older text below
 > ("proposal … human merge before use") applies to *official* blocks.
 
 A new block is a **proposal**. It may not be used in a campaign whose results count until a human has

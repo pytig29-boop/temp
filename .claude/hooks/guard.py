@@ -16,7 +16,10 @@ logs/research_tool_calls.jsonl and the call is denied when it:
      `python -m btc_quant.params approve|reject`) or
      `git push` / other tree-mutating git commands;
   3. reads lockbox data (data/raw/**/year=2026/month=05..11/**) or an unscoped
-     data/raw path that could cover the lockbox.
+     data/raw path that could cover the lockbox;
+  4. calls an MCP tool whose name implies a human-only capability (approve /
+     activate / rollback / promote / open lockbox / orders / keys) — the btcq
+     research MCP server exposes none of these (docs/MCP.md).
 
 Hook protocol (https://code.claude.com/docs/en/hooks): JSON on stdin with
 tool_name / tool_input / cwd; to deny we print
@@ -64,6 +67,8 @@ PROTECTED_WRITE = [
      "facts are immutable and interpretations are added with add_interpretation()"),
     (r"research/lockbox_approvals(/|$)", "lockbox approvals are human-only (PLAN §5.3)"),
     (r"research/activation_approvals(/|$)", "activation approvals are human-only (PLAN §6)"),
+    # 잠금 평가 요청은 MCP 도구 request_lockbox_eval(자격 검사: validated + skeptic SURVIVES)로만 기록
+    (r"research/lockbox_requests(/|$)", "lockbox evaluation requests are filed only via the MCP tool request_lockbox_eval (eligibility checks)"),
     # 파라미터 거버넌스 (docs/PARAMS.md): 레지스트리·비용 모델은 btc_quant.params 규칙으로만, 승인은 사람만
     (r"config/params\.ya?ml", "the parameter registry changes only through btc_quant.params class rules + human approval (docs/PARAMS.md)"),
     (r"config/costs\.ya?ml", "cost models are versioned only by btc_quant.params calibrate (stricter) or human approval (looser)"),
@@ -222,6 +227,22 @@ def check_bash(cmd: str) -> str | None:
     return f"Bash denied: {why}" if why else None
 
 
+# MCP tools (any server) whose name implies a human-only capability. The btcq research server has none
+# (docs/MCP.md); this is a tripwire against other servers / future additions.
+MCP_FORBIDDEN_RE = re.compile(
+    r"approv|activat|roll_?back|promot|open_lockbox|lockbox_open|unlock|"
+    r"(place|submit|cancel|create)_?order|(api_)?keys?$|secret|credential", re.IGNORECASE)
+
+
+def check_mcp_name(tool: str) -> str | None:
+    parts = tool.split("__", 2)
+    name = parts[2] if len(parts) == 3 else tool
+    if MCP_FORBIDDEN_RE.search(name):
+        return (f"MCP tool '{tool}' looks like a human-only capability (approval / activation / rollback / "
+                "lockbox opening / orders / keys); not available to AI research sessions (PLAN §6, §8)")
+    return None
+
+
 def check_generic(ti: dict) -> str | None:
     """MCP / other tools: only scan arguments for lockbox paths."""
     try:
@@ -239,6 +260,10 @@ def evaluate(payload: dict, root: Path) -> str | None:
         return check_file_tool(tool, ti, root, cwd)
     if tool == "Bash":
         return check_bash(ti.get("command", ""))
+    if tool.startswith("mcp__"):
+        why = check_mcp_name(tool)
+        if why:
+            return why
     return check_generic(ti)
 
 

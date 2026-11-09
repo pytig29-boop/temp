@@ -78,7 +78,7 @@ def test_quick_mode_runs(tmp_path):
         assert r["n_specs"] == 4 and 1 <= r["star_rank"] <= 4
         assert isinstance(r["any_validated"], bool) and r["n_candidates"] >= 1
         assert r["star_outcome"] in {"validated", "not_selected", "G0", "G1", "G2", "G3", "G4", "G5"} \
-            or r["star_outcome"].startswith("G6(")
+            or r["star_outcome"].startswith(("G6(", "R("))
     planted = next(r for r in res["runs"] if r["kind"] == "planted")
     null = next(r for r in res["runs"] if r["kind"] == "null")
     assert planted["star_sharpe_dev"] > null["star_sharpe_dev"]
@@ -87,3 +87,49 @@ def test_quick_mode_runs(tmp_path):
     md = C.write_report(res, tmp_path / "calib.md", interpretation="## 해석\n테스트")
     text = md.read_text(encoding="utf-8")
     assert "파이프라인 자체 검증" in text and "| 3 |" in text and "## 해석" in text
+
+
+def test_robustness_fail_is_not_validated():
+    c = {"status": "validated (robustness FAIL) (grade A)", "dev_passed": True,
+         "robustness": {"failed": ["cost", "alpha"]}}
+    assert C.candidate_outcome(c) == "R(cost+alpha)"
+    c = {"dev_passed": True, "status": "failed G6", "gates": {"G6": {"ok_sharpe": True, "ok_mdd": False,
+                                                                       "ok_stress_sharpe": False, "ok_mc_mdd": True}}}
+    assert C.candidate_outcome(c) == "G6(mdd+stress_sr)"
+
+
+def test_pilot_uses_current_cost_registry():
+    from btc_quant.research.campaign import get_cost
+    assert C.primary_cost() == get_cost("coinone_conservative")
+
+
+def test_1m_scenario_grid_and_plant():
+    from btc_quant.research.campaign import CampaignTemplate, prepare_m1
+    tpl = CampaignTemplate.from_dict(C.template_for("a12", "t_a12"))
+    assert tpl.decision_tf == "1m" and tpl.exit_mode == "atr" and tpl.n_specs() == 12
+    ex = C.PLANTED_SPEC_1M.exit
+    star = tpl.make_spec(C.PLANTED_SPEC_1M.entry, (), ex.sl, ex.tp, ex.max_hold_min)
+    assert star.logic_hash() in {s.logic_hash() for s in tpl.enumerate()}
+    s, e = pd.Timestamp("2023-01-02", tz="UTC"), pd.Timestamp("2023-04-01", tz="UTC")
+    pp = C.plant_params("1m_atr")
+    null = prepare_m1(C.gen_market("2023-01-01", "2023-04-01", seed=4, k_edge=0.0, **pp))
+    plant = prepare_m1(C.gen_market("2023-01-01", "2023-04-01", seed=4, k_edge=0.12, **pp))
+    a = C.planted_stats(null, s, e, C.PLANTED_SPEC_1M)
+    b = C.planted_stats(plant, s, e, C.PLANTED_SPEC_1M)
+    assert b["sharpe"] > a["sharpe"] + 5 and a["trades_per_day"] > 3
+
+
+def test_cumulative_tasks_pair_with_main_seeds():
+    from btc_quant.research.campaign import CampaignTemplate
+    cfg = C.cumulative_config(jobs=1)
+    k_for = {s: 0.01 * s for s in cfg.strengths}
+    tasks = C.build_tasks(cfg, k_for)
+    main = C.build_tasks(C.full_config(jobs=1), k_for)
+    main_seed = {(t["kind"], t["strength"], t["seed"]) for t in main if t["study"] == "main"}
+    assert all((t["kind"], t["strength"], t["seed"]) in main_seed for t in tasks)
+    assert len(tasks) == sum(cfg.cumulative.values()) and all(t["sequence"][-1] == "g12" for t in tasks)
+    ex = C.PLANTED_SPEC.exit
+    for g in C.CUM_SEQUENCE[:-1]:
+        tpl = CampaignTemplate.from_dict(C.template_for(g, f"t_{g}", "calib_cum"))
+        star = tpl.make_spec(C.PLANTED_SPEC.entry, (), ex.stop_loss_pct, ex.take_profit_pct, ex.max_hold_min)
+        assert star.logic_hash() not in {s.logic_hash() for s in tpl.enumerate()}

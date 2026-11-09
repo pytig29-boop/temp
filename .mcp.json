@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "btcq": {
+      "type": "stdio",
+      "command": "uv",
+      "args": ["run", "--quiet", "--project", "${CLAUDE_PROJECT_DIR:-.}", "python", "-m", "btc_quant.mcp"],
+      "env": {
+        "BTCQ_RESEARCH_MODE": "1"
+      }
+    }
+  }
+}

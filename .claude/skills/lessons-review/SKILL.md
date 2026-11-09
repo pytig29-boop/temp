@@ -6,6 +6,9 @@ argument-hint: "[campaign_id | family | weekly]"
 
 # Lessons review (오답노트, PLAN §10b-9)
 
+MCP tools (`btcq`): `lessons_view` (facts, interpretations + status, `verify()`, weekly budget),
+`lessons_add_interpretation`, `lessons_mark`, `lessons_derive_hypothesis`, `find_similar`. Screens/campaigns run via
+MCP record facts automatically. Postmortems and the rest use the Python API below.
 API: `from btc_quant.research.lessons import LessonBook; B = LessonBook()` (stores in `research/lessons/`,
 reads `research/ledger/`). Human-readable view: `research/lessons/LESSONS.md` (regenerate with
 `B.render_markdown()`). The JSONL files and LESSONS.md are **never edited directly** (research guard denies it);

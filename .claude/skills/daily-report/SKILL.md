@@ -10,13 +10,12 @@ Report facts from the ledger and registry; do not run new campaigns or change an
 Never include lockbox performance numbers except results already recorded by an approved opening, and report
 Val (G6) only as outcome codes and counts.
 
-Intended MCP tools (later milestone): `query_ledger`, `compare`, `write_report`.
-Python equivalents today:
-- Ledger: `from btc_quant.registry.ledger import Ledger; L = Ledger()` →
-  `L.records("hypotheses" | "campaigns" | "runs" | "lockbox" | "transitions")`, `L.query("SELECT …")`
-  (duckdb over the JSONL tables), `L.trials_count(family=…)`, `L.lockbox_history()`.
-- Registry: `from btc_quant.registry.strategies import StrategyRegistry; StrategyRegistry().status()`.
-- Lockbox: `from btc_quant.registry.splits import DataAccess; DataAccess().lockbox_status()`.
+MCP tools (`btcq`, docs/MCP.md): `list_campaigns`, `get_campaign_report` (funnels; G6 pass/fail only),
+`query_ledger` (`table="trials"` → trials per family; hypotheses/campaigns/runs/transitions/val_evaluations/
+lockbox/forward_results with whitelisted columns, `since=` for the window), `registry_status` (states, lockbox
+openings/cap, pending lockbox requests, Val usage), `forward_status`, `lessons_view`, `params_status`,
+`get_data_summary`. Python fallback: `Ledger().records(…)`/`trials_count`, `StrategyRegistry().status()`,
+`DataAccess().lockbox_status()`.
 - Data quality: delegate to the `data-steward` subagent (Dev/Val/Forward only).
 - Do **not** run `btc_quant.registry.admin_cli` (human-only; the research guard denies it, even `status`).
 
