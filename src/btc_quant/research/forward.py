@@ -18,6 +18,8 @@
 - 대신 Forward 시작 후 G8.forward_warmup_days(기본 14일 = 파이프라인 G6 Val 워밍업과 동일) 동안은
   신호 계산만 하고 거래·평가를 하지 않는다. 평가 구간 = [forward_start + warmup, as_of + 1일).
   그 전에는 status=warming_up 레코드만 남긴다.
+- 보조 데이터 블록(업비트 등, `requires`)은 보조 거래소 1분봉도 **같은 Forward 창**에서만 읽어 캠페인·페이퍼와
+  같은 방식(regularize(clean_wicks) → to_tf, 대상 봉에 reindex, ffill 없음)으로 ctx.aux 를 만든다.
 - 7일 이상 창을 쓰는 블록(vol_regime 순위 등)은 워밍업 직후 백테스트보다 짧은 이력을 본다
   (G6 Val 과 같은 한계). 일정 기간이 지나면 사라진다.
 
@@ -41,18 +43,22 @@ import pandas as pd
 from scipy import stats
 
 from btc_quant.backtest import fast
-from btc_quant.evaluation import gates as G
 from btc_quant.evaluation import metrics as M
+from btc_quant.params import gate_config_for_campaign
 from btc_quant.registry.strategies import key_of
+from btc_quant.strategy.blocks import REGISTRY
 
 from .campaign import (
     DEFAULT_COSTS,
     HALF_LIFE_DAYS,
     CampaignError,
     ResearchEnv,
+    aux_context,
+    config_root,
     get_cost,
     git_commit,
     prepare_m1,
+    run_params,
 )
 
 DEFAULT_STATES = ("validated", "challenger")
@@ -187,6 +193,42 @@ def expectation_band(env: ResearchEnv, logic_hash: str, cost: str, n_days: int, 
 
 
 # ============================================================== 평가
+def spec_aux_keys(spec, registry=REGISTRY) -> list[str]:
+    """스펙 블록(진입·필터·신호 청산)이 요구하는 보조 데이터 키 (예: ["upbit"])."""
+    refs = [spec.entry, *spec.filters]
+    if spec.exit.signal_exit:
+        refs.append(spec.exit.signal_exit)
+    keys: list[str] = []
+    for r in refs:
+        for k in registry.get(r.block).requires:
+            if k not in keys:
+                keys.append(k)
+    return keys
+
+
+def forward_aux_context(env: ResearchEnv, spec, fwd_start: pd.Timestamp, window_end: pd.Timestamp):
+    """보조 데이터가 필요한 스펙의 ctx (필요 없으면 None).
+
+    research/campaign.aux_context·페이퍼와 같은 구성: 보조 거래소 1분봉을 **Forward 구간만**
+    (`read_range(fwd_start, window_end)` — 대상 시계열과 같은 창, 잠금 구간 미접근) 읽어
+    regularize(clean_wicks) → 결정 주기 봉 `to_tf` → 블록이 대상 봉 index 에 reindex(ffill 없음).
+    반환 (ctx, rows) 또는 데이터가 없으면 CampaignError."""
+    keys = spec_aux_keys(spec)
+    if not keys:
+        return None, {}
+    aux_m1, rows = {}, {}
+    for a in keys:
+        try:
+            raw = env.data.read_range(fwd_start, window_end, a, SYMBOL, TIMEFRAME)
+        except _NO_DATA:
+            raw = pd.DataFrame()
+        if raw.empty:
+            raise CampaignError(f"no {a} aux data in the forward segment")
+        aux_m1[a] = prepare_m1(raw)
+        rows[a] = len(raw)
+    return aux_context(aux_m1, spec.tf_min), rows
+
+
 def evaluate(env: ResearchEnv, fs: ForwardStrategy, fwd_start: pd.Timestamp, window_end: pd.Timestamp,
              warmup_days: int, band: float) -> dict:
     eval_start = fwd_start + pd.Timedelta(days=warmup_days)
@@ -205,12 +247,18 @@ def evaluate(env: ResearchEnv, fs: ForwardStrategy, fwd_start: pd.Timestamp, win
         return {**base, "status": "no_data"}
     if m1.index.max() < eval_start:
         return {**base, "status": "no_data", "note": "no bars after warm-up"}
-    res = fast.run_fast(fs.spec, m1, get_cost(fs.cost), eval_start, window_end)
+    try:
+        ctx, aux_rows = forward_aux_context(env, fs.spec, fwd_start, window_end)
+    except CampaignError as e:
+        return {**base, "status": "no_data", "note": str(e)}
+    res = fast.run_fast(fs.spec, m1, get_cost(fs.cost, config_root(env)), eval_start, window_end, ctx=ctx)
     met = M.summarize(res, HALF_LIFE_DAYS)
     out = {**base, "status": "ok", "n_days": met["n_days"], "n_trades": met["n_trades"],
            "net_return": met["total_return"], "sharpe": met["sharpe"], "mean_daily": met["mean_daily"],
            "max_dd": met["max_dd"], "expectancy": met["expectancy"], "win_rate": met["win_rate"],
            "data_rows": len(raw), "data_last_ts": pd.Timestamp(raw.index.max()).isoformat()}
+    if aux_rows:
+        out["aux_rows"] = aux_rows
     exp = expectation_band(env, fs.logic_hash, fs.cost, met["n_days"], band)
     out["expected"] = exp
     out["within_band"] = (None if exp is None
@@ -231,7 +279,7 @@ def run_forward(root: str | Path | None = None, env: ResearchEnv | None = None, 
                 fetch: bool = True, fetcher: Fetcher | None = None, now=None, states=None,
                 gate_cfg: dict | None = None, log: Callable[[str], None] = lambda s: None) -> dict:
     env = env or ResearchEnv.at(root)
-    cfg = gate_cfg or G.load_gate_config()
+    cfg = gate_cfg if gate_cfg is not None else gate_config_for_campaign(None, root=config_root(env))
     g8 = cfg.get("G8") or {}
     states = tuple(states or g8.get("forward_states") or DEFAULT_STATES)
     exchanges = tuple(g8.get("forward_exchanges") or DEFAULT_EXCHANGES)
@@ -248,6 +296,7 @@ def run_forward(root: str | Path | None = None, env: ResearchEnv | None = None, 
     if window_end <= fwd_start:
         raise ValueError(f"as-of {as_of_s} is before the forward segment start {fwd_start.date()}")
     fetched = fetch_forward(env, exchanges, fwd_start, window_end, fetcher, log) if fetch else None
+    pver = run_params(env)                     # params_version + cost_versions (docs/PARAMS.md §4)
     results, new = [], 0
     for fs in resolve_strategies(env, states):
         prior = [r for r in env.ledger.forward_results(fs.key, as_of_s) if r["logic_hash"] == fs.logic_hash]
@@ -256,6 +305,8 @@ def run_forward(root: str | Path | None = None, env: ResearchEnv | None = None, 
             continue
         rec = evaluate(env, fs, fwd_start, window_end, warmup, band)
         rec["code_commit"] = git_commit(env.code_root)
+        rec["params_version"] = pver.get("params_version")
+        rec["cost_versions"] = pver.get("cost_versions")
         rid, created = env.ledger.record_forward_result(fs.key, fs.logic_hash, as_of_s, rec)
         new += int(created)
         results.append(env.ledger.get("forward_results", rid))

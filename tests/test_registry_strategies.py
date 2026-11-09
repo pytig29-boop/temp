@@ -140,3 +140,62 @@ def test_admin_cli_confirmation(tmp_path, monkeypatch, capsys):
     assert admin_cli.main(root + ["status"]) == 0
     out = capsys.readouterr().out
     assert '"a_v1"' in out and '"pending_approvals"' in out
+
+
+# ---------------------------------------------------------------- 리스크 사이드카 이동
+def _write_sidecar(reg, state, key, grade="A"):
+    p = reg.dir / state / f"{key}.risk.yaml"
+    p.write_text(yaml.safe_dump({"grade": grade, "limits": {"daily_loss": -0.02}}))
+    return p
+
+
+def test_risk_sidecar_moves_with_spec(tmp_path):
+    reg = StrategyRegistry(tmp_path)
+    reg.register(spec("a"))
+    for st in ("candidate", "validated"):
+        reg.transition("a", 1, st, "ok")
+    side = _write_sidecar(reg, "validated", "a_v1")             # pipeline.write_risk_yaml 위치
+    for st in ("challenger", "review"):
+        reg.transition("a", 1, st, "ok")
+        assert (reg.dir / st / "a_v1.risk.yaml").exists() and not side.exists()
+    assert yaml.safe_load((reg.dir / "review" / "a_v1.risk.yaml").read_text())["grade"] == "A"
+    # risk.yaml 은 목록에 스펙으로 잡히지 않는다
+    assert [x["id"] for x in reg.list("review")] == ["a"]
+
+    reg.write_activation_approval("a", 1, "human")              # activate: review → active
+    reg.activate("a", 1)
+    assert (reg.dir / "active" / "a_v1.risk.yaml").exists()
+    assert not (reg.dir / "review" / "a_v1.risk.yaml").exists()
+
+    to_review(reg, spec("b"))                                    # b 는 사이드카 없음 (그대로 동작)
+    _write_sidecar(reg, "review", "b_v1", grade="B")
+    reg.write_activation_approval("b", 1, "human")
+    reg.activate("b", 1)                                         # a: active → retired (사이드카 함께)
+    assert (reg.dir / "retired" / "a_v1.risk.yaml").exists()
+    assert (reg.dir / "active" / "b_v1.risk.yaml").exists()
+
+    reg.rollback()                                               # b → retired, a → active
+    assert (reg.dir / "active" / "a_v1.risk.yaml").exists()
+    assert (reg.dir / "retired" / "b_v1.risk.yaml").exists()
+    assert not (reg.dir / "retired" / "a_v1.risk.yaml").exists()
+
+    reg.register(spec("c"))
+    reg.transition("c", 1, "candidate", "ok")
+    reg.transition("c", 1, "validated", "ok")
+    _write_sidecar(reg, "validated", "c_v1")
+    reg.reject("c", 1, "skeptic review failed")                  # reject 도 함께 이동
+    assert (reg.dir / "rejected" / "c_v1.risk.yaml").exists()
+    assert not (reg.dir / "validated" / "c_v1.risk.yaml").exists()
+
+
+def test_risk_sidecar_conflict_leaves_files_untouched(tmp_path):
+    reg = StrategyRegistry(tmp_path)
+    reg.register(spec("a"))
+    reg.transition("a", 1, "candidate", "ok")
+    reg.transition("a", 1, "validated", "ok")
+    _write_sidecar(reg, "validated", "a_v1")
+    stale = _write_sidecar(reg, "challenger", "a_v1", grade="C")   # 목적지에 남은 사이드카
+    with pytest.raises(RegistryError, match="risk.yaml"):
+        reg.transition("a", 1, "challenger", "ok")
+    assert reg.state_of("a", 1) == "validated"
+    assert (reg.dir / "validated" / "a_v1.risk.yaml").exists() and stale.exists()

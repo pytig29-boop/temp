@@ -25,7 +25,9 @@
                   (신호의 재현을 보는 것; 비용 등급은 pipeline 이 따로 본다). 다른 거래소 Sharpe > 0 이고
                   Sharpe 비(다른/대상) ≥ CROSS_VENUE_MIN_RATIO. 데이터 없으면 skipped.
 
-수치 기준은 아래 모듈 상수 (나중에 통합 담당이 config/gates.yaml 의 `robustness:` 로 옮긴다).
+수치 기준은 config/gates.yaml 의 `robustness:` (class ② 증거 기준, config/params.yaml 에 등급·근거 수록)에서
+읽는다. 아래 모듈 상수는 같은 값의 대체값(설정에 항목이 없을 때)이다. 파이프라인은 캠페인 시점 관문 설정
+(`gate_config_for_campaign`)의 `robustness` 를 `thresholds=` 로 넘긴다.
 엔진 호출은 공개 API(`fast.prepare_spec`, `fast.prepare`, `fast.simulate_prepared`,
 `fast.daily_returns_matrix`)만 쓴다. 청산은 `spec.exit` 의 고정 % 또는 ATR 배수 SL/TP + 최대보유
 (ATR 모드: `Candidate.atr_bars`; 지연 시나리오는 결정 봉 ATR 절대값을 지연 진입가 기준 비율로 다시 계산).
@@ -43,7 +45,7 @@ from btc_quant.backtest import fast
 from btc_quant.backtest.types import COINONE_CONSERVATIVE, CostModel
 from btc_quant.evaluation import metrics as M
 
-# ============================================================== 기준 (gates.yaml 이관 대상)
+# ============================================================== 기준 (대체값 — 원본은 config/gates.yaml `robustness:`)
 LATENCY_DELAYS_MIN = (1,)          # 실시간 체결 지연 시나리오(분). 1봉 지연은 봉 길이로 자동 추가
 LATENCY_MIN_RETENTION = 0.5        # Sharpe(지연)/Sharpe(기준) ≥ 0.5 (모든 시나리오)
 OUTLIER_TOP_FRAC = 0.01            # 상위 1% 거래 제거
@@ -65,6 +67,28 @@ THRESHOLDS = {
     "alpha_min_tstat": ALPHA_MIN_TSTAT, "alpha_nw_lags": ALPHA_NW_LAGS,
     "cross_venue_min_ratio": CROSS_VENUE_MIN_RATIO,
 }
+DEFAULT_THRESHOLDS = THRESHOLDS
+
+
+def load_thresholds(cfg: dict | None = None) -> dict:
+    """견고성 기준: `cfg`(관문 설정 전체 또는 그 `robustness` 절) → 없으면 config/gates.yaml `robustness:`.
+    설정에 없는 항목은 모듈 상수(DEFAULT_THRESHOLDS)로 채운다. 반환은 새 dict (공유 객체 변경 없음)."""
+    sec = None
+    if cfg is not None:
+        sec = cfg.get("robustness", cfg) if isinstance(cfg, dict) and "robustness" in cfg else cfg
+    else:
+        try:
+            from btc_quant.evaluation.gates import load_gate_config
+            sec = load_gate_config().get("robustness")
+        except Exception:  # noqa: BLE001 — 설정을 못 읽으면 상수 대체값
+            sec = None
+    out = {k: (list(v) if isinstance(v, (list, tuple)) else v) for k, v in DEFAULT_THRESHOLDS.items()}
+    for k, v in (sec or {}).items():
+        if k in out:
+            out[k] = list(v) if isinstance(v, (list, tuple)) else v
+    return out
+
+
 CHECKS = ("latency", "outliers", "leave_year_out", "cost", "regime", "alpha", "cross_venue")
 
 Builder = Callable[[pd.DataFrame], fast.Prepared]
@@ -198,9 +222,10 @@ def _ratio(a: float, b: float) -> float:
     return float(a / b) if b > 0 else float("nan")
 
 
-def check_latency(eng: _Engine, base: _Run, cost: CostModel) -> dict:
+def check_latency(eng: _Engine, base: _Run, cost: CostModel, th: dict | None = None) -> dict:
+    th = th or DEFAULT_THRESHOLDS
     sr0 = _sr(base.daily)
-    delays = sorted({*LATENCY_DELAYS_MIN, eng.cand.bar_minutes} | (
+    delays = sorted({*(int(x) for x in th["latency_delays_min"]), eng.cand.bar_minutes} | (
         {eng.cand.bar_minutes + 1} if eng.cand.bar_minutes > 1 else set()))
     rows = []
     for d in delays:
@@ -211,18 +236,20 @@ def check_latency(eng: _Engine, base: _Run, cost: CostModel) -> dict:
     if sr0 <= 0:
         return {"passed": False, "base_sharpe": sr0, "scenarios": rows, "reason": "base Sharpe <= 0"}
     worst = min(r["retention"] for r in rows)
-    return {"passed": bool(worst >= LATENCY_MIN_RETENTION), "base_sharpe": sr0, "min_retention": worst,
+    return {"passed": bool(worst >= th["latency_min_retention"]), "base_sharpe": sr0, "min_retention": worst,
             "scenarios": rows, "note": "delays: 1 min (live fill), 1 bar, 1 bar + 1 min (5m strategies)"}
 
 
-def check_outliers(eng: _Engine, base: _Run) -> dict:
+def check_outliers(eng: _Engine, base: _Run, th: dict | None = None) -> dict:
+    th = th or DEFAULT_THRESHOLDS
     net = base.tr.net_ret
     n = len(net)
     if n == 0:
         return {"passed": False, "reason": "no trades"}
     order = np.argsort(-net, kind="stable")
     rows = []
-    for label, k in (("top_1pct", max(1, math.ceil(OUTLIER_TOP_FRAC * n))), ("top_5", OUTLIER_TOP_N)):
+    for label, k in (("top_1pct", max(1, math.ceil(th["outlier_top_frac"] * n))),
+                     (f"top_{int(th['outlier_top_n'])}", int(th["outlier_top_n"]))):
         k = min(k, n)
         keep = np.ones(n, dtype=bool)
         keep[order[:k]] = False
@@ -234,13 +261,15 @@ def check_outliers(eng: _Engine, base: _Run) -> dict:
             "n_trades": int(n), "removals": rows}
 
 
-def check_leave_year_out(base: _Run) -> dict:
+def check_leave_year_out(base: _Run, th: dict | None = None) -> dict:
+    th = th or DEFAULT_THRESHOLDS
+    min_days = int(th["loyo_min_days"])
     d = base.daily
     years = d.index.year
     counts = pd.Series(years).value_counts()
-    eligible = sorted(int(y) for y, c in counts.items() if c >= LOYO_MIN_DAYS)
+    eligible = sorted(int(y) for y, c in counts.items() if c >= min_days)
     if len(eligible) < 2:
-        return {"passed": None, "reason": f"< 2 calendar years with >= {LOYO_MIN_DAYS} days",
+        return {"passed": None, "reason": f"< 2 calendar years with >= {min_days} days",
                 "years": eligible}
     rows = []
     for y in eligible:
@@ -252,14 +281,19 @@ def check_leave_year_out(base: _Run) -> dict:
             "worst_year_removed": min(rows, key=lambda r: r["sharpe_rest"])["year_removed"], "years": rows}
 
 
-def check_cost(eng: _Engine, base: _Run, cost: CostModel) -> dict:
+def check_cost(eng: _Engine, base: _Run, cost: CostModel, th: dict | None = None) -> dict:
+    th = th or DEFAULT_THRESHOLDS
     rows = [{"mult": 1.0, "cost": cost.name, "sharpe": _sr(base.daily)}]
-    for m in COST_MULTS:
+    mults = [float(m) for m in th["cost_mults"]]
+    pass_mult = float(th["cost_pass_mult"])
+    if pass_mult not in mults and pass_mult != 1.0:
+        mults = sorted({*mults, pass_mult})
+    for m in mults:
         c = scale_cost(cost, m)
         r = eng.run(c)
         rows.append({"mult": m, "cost": c.name, "sharpe": _sr(r.daily),
                      "total_return": float(np.prod(1 + r.daily.to_numpy()) - 1)})
-    at = next(r for r in rows if r["mult"] == COST_PASS_MULT)
+    at = next(r for r in rows if r["mult"] == pass_mult)
     return {"passed": bool(at["sharpe"] > 0), "scenarios": rows,
             "round_trip_bps_base": 2e4 * cost.side_cost + 2e4 * cost.fee_rate}
 
@@ -269,11 +303,11 @@ def btc_daily(m1: pd.DataFrame) -> pd.Series:
     return m1["close"].resample("1D").last().dropna()
 
 
-def regime_labels(m1: pd.DataFrame, days: pd.DatetimeIndex) -> pd.DataFrame:
+def regime_labels(m1: pd.DataFrame, days: pd.DatetimeIndex, lookback_days: int | None = None) -> pd.DataFrame:
     """일자별 인과 국면 라벨 (특성은 전일 종가까지). 특성이 없는 날은 'na'."""
     close = btc_daily(m1)
     ret = close.pct_change()
-    L = REGIME_LOOKBACK_DAYS
+    L = int(lookback_days if lookback_days is not None else REGIME_LOOKBACK_DAYS)
     trail = (close / close.shift(L) - 1).shift(1)          # d-1 종가 / d-1-L 종가
     vol = ret.rolling(L, min_periods=L).std().shift(1)
     idx = days.tz_convert(close.index.tz) if (days.tz is not None and close.index.tz is not None) else days
@@ -311,20 +345,22 @@ def _regime_table(daily: pd.Series, labels: pd.Series, exit_days: pd.DatetimeInd
             "regimes": rows}
 
 
-def check_regime(eng: _Engine, base: _Run) -> dict:
+def check_regime(eng: _Engine, base: _Run, th: dict | None = None) -> dict:
+    th = th or DEFAULT_THRESHOLDS
     days = base.daily.index
-    lab = regime_labels(eng.m1, days)
+    lab = regime_labels(eng.m1, days, int(th["regime_lookback_days"]))
     exit_days = pd.DatetimeIndex(eng.p.index[base.tr.exit_idx]).floor("D") if len(base.tr.exit_idx) \
         else pd.DatetimeIndex([], tz=days.tz)
     out = {}
     ok = True
     for dim in ("trend", "vol"):
         t = _regime_table(base.daily, lab[dim], exit_days)
-        t["flag"] = bool(not (t["total_pnl_log"] > 0) or t["max_pnl_share"] > REGIME_MAX_PNL_SHARE)
+        t["flag"] = bool(not (t["total_pnl_log"] > 0) or t["max_pnl_share"] > th["regime_max_pnl_share"])
         ok &= not t["flag"]
         out[dim] = t
     return {"passed": bool(ok), **out,
-            "note": "terciles of causal trailing-30d features over the segment; 'na' = warm-up days"}
+            "note": f"terciles of causal trailing-{int(th['regime_lookback_days'])}d features over the segment; "
+                    "'na' = warm-up days"}
 
 
 def _ols_nw(y: np.ndarray, x: np.ndarray, lags: int) -> tuple[np.ndarray, np.ndarray]:
@@ -342,21 +378,22 @@ def _ols_nw(y: np.ndarray, x: np.ndarray, lags: int) -> tuple[np.ndarray, np.nda
     return b, np.sqrt(np.clip(np.diag(V), 0, None))
 
 
-def check_alpha(eng: _Engine, base: _Run) -> dict:
+def check_alpha(eng: _Engine, base: _Run, th: dict | None = None) -> dict:
+    th = th or DEFAULT_THRESHOLDS
     days = base.daily.index
-    lab = regime_labels(eng.m1, days)
+    lab = regime_labels(eng.m1, days, int(th["regime_lookback_days"]))
     y = base.daily.to_numpy(float)
     x = lab["btc_ret"].to_numpy(float)
     ok = np.isfinite(x)
     if ok.sum() < 30:
         return {"passed": None, "reason": "< 30 days with BTC returns"}
     y, x = y[ok], x[ok]
-    b, se = _ols_nw(y, x, ALPHA_NW_LAGS)
+    b, se = _ols_nw(y, x, int(th["alpha_nw_lags"]))
     t_a = float(b[0] / se[0]) if se[0] > 0 else 0.0
     minutes_total = max((eng.e - eng.s).total_seconds() / 60, 1.0)
     exposure = float(np.sum(base.tr.hold_min) / minutes_total)
     bh_matched = exposure * x
-    return {"passed": bool(t_a >= ALPHA_MIN_TSTAT), "alpha_daily": float(b[0]),
+    return {"passed": bool(t_a >= th["alpha_min_tstat"]), "alpha_daily": float(b[0]),
             "alpha_annual": float(b[0] * M.ANN), "alpha_t": t_a, "beta": float(b[1]),
             "beta_t": float(b[1] / se[1]) if se[1] > 0 else 0.0, "n_days": int(ok.sum()),
             "exposure": exposure, "strategy_mean_annual": float(y.mean() * M.ANN),
@@ -366,7 +403,8 @@ def check_alpha(eng: _Engine, base: _Run) -> dict:
 
 
 def check_cross_venue(cand: Candidate, base: _Run, other_m1: pd.DataFrame | None, start, end,
-                      cost: CostModel, other_venue: str | None) -> dict:
+                      cost: CostModel, other_venue: str | None, th: dict | None = None) -> dict:
+    th = th or DEFAULT_THRESHOLDS
     if other_m1 is None or len(other_m1) == 0:
         return {"passed": None, "reason": "no other-venue data", "other_venue": other_venue}
     eng = _Engine(cand, other_m1, start, end)
@@ -375,7 +413,7 @@ def check_cross_venue(cand: Candidate, base: _Run, other_m1: pd.DataFrame | None
     a, b = base.daily.align(r.daily, join="inner")
     corr = float(np.corrcoef(a, b)[0, 1]) if len(a) > 2 and a.std() > 0 and b.std() > 0 else float("nan")
     ratio = _ratio(sr1, sr0)
-    passed = bool(sr0 > 0 and sr1 > 0 and ratio >= CROSS_VENUE_MIN_RATIO)
+    passed = bool(sr0 > 0 and sr1 > 0 and ratio >= th["cross_venue_min_ratio"])
     return {"passed": passed, "other_venue": other_venue, "sharpe_target": sr0, "sharpe_other": sr1,
             "ratio": ratio, "same_sign": bool(np.sign(sr0) == np.sign(sr1)), "daily_corr": corr,
             "n_trades_target": len(base.tr.net_ret), "n_trades_other": len(r.tr.net_ret),
@@ -385,7 +423,10 @@ def check_cross_venue(cand: Candidate, base: _Run, other_m1: pd.DataFrame | None
 # ============================================================== 묶음
 def run_suite(cand: Candidate, m1: pd.DataFrame, start, end, cost: CostModel = COINONE_CONSERVATIVE, *,
               other_m1: pd.DataFrame | None = None, other_venue: str | None = None,
-              checks: tuple[str, ...] = CHECKS, half_life_days: float = 365) -> dict:
+              checks: tuple[str, ...] = CHECKS, half_life_days: float = 365,
+              thresholds: dict | None = None) -> dict:
+    """thresholds: 견고성 기준 (관문 설정 또는 그 `robustness` 절; None → config/gates.yaml, 없으면 상수)."""
+    th = load_thresholds(thresholds)
     unknown = set(checks) - set(CHECKS)
     if unknown:
         raise ValueError(f"unknown checks {sorted(unknown)}")
@@ -393,19 +434,19 @@ def run_suite(cand: Candidate, m1: pd.DataFrame, start, end, cost: CostModel = C
     base = eng.run(cost)
     res: dict[str, dict] = {}
     if "latency" in checks:
-        res["latency"] = check_latency(eng, base, cost)
+        res["latency"] = check_latency(eng, base, cost, th)
     if "outliers" in checks:
-        res["outliers"] = check_outliers(eng, base)
+        res["outliers"] = check_outliers(eng, base, th)
     if "leave_year_out" in checks:
-        res["leave_year_out"] = check_leave_year_out(base)
+        res["leave_year_out"] = check_leave_year_out(base, th)
     if "cost" in checks:
-        res["cost"] = check_cost(eng, base, cost)
+        res["cost"] = check_cost(eng, base, cost, th)
     if "regime" in checks:
-        res["regime"] = check_regime(eng, base)
+        res["regime"] = check_regime(eng, base, th)
     if "alpha" in checks:
-        res["alpha"] = check_alpha(eng, base)
+        res["alpha"] = check_alpha(eng, base, th)
     if "cross_venue" in checks:
-        res["cross_venue"] = check_cross_venue(cand, base, other_m1, start, end, cost, other_venue)
+        res["cross_venue"] = check_cross_venue(cand, base, other_m1, start, end, cost, other_venue, th)
     failed = [k for k, v in res.items() if v["passed"] is False]
     skipped = [k for k, v in res.items() if v["passed"] is None]
     passed = not failed
@@ -419,16 +460,16 @@ def run_suite(cand: Candidate, m1: pd.DataFrame, start, end, cost: CostModel = C
         "verdict": ("robust" if passed and not skipped else
                     f"robust on available checks (skipped: {', '.join(skipped)})" if passed else
                     f"fragile: failed {', '.join(failed)}"),
-        "thresholds": dict(THRESHOLDS),
+        "thresholds": th,
     }
 
 
 def robustness_suite(spec, m1: pd.DataFrame, start, end, cost: CostModel = COINONE_CONSERVATIVE, *,
                      other_m1: pd.DataFrame | None = None, other_venue: str | None = None, ctx=None,
-                     checks: tuple[str, ...] = CHECKS) -> dict:
+                     checks: tuple[str, ...] = CHECKS, thresholds: dict | None = None) -> dict:
     """StrategySpec 하나에 대한 견고성 묶음. m1 = 엔진 입력 1분봉(regularize 된; 구간 앞 워밍업 포함 권장)."""
     return run_suite(Candidate.from_spec(spec, ctx), m1, start, end, cost, other_m1=other_m1,
-                     other_venue=other_venue, checks=checks)
+                     other_venue=other_venue, checks=checks, thresholds=thresholds)
 
 
 def robustness_for_spec(spec, env=None, segment: str = "dev", exchange: str = "coinone",

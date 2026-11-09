@@ -1,0 +1,72 @@
+# 파라미터 변경 제안 — 사람 승인 전에는 아무 효과 없음. 승인: python -m btc_quant.params approve <id>
+id: pp-20261109-interim-coinone-cost-models-option-b-2-4-7a5511
+created: '2026-11-09T14:15:35+00:00'
+created_by: agent (user-selected option B)
+class: 1
+kind: cost_models
+title: interim Coinone cost models, option B (2/4/8 bp round trip)
+provisional: true
+evidence: research/reports/params_calibration_20261109.md
+rationale: 'Measured (provisional, ~4 calm hours): Coinone one-way p50 0.49bp, p90 0.81bp, p99 1.45bp. Option B
+  keeps 2-4x margin over measurement until a >=72h / 24 KST-hour sample exists; replaces the arbitrary 21bp stress
+  preset. Supersedes pp-20261109-cost-calibration-2026-11-09-coinone-upbi-57ac18'
+changes:
+- target: costs:coinone_base
+  name: coinone_base
+  from:
+    fee_rate: 0.0
+    spread_bps: 1.0
+    slip_bps: 1.0
+    tick: 0.0
+    side_bps: 1.5
+    round_trip_bps: 3.0
+  to:
+    fee_rate: 0.0
+    spread_bps: 1.0
+    slip_bps: 0.5
+    tick: 0.0
+    side_bps: 1.0
+    round_trip_bps: 2.0
+  direction: looser
+  venue: coinone
+  role: base
+- target: costs:coinone_conservative
+  name: coinone_conservative
+  from:
+    fee_rate: 0.0
+    spread_bps: 2.0
+    slip_bps: 3.0
+    tick: 0.0
+    side_bps: 4.0
+    round_trip_bps: 8.0
+  to:
+    fee_rate: 0.0
+    spread_bps: 2.0
+    slip_bps: 1.0
+    tick: 0.0
+    side_bps: 2.0
+    round_trip_bps: 4.0
+  direction: looser
+  venue: coinone
+  role: conservative
+- target: costs:coinone_stress
+  name: coinone_stress
+  from:
+    fee_rate: 0.0
+    spread_bps: 5.0
+    slip_bps: 8.0
+    tick: 0.0
+    side_bps: 10.5
+    round_trip_bps: 21.0
+  to:
+    fee_rate: 0.0
+    spread_bps: 4.0
+    slip_bps: 2.0
+    tick: 0.0
+    side_bps: 4.0
+    round_trip_bps: 8.0
+  direction: looser
+  venue: coinone
+  role: stress
+status: pending
+content_hash: 0ce3e7c5d9a12486

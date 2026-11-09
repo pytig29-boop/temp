@@ -223,8 +223,12 @@ class Ledger:
 
     # ------------------------------------------------------------ 실행
     def record_run(self, campaign_id: str, spec, cost_name: str, period, data_snapshot: str,
-                   code_commit: str, metrics: dict, family: str | None = None) -> str:
-        """spec: StrategySpec 또는 그 dict. 캠페인 예산(고유 logic_hash 수)을 넘는 새 시도는 거부."""
+                   code_commit: str, metrics: dict, family: str | None = None, *,
+                   params_version: str | None = None, cost_versions: dict | None = None) -> str:
+        """spec: StrategySpec 또는 그 dict. 캠페인 예산(고유 logic_hash 수)을 넘는 새 시도는 거부.
+
+        params_version / cost_versions (선택, docs/PARAMS.md §4): `btc_quant.params.params_snapshot()` 의
+        값. 주어지면 레코드에 같은 이름의 필드로 추가된다(없으면 생략 → 이전 형식과 동일)."""
         from btc_quant.strategy.spec import StrategySpec
 
         if not isinstance(spec, StrategySpec):
@@ -249,15 +253,17 @@ class Ledger:
                 "spec_id": spec.id, "spec_version": spec.version, "logic_hash": lh,
                 "spec": spec.to_dict(), "cost_name": cost_name, "period": _period(period),
                 "data_snapshot": data_snapshot, "code_commit": code_commit,
-                "metrics": metrics or {}})["id"]
+                "metrics": metrics or {}, **_param_fields(params_version, cost_versions)})["id"]
 
     def record_runs(self, campaign_id: str, items, period, data_snapshot: str, code_commit: str,
-                    family: str | None = None) -> list[str]:
+                    family: str | None = None, *, params_version: str | None = None,
+                    cost_versions: dict | None = None) -> list[str]:
         """record_run 의 일괄판 (O(n): runs.jsonl 을 한 번만 읽고 한 번에 추가).
 
         items: [(spec | spec dict, cost_name, metrics), ...]. 검증(사전등록 비용, 캠페인 예산 =
         고유 logic_hash 수)은 record_run 과 같고, 하나라도 어긋나면 아무것도 쓰지 않는다.
-        레코드 형식도 record_run 과 동일하다. 반환 = run id 목록(입력 순서).
+        레코드 형식도 record_run 과 동일하다(params_version / cost_versions 선택 필드 포함).
+        반환 = run id 목록(입력 순서).
         """
         from btc_quant.strategy.spec import StrategySpec
 
@@ -267,6 +273,7 @@ class Ledger:
                 spec = StrategySpec.from_dict(spec)
             norm.append((spec, spec.logic_hash(), cost_name, mets))
         per = _period(period)
+        extra = _param_fields(params_version, cost_versions)
         with self.lock():
             camp = self.get("campaigns", campaign_id)
             if camp is None:
@@ -287,7 +294,7 @@ class Ledger:
                 "spec_id": spec.id, "spec_version": spec.version, "logic_hash": lh,
                 "spec": spec.to_dict(), "cost_name": cost_name, "period": per,
                 "data_snapshot": data_snapshot, "code_commit": code_commit,
-                "metrics": mets or {}} for spec, lh, cost_name, mets in norm]
+                "metrics": mets or {}, **extra} for spec, lh, cost_name, mets in norm]
             return [r["id"] for r in self._append_many_locked("runs", recs)]
 
     def trials_count(self, campaign_id: str | None = None, family: str | None = None) -> int:
@@ -453,6 +460,16 @@ class Ledger:
     def transitions(self, strategy_id: str | None = None) -> list[dict]:
         return [r for r in self.records("transitions")
                 if strategy_id is None or r["strategy_id"] == strategy_id]
+
+
+def _param_fields(params_version: str | None, cost_versions: dict | None) -> dict:
+    """실행 레코드의 선택 필드 (파라미터 거버넌스 버전). None 이면 생략 — 이전 레코드와 같은 형식."""
+    out: dict = {}
+    if params_version is not None:
+        out["params_version"] = str(params_version)
+    if cost_versions is not None:
+        out["cost_versions"] = {str(k): int(v) for k, v in dict(cost_versions).items()}
+    return out
 
 
 def _period(period) -> dict:

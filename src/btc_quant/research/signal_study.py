@@ -513,6 +513,7 @@ class ScreenTemplate:
     family: str | None
     segment: str = "dev"
     raw: dict = field(default_factory=dict)
+    aux: list = field(default_factory=list)   # 보조 데이터 (data.aux, 실시간 수신 가능한 것만: campaign.LIVE_AUX)
 
     @classmethod
     def from_yaml(cls, path, registry: Registry = REGISTRY) -> ScreenTemplate:
@@ -520,7 +521,7 @@ class ScreenTemplate:
 
     @classmethod
     def from_dict(cls, d: dict, registry: Registry = REGISTRY) -> ScreenTemplate:
-        from btc_quant.research.campaign import CampaignError, _block_grid, get_cost
+        from btc_quant.research.campaign import LIVE_AUX, CampaignError, _block_grid, get_cost
 
         if not isinstance(d, dict):
             raise CampaignError("template must be a mapping")
@@ -537,8 +538,13 @@ class ScreenTemplate:
             if not str(hyp.get(k) or "").strip():
                 raise CampaignError(f"hypothesis.{k} required")
         data = d.get("data") or {}
-        if data.get("aux"):
-            raise CampaignError("aux data not supported in screens yet")
+        aux = list(data.get("aux") or [])
+        exchange = str(data.get("exchange", "upbit"))
+        bad = [a for a in aux if a not in LIVE_AUX]
+        if bad:
+            raise CampaignError(f"screen aux {bad} not supported (live-available: {list(LIVE_AUX)})")
+        if len(set(aux)) != len(aux) or exchange in aux:
+            raise CampaignError(f"screen aux {aux}: duplicates or the target exchange {exchange!r} itself")
         if d.get("segment", "dev") != "dev":
             raise CampaignError("signal screens run on the dev segment only (PLAN §5)")
         sigs_raw = d.get("signals")
@@ -582,14 +588,14 @@ class ScreenTemplate:
         if bm not in (1, 5):
             raise CampaignError("bar_minutes must be 1 or 5 (PLAN D10)")
         tpl = cls(name=name, hypothesis={k: hyp[k] for k in ("text", "rationale", "success_criteria")},
-                  exchange=str(data.get("exchange", "upbit")), symbol=str(data.get("symbol", "BTC-KRW")),
+                  exchange=exchange, symbol=str(data.get("symbol", "BTC-KRW")),
                   timeframe=str(data.get("timeframe", "1m")), bar_minutes=bm, signals=sigs,
                   horizons=horizons, primary_horizons=primary,
                   min_gap_min=float(st.get("min_gap_min", DEFAULT_MIN_GAP_MIN)),
                   n_null=int(st.get("n_null", DEFAULT_N_NULL)), seed=int(st.get("seed", 0)),
                   min_events=int(st.get("min_events", DEFAULT_MIN_EVENTS)), stratify=stratify,
                   costs=costs, method=method, alpha=alpha, budget=budget,
-                  family=(str(d["family"]) if d.get("family") else None), raw=d)
+                  family=(str(d["family"]) if d.get("family") else None), raw=d, aux=aux)
         configs = tpl.configs()
         keys = [_config_key(e, fs) for e, fs in configs]
         if len(set(keys)) != len(keys):
@@ -599,6 +605,10 @@ class ScreenTemplate:
                 tpl.trial_spec(e, fs).validate(registry)
             except (ValueError, KeyError) as err:
                 raise CampaignError(f"invalid signal config: {err}") from err
+        need = sorted({r for e, fs in configs for b in (e, *fs) for r in registry.get(b.block).requires})
+        missing = [r for r in need if r not in aux]
+        if missing:
+            raise CampaignError(f"screen blocks require aux data {missing}; declare data.aux: {need}")
         return tpl
 
     def configs(self) -> list[tuple[BlockRef, tuple[BlockRef, ...]]]:
@@ -639,7 +649,8 @@ class ScreenTemplate:
 
     def to_record(self) -> dict:
         return {"kind": KIND, "name": self.name, "bar_minutes": self.bar_minutes,
-                "data": {"exchange": self.exchange, "symbol": self.symbol, "timeframe": self.timeframe},
+                "data": {"exchange": self.exchange, "symbol": self.symbol, "timeframe": self.timeframe,
+                         **({"aux": list(self.aux)} if self.aux else {})},
                 "signals": [{"entry": {"block": e.block, "grid": e.grid},
                              "filters": [[{"block": f.block, "grid": f.grid} for f in fs] for fs in fsets]}
                             for e, fsets in self.signals],
@@ -724,6 +735,19 @@ def prior_screen_pvalues(ledger, families: set[str], exclude_campaign: str | Non
     return uniq
 
 
+def dev_aux_context(env, tpl: ScreenTemplate) -> Context:
+    """선별 템플릿 data.aux 의 Dev 보조 1분봉 → regularize(clean_wicks) → `campaign.aux_context`
+    (결정 주기 봉 `to_tf`, ffill 없음 — research/campaign.py·paper 와 같은 구성)."""
+    from btc_quant.research.campaign import CampaignError, aux_context, prepare_m1
+    aux_m1 = {}
+    for a in tpl.aux:
+        raw = env.data.read("dev", a, tpl.symbol, tpl.timeframe)
+        if raw.empty:
+            raise CampaignError(f"no {a} aux data on dev")
+        aux_m1[a] = prepare_m1(raw)
+    return aux_context(aux_m1, tpl.bar_minutes)
+
+
 def screen(template, root=None, env=None, include_prior: bool = True, save: bool = True,
            m1: pd.DataFrame | None = None, ctx: Context | None = None,
            progress: Callable[[str], None] | None = None) -> ScreenResult:
@@ -739,6 +763,8 @@ def screen(template, root=None, env=None, include_prior: bool = True, save: bool
         git_commit,
         load_segment,
         record_runs_batch,
+        run_param_fields,
+        run_params,
     )
 
     tpl = template if isinstance(template, ScreenTemplate) else (
@@ -747,9 +773,12 @@ def screen(template, root=None, env=None, include_prior: bool = True, save: bool
     log = progress or (lambda s: None)
     n_cfg = tpl.check_budget()                      # 원장 쓰기 전에 거부
     configs = tpl.configs()
+    if ctx is None and tpl.aux:                     # data.aux: 캠페인·페이퍼와 같은 구성의 ctx (Dev, 원장 쓰기 전)
+        ctx = dev_aux_context(env, tpl)
     start, end = env.data.segment_bounds("dev")
     snap = snapshot_id(tpl.exchange, tpl.symbol, tpl.timeframe, start, end, data_root=env.data.data_root)
     commit = git_commit(env.code_root)
+    pver = run_params(env)                          # 파라미터·비용 모델 버전 (docs/PARAMS.md §4)
     period = {"segment": "dev", "start": start.isoformat(), "end": end.isoformat()}
     families = sorted({tpl.family_of(e) for e, _ in configs})
     hyp_id = env.ledger.register_hypothesis(tpl.hypothesis["text"], tpl.hypothesis["rationale"],
@@ -828,7 +857,7 @@ def screen(template, root=None, env=None, include_prior: bool = True, save: bool
         met = {**_summary_metrics(st, pc), "decision": st["decision"], "correction": decision}
         by_fam.setdefault(st["family"], []).append((tpl.trial_spec(e, fs), pc, met))
     for fam, items in by_fam.items():
-        record_runs_batch(env.ledger, camp_id, items, period, snap, commit, fam)
+        record_runs_batch(env.ledger, camp_id, items, period, snap, commit, fam, **run_param_fields(pver))
 
     res = ScreenResult(camp_id, hyp_id, tpl, table, studies, decision)
     if save:
@@ -839,7 +868,8 @@ def screen(template, root=None, env=None, include_prior: bool = True, save: bool
         from btc_quant.research.pipeline import jsonable
         (out / "signal_screen.json").write_text(json.dumps(jsonable(
             {"campaign_id": camp_id, "hypothesis_id": hyp_id, "kind": KIND, "period": period,
-             "data_snapshot": snap, "code_commit": commit, "decision": decision, "studies": studies}),
+             "data_snapshot": snap, "code_commit": commit, "params": pver, "decision": decision,
+             "studies": studies}),
             indent=2, ensure_ascii=False), encoding="utf-8")
         table.to_csv(out / "signal_screen.csv", index=False, float_format="%.6g")
         res.dir = out

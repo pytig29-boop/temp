@@ -79,7 +79,7 @@ def test_owner_class_mismatch_rejected(tmp_path):
 
 
 def test_cost_seed_identical_to_presets():
-    from btc_quant.research.campaign import UPBIT_STRESS
+    UPBIT_STRESS = T.CostModel("upbit_stress", 0.0005, 5.0, 8.0)   # 예전 campaign.UPBIT_STRESS 프리셋
     presets = [T.COINONE_BASE, T.COINONE_CONSERVATIVE, T.COINONE_STRESS, T.UPBIT_BASE, T.UPBIT_CONSERVATIVE,
                UPBIT_STRESS]
     seed = C.all_cost_models(doc=C.seed_document())
@@ -95,12 +95,13 @@ def test_cost_seed_identical_to_presets():
 def test_cost_registry_versions_and_ordering(tmp_path):
     root = make_root(tmp_path)
     new = T.CostModel("coinone_stress", 0.0, 6.0, 9.0)
+    prev = C.cost_versions(root)["coinone_stress"]          # 실제 config 복사본 (승인된 버전이 있을 수 있음)
     v = C.add_version("coinone_stress", new, direction_="stricter", applied_by="auto", source="test", root=root)
-    assert v == 2
+    assert v == prev + 1
     assert C.cost_model("coinone_stress", root=root) == new
     assert C.cost_model("coinone_stress", version=1, root=root) == T.COINONE_STRESS
-    assert C.cost_versions(root)["coinone_stress"] == 2
-    assert [h["version"] for h in C.cost_history("coinone_stress", root)] == [1, 2]
+    assert C.cost_versions(root)["coinone_stress"] == v
+    assert [h["version"] for h in C.cost_history("coinone_stress", root)] == list(range(1, v + 1))
     # base > conservative 이면 거부, 파일은 그대로
     before = (root / "config" / "costs.yaml").read_text()
     with pytest.raises(C.CostRegistryError):

@@ -27,6 +27,7 @@ from __future__ import annotations
 import itertools
 import json
 import math
+import functools
 import subprocess
 import time
 from dataclasses import dataclass, field
@@ -38,8 +39,7 @@ import pandas as pd
 import yaml
 
 from btc_quant.backtest import fast
-from btc_quant.backtest.types import (COINONE_BASE, COINONE_CONSERVATIVE, COINONE_STRESS,
-                                      UPBIT_BASE, UPBIT_CONSERVATIVE, CostModel)
+from btc_quant.backtest.types import CostModel
 from btc_quant.data.quality import clean_wicks, regularize
 from btc_quant.evaluation import metrics as M
 from btc_quant.registry.ledger import Ledger, repo_root, utcnow
@@ -51,12 +51,8 @@ from btc_quant.strategy.features import to_tf
 from btc_quant.strategy.spec import (DEFAULT_ATR_BARS, DEFAULT_TIMEFRAME, MAX_FILTERS, TIMEFRAMES, BlockRef,
                                      ExitSpec, StrategySpec, tf_minutes)
 
-# types.py 에 업비트 stress 프리셋이 없어 여기서 정의 (코인원 stress 와 같은 스프레드·슬리피지 + 업비트 수수료).
-# 권장: backtest/types.py 에 UPBIT_STRESS 추가.
-UPBIT_STRESS = CostModel("upbit_stress", 0.0005, 5.0, 8.0)
-
-COST_MODELS: dict[str, CostModel] = {c.name: c for c in (
-    COINONE_BASE, COINONE_CONSERVATIVE, COINONE_STRESS, UPBIT_BASE, UPBIT_CONSERVATIVE, UPBIT_STRESS)}
+# 비용 모델은 버전 관리되는 레지스트리(config/costs.yaml, `btc_quant.params.cost_model`)에서 읽는다
+# (docs/PARAMS.md §4). 예전 모듈 상수 COST_MODELS / UPBIT_STRESS 는 없어졌다 — `get_cost(name)` 를 쓴다.
 
 DEFAULT_COSTS = {"primary": "coinone_conservative", "grade": "upbit_conservative",
                  "stress": "coinone_stress", "grade_stress": "upbit_stress"}
@@ -84,11 +80,69 @@ class PowerCheckError(CampaignError):
     """`strict_power` 에서 검정력 점검 실패 (원장 쓰기 전 거부)."""
 
 
-def get_cost(name: str) -> CostModel:
+@functools.lru_cache(maxsize=8)
+def _cost_doc_cached(path: str, mtime_ns: int | None) -> dict:
+    from btc_quant.params.costs import load_costs
+    return load_costs(Path(path).parent.parent)
+
+
+def _cost_doc(root: str | Path | None = None) -> dict:
+    """config/costs.yaml 문서 (파일 mtime 기준 캐시 — 보정·승인으로 새 버전이 생기면 다시 읽는다)."""
+    from btc_quant.params.costs import costs_path
+    p = costs_path(root)
     try:
-        return COST_MODELS[name]
-    except KeyError:
-        raise CampaignError(f"unknown cost model {name!r}; one of {sorted(COST_MODELS)}") from None
+        mt = p.stat().st_mtime_ns
+    except FileNotFoundError:
+        mt = None
+    return _cost_doc_cached(str(p), mt)
+
+
+def get_cost(name: str, root: str | Path | None = None) -> CostModel:
+    """호환용 얇은 래퍼 → `btc_quant.params.cost_model(name)` (현재 버전). 모르는 이름은 CampaignError."""
+    from btc_quant.params.costs import CostRegistryError, cost_model
+    doc = _cost_doc(root)
+    try:
+        return cost_model(name, doc=doc)
+    except CostRegistryError:
+        raise CampaignError(f"unknown cost model {name!r}; one of {sorted(doc['models'])}") from None
+
+
+def __getattr__(name: str):
+    """하위 호환: `campaign.COST_MODELS` 는 레지스트리의 현재 비용 모델 dict (매번 새로 읽음)."""
+    if name == "COST_MODELS":
+        from btc_quant.params.costs import all_cost_models
+        return all_cost_models(doc=_cost_doc())
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def config_root(env: "ResearchEnv | None" = None) -> Path:
+    """파라미터 거버넌스 설정(config/params.yaml·costs.yaml·gates.yaml)이 있는 루트.
+    연구 저장소(env.root)에 config/ 가 있으면 그곳, 아니면 코드 저장소(테스트용 임시 저장소 대비)."""
+    if env is not None and (Path(env.root) / "config" / "gates.yaml").exists():
+        return Path(env.root)
+    return Path(env.code_root) if env is not None else repo_root()
+
+
+def run_params(env: "ResearchEnv | None" = None) -> dict:
+    """실행 기록용 파라미터 버전 (docs/PARAMS.md §4): `params_snapshot()` 요약.
+    {params_version, cost_versions, registry_version, n_params}. 레지스트리가 검증에 실패하면(drift 등)
+    params_version=None 과 params_error 를 남기고 계속한다(비용 버전은 costs.yaml 에서 직접)."""
+    from btc_quant.params import cost_versions, params_snapshot
+    root = config_root(env)
+    try:
+        return params_snapshot(root)
+    except Exception as e:  # noqa: BLE001 — 기록 실패로 연구를 멈추지 않는다; 오류를 그대로 남긴다
+        try:
+            cv = cost_versions(root)
+        except Exception:  # noqa: BLE001
+            cv = None
+        return {"params_version": None, "cost_versions": cv, "params_error": f"{type(e).__name__}: {e}"}
+
+
+def run_param_fields(snap: dict | None) -> dict:
+    """`Ledger.record_run(s)` 의 선택 인자 (params_version, cost_versions)."""
+    snap = snap or {}
+    return {"params_version": snap.get("params_version"), "cost_versions": snap.get("cost_versions")}
 
 
 # ============================================================== 경로
@@ -644,9 +698,11 @@ def _metrics_record(m: dict) -> dict:
 
 
 def record_runs_batch(ledger: Ledger, campaign_id: str, items: list[tuple[StrategySpec, str, dict]],
-                      period: dict, data_snapshot: str, code_commit: str, family: str) -> list[str]:
+                      period: dict, data_snapshot: str, code_commit: str, family: str, *,
+                      params_version: str | None = None, cost_versions: dict | None = None) -> list[str]:
     """호환용 별칭 → `Ledger.record_runs` (같은 검증·형식, 한 번의 잠금). signal_study.screen 이 쓴다."""
-    return ledger.record_runs(campaign_id, items, period, data_snapshot, code_commit, family)
+    return ledger.record_runs(campaign_id, items, period, data_snapshot, code_commit, family,
+                              params_version=params_version, cost_versions=cost_versions)
 
 
 # ============================================================== 실행
@@ -693,6 +749,7 @@ def run_campaign(template: CampaignTemplate | str | Path, root: str | Path | Non
     snap = data_snapshot(env, tpl, start, end)
     commit = git_commit(env.code_root)
     period = {"segment": tpl.segment, "start": start.isoformat(), "end": end.isoformat()}
+    pver = run_params(env)                             # 파라미터·비용 모델 버전 (docs/PARAMS.md §4)
     hyp_id, camp_id = register_campaign(env, tpl, snap, period, n_specs)   # ① ② 사전등록
     log(f"registered {hyp_id} / {camp_id}: {n_specs} specs, snapshot {snap}, code {commit}")
 
@@ -702,6 +759,7 @@ def run_campaign(template: CampaignTemplate | str | Path, root: str | Path | Non
     ctx = aux_context(aux_m1, tpl.tf_min)
     cache = SignalCache(m1, ctx, tf_min=tpl.tf_min, atr_bars=tpl.sim_atr_bars)
     eval_costs = [tpl.costs["primary"], tpl.costs["grade"]]
+    cost_by_name = {c: get_cost(c, config_root(env)) for c in eval_costs}
     exits = tpl.exit_combos()
     rows, items, ret_cols, specs = [], [], {}, {}
     days = None
@@ -709,7 +767,7 @@ def run_campaign(template: CampaignTemplate | str | Path, root: str | Path | Non
     for ci, (entry, filters, set_idx) in enumerate(combos):
         p = cache.prepared(entry, filters)
         for cost_name in eval_costs:
-            cost = get_cost(cost_name)
+            cost = cost_by_name[cost_name]
             trs = fast.simulate_many(p, exits, cost, start, end, atr_bars=tpl.sim_atr_bars)
             if cost_name == tpl.costs["primary"]:
                 days, mat = fast.daily_returns_matrix(p, trs, start, end)
@@ -730,7 +788,8 @@ def run_campaign(template: CampaignTemplate | str | Path, root: str | Path | Non
                              **met, "cost": cost_name})
                 items.append((spec, cost_name, _metrics_record(met)))
         log(f"  signals {ci + 1}/{len(combos)} done ({len(rows)} runs, {time.time() - t0:.1f}s)")
-    env.ledger.record_runs(camp_id, items, period, snap, commit, tpl.family)   # 모든 실행 기록
+    env.ledger.record_runs(camp_id, items, period, snap, commit, tpl.family,   # 모든 실행 기록
+                           **run_param_fields(pver))
 
     results = pd.DataFrame(rows)
     returns = pd.DataFrame(ret_cols, index=days)
@@ -748,6 +807,7 @@ def run_campaign(template: CampaignTemplate | str | Path, root: str | Path | Non
         "n_runs": len(items), "costs": tpl.costs, "evaluated_costs": eval_costs,
         "runtime_sec": round(time.time() - t0, 2), "half_life_days": HALF_LIFE_DAYS,
         "power": pw, "screen": screen,
+        "params": pver, "params_version": pver.get("params_version"), "cost_versions": pver.get("cost_versions"),
     }
     out = save_campaign(env, tpl, camp_id, results, returns, manifest)
     log(f"campaign {camp_id} done: {len(items)} runs in {manifest['runtime_sec']}s → {out}")
@@ -809,54 +869,37 @@ def list_campaigns(root: str | Path | None = None, env: ResearchEnv | None = Non
 
 # ============================================================== 신호 선별 (v4, signal_study.screen 래퍼)
 def _aux_screen_template_cls():
-    """보조 데이터(data.aux)를 지원하는 ScreenTemplate 하위 클래스 (signal_study 는 aux 를 거부하므로
-    여기서 aux 를 떼어 검증한 뒤 ctx 로 넘긴다. 원장 grid 기록·template.yaml 에는 aux 를 그대로 남긴다)."""
+    """하위 호환 래퍼. `signal_study.ScreenTemplate` 가 이제 data.aux 를 직접 검증·보관하므로(같은 규칙·
+    같은 오류) 이 하위 클래스는 원장 grid 기록에 aux 를 항상(빈 목록이어도) 남기는 것만 다르다
+    — run_screen 이 예전부터 남기던 형식 그대로."""
     from btc_quant.research.signal_study import ScreenTemplate
 
-    @dataclass
-    class AuxScreenTemplate(ScreenTemplate):
-        aux: list = field(default_factory=list)
+    global _AUX_SCREEN_CLS
+    if _AUX_SCREEN_CLS is None:
+        @dataclass
+        class AuxScreenTemplate(ScreenTemplate):
+            def to_record(self) -> dict:
+                rec = super().to_record()
+                rec["data"] = {**rec["data"], "aux": list(self.aux)}
+                return rec
 
-        @classmethod
-        def from_dict(cls, d: dict, registry: Registry = REGISTRY):
-            if not isinstance(d, dict):
-                raise CampaignError("template must be a mapping")
-            data = dict(d.get("data") or {})
-            aux = list(data.pop("aux", None) or [])
-            exchange = str(data.get("exchange", "upbit"))
-            bad = [a for a in aux if a not in LIVE_AUX]
-            if bad:
-                raise CampaignError(f"screen aux {bad} not supported (live-available: {list(LIVE_AUX)})")
-            if len(set(aux)) != len(aux) or exchange in aux:
-                raise CampaignError(f"screen aux {aux}: duplicates or the target exchange {exchange!r} itself")
-            tpl = super(AuxScreenTemplate, cls).from_dict({**d, "data": data}, registry)
-            tpl.aux, tpl.raw = aux, d
-            need = sorted({r for e, fs in tpl.configs() for b in (e, *fs) for r in registry.get(b.block).requires})
-            missing = [r for r in need if r not in aux]
-            if missing:
-                raise CampaignError(f"screen blocks require aux data {missing}; declare data.aux: {need}")
-            return tpl
+        _AUX_SCREEN_CLS = AuxScreenTemplate
+    return _AUX_SCREEN_CLS
 
-        def to_record(self) -> dict:
-            rec = super().to_record()
-            rec["data"] = {**rec["data"], "aux": list(self.aux)}
-            return rec
 
-    return AuxScreenTemplate
+_AUX_SCREEN_CLS = None
 
 
 def load_screen_template(template, registry: Registry = REGISTRY):
-    """YAML 경로 | dict | ScreenTemplate → (aux 지원) ScreenTemplate."""
+    """YAML 경로 | dict | ScreenTemplate → ScreenTemplate (aux 는 ScreenTemplate 이 직접 지원)."""
     cls = _aux_screen_template_cls()
-    if isinstance(template, cls):
+    from btc_quant.research.signal_study import ScreenTemplate
+    if isinstance(template, ScreenTemplate):
         return template
     if isinstance(template, dict):
         return cls.from_dict(template, registry)
     if isinstance(template, (str, Path)):
         return cls.from_yaml(template, registry)
-    from btc_quant.research.signal_study import ScreenTemplate
-    if isinstance(template, ScreenTemplate):
-        return template
     raise CampaignError(f"unsupported screen template {type(template)}")
 
 
@@ -867,16 +910,8 @@ def run_screen(template, root: str | Path | None = None, env: ResearchEnv | None
     from btc_quant.research.signal_study import screen
     env = env or ResearchEnv.at(root)
     tpl = load_screen_template(template)
-    ctx = None
-    aux = list(getattr(tpl, "aux", []) or [])
-    if aux:
-        aux_m1 = {}
-        for a in aux:
-            raw = env.data.read("dev", a, tpl.symbol, tpl.timeframe)
-            if raw.empty:
-                raise CampaignError(f"no {a} aux data on dev")
-            aux_m1[a] = prepare_m1(raw)
-        ctx = aux_context(aux_m1, tpl.bar_minutes)
+    from btc_quant.research.signal_study import dev_aux_context
+    ctx = dev_aux_context(env, tpl) if tpl.aux else None
     res = screen(tpl, env=env, ctx=ctx, progress=progress)
     if lessons:
         from btc_quant.research.lessons import LessonBook

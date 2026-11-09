@@ -57,6 +57,7 @@
 """
 from __future__ import annotations
 
+import copy
 import json
 import math
 import time
@@ -71,13 +72,14 @@ from btc_quant.backtest.reference import run_reference
 from btc_quant.evaluation import gates as G
 from btc_quant.evaluation import inference, montecarlo, selection
 from btc_quant.evaluation import metrics as M
+from btc_quant.params import gate_config_for_campaign
 from btc_quant.registry.ledger import ValBudgetExhaustedError
 from btc_quant.strategy.blocks import REGISTRY, Context, spec_uses_experimental
 from btc_quant.strategy.spec import BlockRef, StrategySpec
 
 from .campaign import (HALF_LIFE_DAYS, LIVE_AUX, CampaignResult, ResearchEnv, SignalCache,
-                       aux_context, data_snapshot, get_cost, git_commit, load_aux_m1, load_campaign,
-                       load_segment, prepare_m1)
+                       aux_context, config_root, data_snapshot, get_cost, git_commit, load_aux_m1,
+                       load_campaign, load_segment, prepare_m1, run_param_fields, run_params)
 from .nulls import null_distribution, weighted_sharpe_rows
 
 VAL_WARMUP_DAYS = 14
@@ -231,7 +233,11 @@ class Pipeline:
         self.cr, self.env, self.top_k = cr, env, int(top_k)
         self.robustness = bool(robustness)
         self.lessons = bool(lessons)
-        self.cfg = gate_cfg or G.load_gate_config()
+        # 관문 설정 = 캠페인 등록 시점 기준 (승인된 class ② 변경은 다음 캠페인부터, docs/PARAMS.md §3).
+        # 넘겨받은 dict(예: lru 캐시된 G.load_gate_config() 결과)는 복사해서 공유 객체를 건드리지 않는다.
+        self.cfg = (copy.deepcopy(gate_cfg) if gate_cfg is not None
+                    else gate_config_for_campaign(cr.campaign_id, root=config_root(env)))
+        self.params = run_params(env)                  # params_version + cost_versions (실행 기록용)
         self.n_null = int(n_null if n_null is not None else self.cfg["G2"]["null_runs"])
         self.null_seed0 = null_seed0
         self.register = register
@@ -425,7 +431,7 @@ class Pipeline:
                                                           if k not in ("spec_id", "cost")}))
             self.env.ledger.record_runs(abl_camp, items, self.cr.manifest["period"],
                                         self.cr.manifest["data_snapshot"], git_commit(self.env.code_root),
-                                        tpl.family)
+                                        tpl.family, **run_param_fields(self.params))
         days = self.cr.returns.index
         out = {}
         for slh, items in plan.items():
@@ -557,7 +563,7 @@ class Pipeline:
                 self.cr.campaign_id,
                 [(spec, cost_name, _val_metrics(met) | {"g6": {"passed": ok, "mc_mdd95": mc}}),
                  (spec, stress_name, _val_metrics(smet))],
-                per, snap, git_commit(self.env.code_root), tpl.family)
+                per, snap, git_commit(self.env.code_root), tpl.family, **run_param_fields(self.params))
         return _gate(ok, **d), res, met, mc
 
     # ---------------------------------------------------------- 견고성 (Dev)
@@ -582,7 +588,8 @@ class Pipeline:
         checks = CHECKS if not uses_aux else tuple(k for k in CHECKS if k != "cross_venue")
         other = self._other_m1() if "cross_venue" in checks else None
         out = robustness_suite(spec, c.m1, self.start, self.end, get_cost(self.costs["primary"]),
-                               other_m1=other, other_venue=self.other_venue(), ctx=c.ctx, checks=checks)
+                               other_m1=other, other_venue=self.other_venue(), ctx=c.ctx, checks=checks,
+                               thresholds=self.cfg.get("robustness"))
         if uses_aux:
             out["checks"]["cross_venue"] = {
                 "passed": None, "other_venue": self.other_venue(),
@@ -611,6 +618,8 @@ class Pipeline:
                "screen": (cr.manifest.get("screen") or None),
                "n_null": self.n_null, "funnel_all": self.funnel_all(), "campaign_stats": stats,
                "gate_config_version": self.cfg.get("version"), "candidates": [],
+               "params_version": self.params.get("params_version"),
+               "cost_versions": self.params.get("cost_versions"),
                "code_commit": git_commit(self.env.code_root)}
         dev_survivors = []
         for rank, lh in enumerate(top, start=1):

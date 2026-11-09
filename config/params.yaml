@@ -216,15 +216,16 @@ params:
   history: []
 - key: robustness.latency_delays_min
   class: 1
-  source: py:btc_quant.research.robustness:LATENCY_DELAYS_MIN
+  source: yaml:config/gates.yaml#robustness.latency_delays_min
   value:
   - 1
   rationale: 실시간 체결 지연 시나리오(분) — 주문 왕복 지연 실측 대상
-  evidence: research/robustness.py
+  evidence: config/gates.yaml robustness (research/robustness.py 상수에서 이관, 같은 값)
   version: 1
   last_updated: '2026-11-09'
   owner: auto
   history: []
+  note: 2026-11-09 코드 상수(research/robustness.py)에서 config/gates.yaml robustness 로 이관 — 값·버전 변경 없음
 - key: gates.primary_metric.half_life_days
   class: 2
   source: yaml:config/gates.yaml#primary_metric.half_life_days
@@ -597,116 +598,127 @@ params:
   history: []
 - key: robustness.latency_min_retention
   class: 2
-  source: py:btc_quant.research.robustness:LATENCY_MIN_RETENTION
+  source: yaml:config/gates.yaml#robustness.latency_min_retention
   value: 0.5
-  rationale: 지연 시 Sharpe 유지율 하한
-  evidence: research/robustness.py (gates.yaml 이관 대상)
+  rationale: 지연(1분 실시간 체결·1봉) 시 Sharpe 유지율 하한 — 엣지가 체결 지연에 무너지지 않는지(실시간 실행 가능성). 0.5 = 모든 시나리오에서 절반 이상 유지
+  evidence: config/gates.yaml robustness (research/robustness.py 상수에서 이관, 같은 값)
   version: 1
   last_updated: '2026-11-09'
   owner: human
   history: []
+  note: 2026-11-09 코드 상수(research/robustness.py)에서 config/gates.yaml robustness 로 이관 — 값·버전 변경 없음
 - key: robustness.outlier_top_frac
   class: 2
-  source: py:btc_quant.research.robustness:OUTLIER_TOP_FRAC
+  source: yaml:config/gates.yaml#robustness.outlier_top_frac
   value: 0.01
-  rationale: 상위 거래 제거 비율
-  evidence: research/robustness.py (gates.yaml 이관 대상)
+  rationale: 상위 1% 거래(최소 1건)를 0 으로 해도 Sharpe > 0 — 소수 대박 거래 의존(복권형 수익) 탐지
+  evidence: config/gates.yaml robustness (research/robustness.py 상수에서 이관, 같은 값)
   version: 1
   last_updated: '2026-11-09'
   owner: human
   history: []
+  note: 2026-11-09 코드 상수(research/robustness.py)에서 config/gates.yaml robustness 로 이관 — 값·버전 변경 없음
 - key: robustness.outlier_top_n
   class: 2
-  source: py:btc_quant.research.robustness:OUTLIER_TOP_N
+  source: yaml:config/gates.yaml#robustness.outlier_top_n
   value: 5
-  rationale: 상위 거래 제거 건수
-  evidence: research/robustness.py (gates.yaml 이관 대상)
+  rationale: 상위 5건 거래를 0 으로 해도 Sharpe > 0 — 거래 수가 적을 때 1% 규칙의 보완
+  evidence: config/gates.yaml robustness (research/robustness.py 상수에서 이관, 같은 값)
   version: 1
   last_updated: '2026-11-09'
   owner: human
   history: []
+  note: 2026-11-09 코드 상수(research/robustness.py)에서 config/gates.yaml robustness 로 이관 — 값·버전 변경 없음
 - key: robustness.loyo_min_days
   class: 2
-  source: py:btc_quant.research.robustness:LOYO_MIN_DAYS
+  source: yaml:config/gates.yaml#robustness.loyo_min_days
   value: 60
-  rationale: 연도 제외 최소 일수
-  evidence: research/robustness.py (gates.yaml 이관 대상)
+  rationale: 연도 하나 제외 검사에서 제외 대상으로 칠 연도의 최소 일수 — 짧은 꼬리 연도로 검사가 무의미해지는 것 방지
+  evidence: config/gates.yaml robustness (research/robustness.py 상수에서 이관, 같은 값)
   version: 1
   last_updated: '2026-11-09'
   owner: human
   history: []
+  note: 2026-11-09 코드 상수(research/robustness.py)에서 config/gates.yaml robustness 로 이관 — 값·버전 변경 없음
 - key: robustness.cost_mults
   class: 2
-  source: py:btc_quant.research.robustness:COST_MULTS
+  source: yaml:config/gates.yaml#robustness.cost_mults
   value:
   - 1.5
   - 2.0
-  rationale: 비용 배수 시나리오
-  evidence: research/robustness.py (gates.yaml 이관 대상)
+  rationale: 비용(수수료·스프레드·슬리피지) +50%/+100% 민감도 시나리오 — 비용 추정 오차 여유 확인
+  evidence: config/gates.yaml robustness (research/robustness.py 상수에서 이관, 같은 값)
   version: 1
   last_updated: '2026-11-09'
   owner: human
   history: []
+  note: 2026-11-09 코드 상수(research/robustness.py)에서 config/gates.yaml robustness 로 이관 — 값·버전 변경 없음
 - key: robustness.cost_pass_mult
   class: 2
-  source: py:btc_quant.research.robustness:COST_PASS_MULT
+  source: yaml:config/gates.yaml#robustness.cost_pass_mult
   value: 1.5
-  rationale: 비용 통과 배수
-  evidence: research/robustness.py (gates.yaml 이관 대상)
+  rationale: 비용 ×1.5 에서 Sharpe > 0 이어야 통과 — 비용 모델이 50% 과소추정돼도 살아남는지 (×2 는 보고만)
+  evidence: config/gates.yaml robustness (research/robustness.py 상수에서 이관, 같은 값)
   version: 1
   last_updated: '2026-11-09'
   owner: human
   history: []
+  note: 2026-11-09 코드 상수(research/robustness.py)에서 config/gates.yaml robustness 로 이관 — 값·버전 변경 없음
 - key: robustness.regime_lookback_days
   class: 2
-  source: py:btc_quant.research.robustness:REGIME_LOOKBACK_DAYS
+  source: yaml:config/gates.yaml#robustness.regime_lookback_days
   value: 30
-  rationale: 국면 특성 창
-  evidence: research/robustness.py (gates.yaml 이관 대상)
+  rationale: 국면 라벨 특성 창(직전 30일 수익률·변동성, 전일 종가까지 = 인과) — 월 단위 추세·변동성 국면
+  evidence: config/gates.yaml robustness (research/robustness.py 상수에서 이관, 같은 값)
   version: 1
   last_updated: '2026-11-09'
   owner: human
   history: []
+  note: 2026-11-09 코드 상수(research/robustness.py)에서 config/gates.yaml robustness 로 이관 — 값·버전 변경 없음
 - key: robustness.regime_max_pnl_share
   class: 2
-  source: py:btc_quant.research.robustness:REGIME_MAX_PNL_SHARE
+  source: yaml:config/gates.yaml#robustness.regime_max_pnl_share
   value: 0.7
-  rationale: 한 국면 손익 비중 상한
-  evidence: research/robustness.py (gates.yaml 이관 대상)
+  rationale: 한 국면(추세·변동성 3분위) 손익 비중 상한 70% — 특정 국면에만 의존하는 전략 표시
+  evidence: config/gates.yaml robustness (research/robustness.py 상수에서 이관, 같은 값)
   version: 1
   last_updated: '2026-11-09'
   owner: human
   history: []
+  note: 2026-11-09 코드 상수(research/robustness.py)에서 config/gates.yaml robustness 로 이관 — 값·버전 변경 없음
 - key: robustness.alpha_min_tstat
   class: 2
-  source: py:btc_quant.research.robustness:ALPHA_MIN_TSTAT
+  source: yaml:config/gates.yaml#robustness.alpha_min_tstat
   value: 2.0
-  rationale: 알파 t 하한(Newey–West)
-  evidence: research/robustness.py (gates.yaml 이관 대상)
+  rationale: BTC 일간 수익 대비 알파 t ≥ 2 (Newey–West) — 단순 베타(보유) 노출과 구별되는 초과수익의 관례적 유의 수준
+  evidence: config/gates.yaml robustness (research/robustness.py 상수에서 이관, 같은 값)
   version: 1
   last_updated: '2026-11-09'
   owner: human
   history: []
+  note: 2026-11-09 코드 상수(research/robustness.py)에서 config/gates.yaml robustness 로 이관 — 값·버전 변경 없음
 - key: robustness.alpha_nw_lags
   class: 2
-  source: py:btc_quant.research.robustness:ALPHA_NW_LAGS
+  source: yaml:config/gates.yaml#robustness.alpha_nw_lags
   value: 5
-  rationale: Newey–West 시차
-  evidence: research/robustness.py (gates.yaml 이관 대상)
+  rationale: Newey–West HAC 시차(일) — 일간 수익 자기상관 보정
+  evidence: config/gates.yaml robustness (research/robustness.py 상수에서 이관, 같은 값)
   version: 1
   last_updated: '2026-11-09'
   owner: human
   history: []
+  note: 2026-11-09 코드 상수(research/robustness.py)에서 config/gates.yaml robustness 로 이관 — 값·버전 변경 없음
 - key: robustness.cross_venue_min_ratio
   class: 2
-  source: py:btc_quant.research.robustness:CROSS_VENUE_MIN_RATIO
+  source: yaml:config/gates.yaml#robustness.cross_venue_min_ratio
   value: 0.5
-  rationale: 교차 거래소 Sharpe 비율 하한
-  evidence: research/robustness.py (gates.yaml 이관 대상)
+  rationale: 다른 거래소 데이터에서 Sharpe 비 ≥ 0.5 (다른 거래소 Sharpe > 0) — 신호가 한 거래소 미시구조 잡음이 아닌지
+  evidence: config/gates.yaml robustness (research/robustness.py 상수에서 이관, 같은 값)
   version: 1
   last_updated: '2026-11-09'
   owner: human
   history: []
+  note: 2026-11-09 코드 상수(research/robustness.py)에서 config/gates.yaml robustness 로 이관 — 값·버전 변경 없음
 - key: calibration.quantiles
   class: 2
   source: params:calibration.quantiles

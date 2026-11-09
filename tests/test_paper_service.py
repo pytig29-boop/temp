@@ -219,3 +219,32 @@ def test_warmup_retries_on_fetch_failure(tmp_path, monkeypatch):
     monkeypatch.setattr(S.asyncio, "sleep", no_sleep)
     asyncio.run(svc.warmup())
     assert len(calls) == 3 and svc.ready and svc.hist.last_ts == raw.index[-1]
+
+
+def test_costs_from_param_registry(tmp_path):
+    from btc_quant.params import all_cost_models
+    from btc_quant.params import costs as C
+    from btc_quant.backtest.types import CostModel
+    # 이름은 그대로 (기존 5개 + upbit_stress), 값은 레지스트리 현재 버전
+    assert set(S.COSTS) >= {"coinone_base", "coinone_conservative", "coinone_stress", "upbit_base",
+                            "upbit_conservative"}
+    assert S.COSTS == all_cost_models() == S.load_costs()
+    # 새 버전이 생기면 서비스가 시작할 때 그 버전을 쓴다
+    (tmp_path / "config").mkdir()
+    C.ensure_costs_file(tmp_path)
+    new = CostModel("coinone_conservative", 0.0, 3.0, 4.0)
+    C.add_version("coinone_conservative", new, direction_="stricter", applied_by="auto", source="test",
+                  root=tmp_path)
+    assert S.load_costs(tmp_path)["coinone_conservative"] == new
+    assert S.load_costs(tmp_path)["coinone_conservative"].name == "coinone_conservative"
+
+
+def test_service_uses_registry_cost(tmp_path, monkeypatch):
+    from btc_quant.backtest.types import CostModel
+    m = CostModel("coinone_conservative", 0.0, 2.5, 3.5)
+    monkeypatch.setattr(S, "load_costs", lambda root=None: {"coinone_conservative": m})
+    svc = _service(tmp_path, lambda: pd.Timestamp("2024-01-01", tz="UTC"))
+    assert svc.cost == m
+    monkeypatch.setattr(S, "load_costs", lambda root=None: {})
+    with pytest.raises(ValueError, match="unknown cost model"):
+        _service(tmp_path, lambda: pd.Timestamp("2024-01-01", tz="UTC"))

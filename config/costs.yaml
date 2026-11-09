@@ -7,7 +7,7 @@ models:
   coinone_base:
     venue: coinone
     role: base
-    current: 1
+    current: 2
     versions:
     - version: 1
       fee_rate: 0.0
@@ -20,10 +20,23 @@ models:
       source: backtest/types.py 하드코딩 프리셋
       evidence: null
       proposal_id: null
+    - version: 2
+      fee_rate: 0.0
+      spread_bps: 1.0
+      slip_bps: 0.5
+      tick: 0.0
+      created: '2026-11-09'
+      created_at: '2026-11-09T14:15:35+00:00'
+      direction: looser
+      applied_by: human:user (explicit approval in chat, 2026-11-09; option B) — recorded by Claude, non-tty
+      source: interim Coinone cost models, option B (2/4/8 bp round trip)
+      evidence: research/reports/params_calibration_20261109.md
+      proposal_id: pp-20261109-interim-coinone-cost-models-option-b-2-4-7a5511
+      provisional: true
   coinone_conservative:
     venue: coinone
     role: conservative
-    current: 1
+    current: 2
     versions:
     - version: 1
       fee_rate: 0.0
@@ -36,10 +49,23 @@ models:
       source: backtest/types.py 하드코딩 프리셋
       evidence: null
       proposal_id: null
+    - version: 2
+      fee_rate: 0.0
+      spread_bps: 2.0
+      slip_bps: 1.0
+      tick: 0.0
+      created: '2026-11-09'
+      created_at: '2026-11-09T14:15:35+00:00'
+      direction: looser
+      applied_by: human:user (explicit approval in chat, 2026-11-09; option B) — recorded by Claude, non-tty
+      source: interim Coinone cost models, option B (2/4/8 bp round trip)
+      evidence: research/reports/params_calibration_20261109.md
+      proposal_id: pp-20261109-interim-coinone-cost-models-option-b-2-4-7a5511
+      provisional: true
   coinone_stress:
     venue: coinone
     role: stress
-    current: 1
+    current: 2
     versions:
     - version: 1
       fee_rate: 0.0
@@ -52,6 +78,19 @@ models:
       source: backtest/types.py 하드코딩 프리셋
       evidence: null
       proposal_id: null
+    - version: 2
+      fee_rate: 0.0
+      spread_bps: 4.0
+      slip_bps: 2.0
+      tick: 0.0
+      created: '2026-11-09'
+      created_at: '2026-11-09T14:15:35+00:00'
+      direction: looser
+      applied_by: human:user (explicit approval in chat, 2026-11-09; option B) — recorded by Claude, non-tty
+      source: interim Coinone cost models, option B (2/4/8 bp round trip)
+      evidence: research/reports/params_calibration_20261109.md
+      proposal_id: pp-20261109-interim-coinone-cost-models-option-b-2-4-7a5511
+      provisional: true
   upbit_base:
     venue: upbit
     role: base

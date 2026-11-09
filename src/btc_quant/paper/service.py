@@ -48,9 +48,24 @@ log = logging.getLogger("btc_quant.paper.service")
 
 MAX_CHALLENGERS = 3
 DEFAULT_LIMITS = RiskLimits(daily_loss=-0.03, weekly_loss=-0.06, max_drawdown=-0.12, max_trades_per_day=5)
-COSTS: dict[str, CostModel] = {c.name: c for c in (
+_PRESET_COSTS: dict[str, CostModel] = {c.name: c for c in (
     bt_types.COINONE_BASE, bt_types.COINONE_CONSERVATIVE, bt_types.COINONE_STRESS,
     bt_types.UPBIT_BASE, bt_types.UPBIT_CONSERVATIVE)}
+
+
+def load_costs(root: str | Path | None = None) -> dict[str, CostModel]:
+    """비용 모델 = 버전 관리 레지스트리 config/costs.yaml 의 현재 버전 (`btc_quant.params.all_cost_models`).
+    이름은 그대로(coinone_base … upbit_stress). 레지스트리를 못 읽으면(파일 손상 등) 하드코딩 프리셋으로
+    대체하고 경고를 남긴다 — 페이퍼 서비스가 비용 설정 문제로 시작조차 못 하는 일을 막는다."""
+    from btc_quant.params import all_cost_models
+    try:
+        return all_cost_models(root)
+    except Exception as e:  # noqa: BLE001
+        log.warning("cost registry unavailable (%s); falling back to presets", e)
+        return dict(_PRESET_COSTS)
+
+
+COSTS: dict[str, CostModel] = load_costs()     # 모듈 로드 시점의 현재 버전 (CLI choices 호환)
 
 
 # --------------------------------------------------------------------------------------------
@@ -199,7 +214,10 @@ class PaperService:
         self.notifier = notifier
         self.fetch = fetch
         self.clock = clock
-        self.cost = COSTS[self.cfg.cost]
+        costs = load_costs()                       # 시작 시점의 현재 버전 (보정·승인 반영)
+        if self.cfg.cost not in costs:
+            raise ValueError(f"unknown cost model {self.cfg.cost!r}; one of {sorted(costs)}")
+        self.cost = costs[self.cfg.cost]
         self.cfg.out.mkdir(parents=True, exist_ok=True)
         # 업비트 보조 데이터(ctx.aux["upbit"]): 필요한 전략이 있을 때만 업비트 1분봉 이력을 만든다
         self.need_upbit = any("upbit" in spec_aux(s.spec) for s in slots)
@@ -675,7 +693,7 @@ def build_report(key_dir: Path, start=None, end=None, m1: pd.DataFrame | None = 
     key_dir = Path(key_dir)
     spec = StrategySpec.from_yaml(key_dir / "spec.yaml")
     st = _read_json(key_dir / "state.json") or {}
-    cost = CostModel(**st["cost"]) if st.get("cost") else COSTS["coinone_conservative"]
+    cost = CostModel(**st["cost"]) if st.get("cost") else load_costs()["coinone_conservative"]
     start = pd.Timestamp(start or st.get("start"))
     end = pd.Timestamp(end) if end is not None else pd.Timestamp(st["last_ts"]) + pd.Timedelta("1min")
     start = start.tz_localize("UTC") if start.tzinfo is None else start.tz_convert("UTC")

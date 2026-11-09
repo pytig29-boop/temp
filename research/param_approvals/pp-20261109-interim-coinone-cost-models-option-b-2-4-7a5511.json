@@ -1,0 +1,22 @@
+{
+  "id": "pp-20261109-interim-coinone-cost-models-option-b-2-4-7a5511",
+  "approved_by": "user (explicit approval in chat, 2026-11-09; option B) — recorded by Claude, non-tty",
+  "ts": "2026-11-09T14:15:35+00:00",
+  "choice": null,
+  "note": "Human approval given in chat (session https://claude.ai/code/session_016UrESoPhkmYVC4hNovJNRw).",
+  "content_hash": "0ce3e7c5d9a12486",
+  "applied": [
+    {
+      "name": "coinone_base",
+      "version": 2
+    },
+    {
+      "name": "coinone_conservative",
+      "version": 2
+    },
+    {
+      "name": "coinone_stress",
+      "version": 2
+    }
+  ]
+}

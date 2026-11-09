@@ -1,6 +1,7 @@
 """파일 기반 전략 레지스트리 (PLAN §6).
 
 strategies/<state>/<id>_v<version>.yaml  (내용 = StrategySpec.to_yaml())
+strategies/<state>/<id>_v<version>.risk.yaml  (선택: grade + 리스크 한도 — 상태 전이 때 스펙과 함께 이동)
 상태 전이는 원장 transitions.jsonl 에 기록.
 
   draft → candidate → validated → challenger → review → active → retired
@@ -76,11 +77,27 @@ class StrategyRegistry:
     def _path(self, state: str, strategy_id: str, version: int) -> Path:
         return self.dir / state / f"{key_of(strategy_id, version)}.yaml"
 
+    def sidecar_path(self, state: str, strategy_id: str, version: int) -> Path:
+        """리스크 사이드카 `<id>_v<ver>.risk.yaml` (paper.service.sidecar_path 와 같은 이름 규칙)."""
+        return self.dir / state / f"{key_of(strategy_id, version)}.risk.yaml"
+
     def _move(self, strategy_id: str, version: int, src: str, dst: str) -> None:
+        """스펙 파일을 상태 디렉터리 사이에서 옮긴다. 리스크 사이드카(.risk.yaml)가 있으면 함께 옮긴다
+        (validated 에서 만든 grade·리스크 한도가 challenger/review/active 까지 따라가야 페이퍼·실거래가 쓴다)."""
         a, b = self._path(src, strategy_id, version), self._path(dst, strategy_id, version)
+        ra, rb = self.sidecar_path(src, strategy_id, version), self.sidecar_path(dst, strategy_id, version)
         if b.exists():
             raise RegistryError(f"{b} already exists")
+        has_sidecar = ra.exists()
+        if has_sidecar and rb.exists():
+            raise RegistryError(f"{rb} already exists")
         os.replace(a, b)
+        if has_sidecar:
+            try:
+                os.replace(ra, rb)
+            except OSError:
+                os.replace(b, a)        # 사이드카를 못 옮기면 스펙도 되돌린다 (둘이 갈라지지 않게)
+                raise
 
     # ------------------------------------------------------------ 조회
     def state_of(self, strategy_id: str, version: int) -> str | None:

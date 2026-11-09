@@ -74,3 +74,18 @@ risk:
   data_stall_minutes: 2
   api_error_streak: 3
   price_anomaly_quantile: 0.999
+# 견고성 묶음 기준 (PLAN §10b-7, research/robustness.py — 원래 코드 상수, 같은 값으로 이관 2026-11-09).
+# class ② 증거 기준 (latency_delays_min 만 class ① 지연 측정치). 등급·근거는 config/params.yaml robustness.*.
+robustness:
+  latency_delays_min: [1]      # 실시간 체결 지연 시나리오(분). 1봉 지연은 봉 길이로 자동 추가
+  latency_min_retention: 0.5   # Sharpe(지연)/Sharpe(기준) ≥ 0.5 (모든 시나리오)
+  outlier_top_frac: 0.01       # 상위 1% 거래 제거 → Sharpe > 0
+  outlier_top_n: 5             # 상위 5건 거래 제거 → Sharpe > 0
+  loyo_min_days: 60            # 연도 제외 검사 대상 연도의 최소 일수
+  cost_mults: [1.5, 2.0]       # 비용 +50%, +100% 시나리오
+  cost_pass_mult: 1.5          # 이 배수에서 Sharpe > 0 이면 통과 (+100% 는 보고만)
+  regime_lookback_days: 30     # 국면 특성 창(직전 30일, 인과)
+  regime_max_pnl_share: 0.70   # 한 국면 손익 비중 > 70% 면 국면 의존
+  alpha_min_tstat: 2.0         # 알파 t ≥ 2 (Newey–West)
+  alpha_nw_lags: 5             # Newey–West 시차
+  cross_venue_min_ratio: 0.5   # Sharpe(다른 거래소)/Sharpe(대상) ≥ 0.5, 다른 거래소 Sharpe > 0

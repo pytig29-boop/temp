@@ -71,7 +71,7 @@ def test_anti_goalpost_known_real_ids(tmp_path):
 @pytest.mark.parametrize("key,match", [
     ("gates.risk.drawdown_floor", "class 3"),            # class ③ 는 위험 선호
     ("costs.coinone_stress", "class 1"),
-    ("robustness.latency_min_retention", "code"),         # 코드 상수는 사람이 코드로
+    ("calibration.n_boot", "only gates.yaml"),            # gates.yaml 밖의 값(보정 설정)은 대상 아님
 ])
 def test_only_gates_class2(tmp_path, key, match):
     root = make_root(tmp_path)
