@@ -56,10 +56,13 @@ def test_g6_sign_agnostic():
     assert not g.check_g6({"sharpe": 0.0}, 0.1, 0.1)[0]
 
 
-def test_g7():
-    assert g.check_g7(0.005)[0]
-    ok, d = g.check_g7(0.02, [0.5])
-    assert not ok and d["k"] == 2 and d["m"] == 10
+def test_g7_cumulative_holm():
+    # 첫 개봉: m=1 → 문턱 0.10
+    assert g.check_g7(0.08)[0]
+    # 두 번째 개봉: m=2, 가장 작은 p가 현재 → 문턱 0.10/2
+    ok, d = g.check_g7(0.04, [0.5])
+    assert ok and d["k"] == 2 and d["m"] == 2
+    assert not g.check_g7(0.07, [0.5])[0]
 
 
 def test_risk_limits_floors_and_signs():
