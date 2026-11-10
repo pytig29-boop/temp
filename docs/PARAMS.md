@@ -36,7 +36,8 @@
 | 경로 | 내용 | 누가 쓰나 |
 |---|---|---|
 | `config/params.yaml` | 목록: key, class, source(값의 실제 위치), value, rationale, evidence, version, last_updated, owner, history + `settings`(보정 방법론 값) | `btc_quant.params` (승인·보정) |
-| `config/costs.yaml` | 비용 모델 6개(코인원·업비트 × base/conservative/stress)의 버전 이력. v1 = 기존 하드코딩 프리셋과 동일 | 보정(엄격 자동) / 승인(느슨) |
+| `config/costs.yaml` | 비용 모델의 버전 이력: 기본 6개(코인원·업비트 × base/conservative/stress, v1 = 기존 하드코딩 프리셋) + 자산별 12개 `<name>@XRP-KRW`·`<name>@ETH-KRW`(PLAN D17, 2026-11-10 v1). 검증 = 거래소 × 심볼마다 base ≤ conservative ≤ stress | 보정(엄격 자동, 기본 모델만) / 승인(느슨·새 자산별 모델 생성) |
+| `config/ticks.yaml` | 거래소 가격대별 호가 단위 정책(코인원 KRW, 공개 API `range_units` 캐시, 버전 + 이전 표 history) — 페이퍼 주문 호가 단위 | `python -m btc_quant.data.ticks refresh` (표가 바뀌면 새 버전 + `ticks.coinone.KRW` 이력) |
 | `research/param_proposals/<id>.yaml` | 제안 (승인 전에는 효과 없음) | AI 도구 |
 | `research/param_approvals/<id>.json` | 승인·거부 기록 | 사람 전용 명령 |
 | `research/reports/params_calibration_<날짜>.md` | ① 보정 근거 리포트 | 보정 |
@@ -140,7 +141,7 @@ snap = params_snapshot()      # {"params_version": "79bc502df565", "cost_version
   `robustness.regime_dominant_min_excess`(0.0) 이면 통과) · `informational`(표시만). 지배 국면 초과수익은 방식과 무관하게
   검사 출력에 정보로 남는다. 판정 재계산 함수 `robustness.regime_verdict` (보정 연구의 사후 평가와 같은 코드).
 
-## 5. 현재 상태 (2026-11-09, 2026-11-10 추가)
+## 5. 현재 상태 (2026-11-09, 2026-11-10 추가 — D17~D19 포함)
 
 - 비용 모델: 코인원 3종은 **v2(잠정 B안, 왕복 2/4/8bp)** — 사용자 채팅 승인(2026-11-09), 기록
   `research/param_approvals/`. 업비트 3종은 v1. 첫 실측 보정 제안(실측값 그대로)은 B안으로 대체되어 기각.
@@ -160,6 +161,21 @@ snap = params_snapshot()      # {"params_version": "79bc502df565", "cost_version
   dominant_alpha, informational)·G4 최근 12개월 '쉼' 변형 모두 현재 관문에서 검정력 23% → 23%(오탐 0/90) → **제안 없음**
   (`criteria_robustness_regime_mode_20261110_regime.md`, `criteria_robustness_regime_max_pnl_share_20261110_regime.md`).
   exposure_aware 를 켠 상태에서만 국면 검사가 묶는다(+7%p, 목표 +10%p 미달).
+
+- **2026-11-10 (사용자 명시 승인, 채팅) — PLAN D17·D18·D19 + 페이퍼 호가 단위**. 모두 제안 + 승인 기록
+  (`research/param_approvals/`, approved_by "user (explicit chat approval 2026-11-10)"; 사람이 채팅으로 승인했기 때문에
+  비대화형 확인으로 기록했다는 사실을 각 승인 기록 note 에 적음).
+  - class ① 자산별 비용 모델 12개 생성 (`pp-20261110-per-asset-cost-models-xrp-krw-eth-krw-d1-3e9607`): 코인원 XRP 8/10/14bp,
+    ETH 5/8/14bp; 업비트 XRP 18.7/22.7/39.4bp, ETH 15.5/19.5/36.4bp (왕복). 카탈로그 `costs.<name>@<SYM>` (class ①, provisional
+    — 15분 표본). 근거 `research/reports/params_costs_per_asset_20261110.md`. 제안 kind `cost_models` 에 `create` 변경 지원 추가.
+  - class ② `evaluation.daily_returns` 신설(v1 = realized, 기존 동작 명시) → **v2 = mtm**, applies_from_campaign **25**
+    (`pp-20261110-criterion-evaluation-daily-returns-reali-1888d6`). camp-000024 이전 = realized(재계산 불변).
+  - class ② `robustness.tail_enabled` false → **ladder** (v2), applies_from_campaign **25**
+    (`pp-20261110-criterion-robustness-tail-enabled-false--72d1c1`). 기준 값은 그대로. 근거(둘 다)
+    `research/reports/criteria_mtm_and_ladder_tail_20261110.md` — 엄격화만, 실제 연구 결과로 조정한 것 아님.
+  - class ① `ticks.coinone.KRW` 신설 (config/ticks.yaml v1, 코인원 공개 API range_units 2026-11-10). 페이퍼 전용 —
+    백테스트는 데이터 추정 유지. Dev 비교 `research/reports/ticks_policy_check_20261110.md`.
+  - params_version 은 목록 추가·값 변경으로 바뀜.
 
 ## 6. 노출 인식 관문 변형 (`gates.exposure_aware.*`, class ②, **기본 OFF** — PLAN D14 초안)
 

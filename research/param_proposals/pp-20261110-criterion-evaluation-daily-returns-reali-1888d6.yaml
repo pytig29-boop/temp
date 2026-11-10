@@ -1,0 +1,24 @@
+# 파라미터 변경 제안 — 사람 승인 전에는 아무 효과 없음. 승인: python -m btc_quant.params approve <id>
+id: pp-20261110-criterion-evaluation-daily-returns-reali-1888d6
+created: '2026-11-10T06:17:48+00:00'
+created_by: agent (user decision in chat 2026-11-10)
+class: 2
+kind: criterion
+title: criterion evaluation.daily_returns realized -> mtm (D18)
+changes:
+- target: yaml:config/gates.yaml#evaluation.daily_returns
+  key: evaluation.daily_returns
+  from: realized
+  to: mtm
+  direction: stricter
+applies_from: next campaign (campaign seq fixed at approval; earlier campaigns keep the old value)
+motivation: 'Exit-day (realized) daily returns hide open-inventory drawdowns (scale-in ladders buying a falling
+  knife show ~0 drawdown until exit). Gates must see mark-to-market equity. User decision: mandatory for ladders,
+  applied prospectively to single-entry strategies too.'
+references:
+- docs/PLAN.md
+- 'synthetic: falling-knife ladder test'
+evidence: research/reports/criteria_mtm_and_ladder_tail_20261110.md
+rationale: human decision in chat 2026-11-10 (stricter only; not tuned on real results); recorded via params machinery
+status: pending
+content_hash: 61eb9e969569a021

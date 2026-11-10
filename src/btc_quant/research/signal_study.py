@@ -534,7 +534,9 @@ def study_events_pooled(assets: list[dict], bar_minutes: int, horizons=DEFAULT_H
                         stratify: str = "hour_vol", min_events: int = DEFAULT_MIN_EVENTS) -> dict:
     """다자산 유니버스(PLAN D15) 풀링 이벤트 스터디 — 같은 신호를 자산마다 같은 규칙으로 정의하고 이벤트를 합친다.
 
-    assets: [{"symbol", "m1", "bars_index", "entry", "filter_ok", "atr_pct"(선택)}].
+    assets: [{"symbol", "m1", "bars_index", "entry", "filter_ok", "atr_pct"(선택), "costs"(선택)}].
+    "costs": 자산별 비용 {이름: 비용 모델 이름|CostModel|비율} (PLAN D17 자산별 모델 `<name>@<SYM>`) — 같은 이름의
+    `cost_round_trip` 값을 그 자산 이벤트에 대해 대신한다(풀링 순수익 = 이벤트마다 자기 자산 비용).
     - 적격 집합·층(KST 시 × 그 자산의 변동성 3분위)·군집 제거는 **자산마다** (자산 간 군집 제거 없음).
     - 귀무는 **자산별 매칭**: 자산 a 의 이벤트 수·층 구성대로 자산 a 의 적격 집합에서 추출(seed 는 자산마다 다름) →
       풀링 귀무 평균 = Σ_a n_a·귀무평균_a / N (신호 풀링 평균과 같은 가중).
@@ -551,6 +553,7 @@ def study_events_pooled(assets: list[dict], bar_minutes: int, horizons=DEFAULT_H
         arr = _event_arrays(a["m1"], a["bars_index"], a["entry"], a["filter_ok"], bm, horizons, min_gap_min,
                             start, end, stratify)
         arr["symbol"] = a["symbol"]
+        arr["costs"] = {**costs, **{k: v for k, v in normalize_costs(a.get("costs") or {}).items() if k in costs}}
         arr["atr_ev"] = _event_atr(arr, a.get("atr_pct"), bm) if arr["n"] >= 2 else None
         if arr["n"] >= 2:
             arr["null_means"], arr["comp_ev"] = _null_means(arr, n_null, len(horizons),
@@ -571,12 +574,14 @@ def study_events_pooled(assets: list[dict], bar_minutes: int, horizons=DEFAULT_H
         "min_events": int(min_events), "enough_events": N >= int(min_events),
         "universe": [a["symbol"] for a in arrs], "pooling": "events pooled across assets; null matched per asset",
     }
+    if any(a["costs"] != costs for a in arrs):          # 자산별 비용 모델 (D17)
+        base["costs_by_asset"] = {a["symbol"]: a["costs"] for a in arrs}
     for a in arrs:      # 자산별 (보고 전용)
         d = {"n_events": a["n"], "n_pool": a["n_pool"], "n_raw_triggers": a["n_raw_triggers"],
              "vol_tercile_edges": [float(x) for x in a["edges"]]}
         if a["n"] >= 2:
             rws = _horizon_rows(a["F"][a["ev"]], a["ev_t_min"], a["null_means"], a["mfe"], a["mae"], horizons,
-                                costs, n_null)
+                                a["costs"], n_null)
             sm = _signal_summary(rws, horizons, primary, a["mfe"], a["mae"], bm, None)
             d.update(p_signal=sm["p_signal"], info_horizon=sm["info_horizon"],
                      best_primary_horizon=sm["best_primary_horizon"],
@@ -597,7 +602,10 @@ def study_events_pooled(assets: list[dict], bar_minutes: int, horizons=DEFAULT_H
     atr_ev = np.concatenate([a["atr_ev"] for a in use])[order]
     Nu = int(sum(a["n"] for a in use))
     null_means = sum(a["n"] * a["null_means"] for a in use) / Nu
-    rows = _horizon_rows(Fe, t_all[order], null_means, mfe, mae, horizons, costs, n_null)
+    ev_costs = {k: np.concatenate([np.full(a["n"], a["costs"][k]) for a in use])[order] for k in costs}
+    if all(np.all(v == costs[k]) for k, v in ev_costs.items()):
+        ev_costs = costs                               # 자산별 비용이 없으면 이전과 같은 스칼라 (비트 단위 동일)
+    rows = _horizon_rows(Fe, t_all[order], null_means, mfe, mae, horizons, ev_costs, n_null)
     summ = _signal_summary(rows, horizons, primary, mfe, mae, bm, atr_ev)
     return {**base, "table": rows, **summ, "per_asset": per,
             "strata_events": {a["symbol"]: {int(g): int(v) for g, v in enumerate(a["comp_ev"]) if v} for a in use},
@@ -976,7 +984,9 @@ def screen(template, root=None, env=None, include_prior: bool = True, save: bool
     bars = decision_bars(m1, tpl.bar_minutes)
     atr = _atr_pct(bars)
     cache: dict = {}
-    cost_map = {tpl.costs["primary"]: tpl.costs["primary"], tpl.costs["grade"]: tpl.costs["grade"]}
+    # 단일 자산이 BTC-KRW 가 아니면 그 자산의 비용 모델 `<name>@<SYM>` (PLAN D17; BTC 는 이전과 같은 이름)
+    from btc_quant.research.campaign import config_root, sleeve_cost_name
+    cost_map = {v: sleeve_cost_name(v, tpl.symbol, config_root(env)) for v in (tpl.costs["primary"], tpl.costs["grade"])}
     studies = []
     t0 = time.time()
     for i, (e, fs) in enumerate(configs):
@@ -1011,6 +1021,9 @@ def _screen_universe(tpl, env, configs, ctxs, start, end, snap, commit, pver, pe
             caches[sym][k] = REGISTRY.evaluate(ref, bars[sym], ctxs.get(sym) or Context()).to_numpy(bool)
         return caches[sym][k]
     cost_map = {tpl.costs["primary"]: tpl.costs["primary"], tpl.costs["grade"]: tpl.costs["grade"]}
+    # 자산별 비용 모델 `<name>@<SYM>` (PLAN D17; 없으면 같은 모델) — 캠페인·파이프라인·페이퍼와 같은 규칙
+    from btc_quant.research.campaign import config_root, sleeve_cost_name
+    sleeve_costs = {sym: {k: sleeve_cost_name(v, sym, config_root(env)) for k, v in cost_map.items()} for sym in syms}
     studies = []
     t0 = time.time()
     for i, (e, fs) in enumerate(configs):
@@ -1020,7 +1033,7 @@ def _screen_universe(tpl, env, configs, ctxs, start, end, snap, commit, pver, pe
             for f in fs:
                 fok &= ev(sym, f)
             assets.append({"symbol": sym, "m1": m1s[sym], "bars_index": bars[sym].index, "entry": ev(sym, e),
-                           "filter_ok": fok, "atr_pct": atrs[sym]})
+                           "filter_ok": fok, "atr_pct": atrs[sym], "costs": sleeve_costs[sym]})
         st = study_events_pooled(assets, tpl.bar_minutes, horizons=tpl.horizons,
                                  primary_horizons=tpl.primary_horizons, cost_round_trip=cost_map,
                                  n_null=tpl.n_null, seed=tpl.seed + i, min_gap_min=tpl.min_gap_min,

@@ -128,12 +128,21 @@ def costs_hash(root: str | Path | None = None, doc: dict | None = None) -> str:
     return hashlib.sha256(json.dumps(cur, sort_keys=True).encode()).hexdigest()[:12]
 
 
-def model_for(venue: str, role: str, root: str | Path | None = None, doc: dict | None = None) -> str:
+def model_symbol(name: str, entry: dict | None = None) -> str | None:
+    """자산별 모델(`<name>@<SYM>`, PLAN D15/D17)의 심볼 — 기본(BTC-KRW 및 자산 미지정) 모델은 None."""
+    if entry is not None and entry.get("symbol"):
+        return str(entry["symbol"])
+    return name.split("@", 1)[1] if "@" in name else None
+
+
+def model_for(venue: str, role: str, root: str | Path | None = None, doc: dict | None = None,
+              symbol: str | None = None) -> str:
+    """거래소·역할(·자산)의 모델 이름. symbol=None 이면 자산 미지정(기본) 모델만 — 보정(calibrate)은 기본 모델 전용."""
     doc = doc or load_costs(root)
     for n, e in doc["models"].items():
-        if e["venue"] == venue and e["role"] == role:
+        if e["venue"] == venue and e["role"] == role and model_symbol(n, e) == symbol:
             return n
-    raise CostRegistryError(f"no cost model for venue={venue} role={role}")
+    raise CostRegistryError(f"no cost model for venue={venue} role={role} symbol={symbol}")
 
 
 def side_cost_bps(m: CostModel) -> float:
@@ -178,15 +187,23 @@ def validate_costs(doc: dict) -> list[str]:
                     errs.append(f"{n} v{v.get('version')}: {k} must be a number ≥ 0")
     if errs:
         return errs
-    # 거래소마다 base ≤ conservative ≤ stress (왕복 총비용)
-    by_venue: dict[str, dict[str, CostModel]] = {}
+    # 거래소(·자산)마다 base ≤ conservative ≤ stress (왕복 총비용). 자산별 모델(`<name>@<SYM>`, D17)은
+    # 같은 거래소·같은 심볼끼리 따로 검사한다. 한 (거래소, 심볼) 안에서 역할은 하나씩.
+    by_venue: dict[tuple[str, str | None], dict[str, CostModel]] = {}
     for n, e in models.items():
-        by_venue.setdefault(e["venue"], {})[e["role"]] = _to_model(n, _version(e, None))
-    for venue, roles in by_venue.items():
+        sym = model_symbol(n, e)
+        if "@" in n and e.get("symbol") and n.split("@", 1)[1] != e["symbol"]:
+            errs.append(f"{n}: symbol field {e['symbol']!r} does not match the name suffix")
+        grp = by_venue.setdefault((e["venue"], sym), {})
+        if e["role"] in grp:
+            errs.append(f"{e['venue']}{'@' + sym if sym else ''}: duplicate role {e['role']} "
+                        f"({grp[e['role']].name}, {n})")
+        grp[e["role"]] = _to_model(n, _version(e, None))
+    for (venue, sym), roles in by_venue.items():
         seq = [roles[r] for r in ROLES if r in roles]
         for a, b in zip(seq, seq[1:]):
             if round_trip_bps(a) > round_trip_bps(b) + 1e-9:
-                errs.append(f"{venue}: {a.name} ({round_trip_bps(a):.2f}bp) > {b.name} "
+                errs.append(f"{venue}{'@' + sym if sym else ''}: {a.name} ({round_trip_bps(a):.2f}bp) > {b.name} "
                             f"({round_trip_bps(b):.2f}bp) — base ≤ conservative ≤ stress 위반")
     return errs
 
@@ -212,14 +229,26 @@ def add_versions(items: list[dict], root: str | Path | None = None) -> dict[str,
     아무것도 쓰지 않는다. items: [{name, model, direction, applied_by, source, evidence?, proposal_id?, extra?}].
     정책 판단(자동/승인)은 호출자 책임:
     - calibrate.apply_calibration: direction='stricter' 만 applied_by='auto'
-    - approve: 사람 승인된 제안."""
+    - approve: 사람 승인된 제안.
+    새 모델 만들기(자산별 모델 `<name>@<SYM>`, PLAN D17): it["create"] = {venue, role, symbol?} → 항목을 만들고
+    version 1 을 쓴다(이미 있으면 거부). 사람 승인된 제안(proposals.approve)만 쓴다."""
     p = ensure_costs_file(root)
     out: dict[str, int] = {}
     with locked(p):
         doc = read_yaml(p)
         for it in items:
             name, model = it["name"], it["model"]
-            if name not in doc["models"]:
+            cr = it.get("create")
+            if cr:
+                if name in doc["models"]:
+                    raise CostRegistryError(f"cost model {name!r} already exists (create refused)")
+                if cr.get("role") not in ROLES:
+                    raise CostRegistryError(f"{name}: role must be one of {ROLES}")
+                ent = {"venue": str(cr["venue"]), "role": str(cr["role"])}
+                if cr.get("symbol"):
+                    ent["symbol"] = str(cr["symbol"])
+                doc["models"][name] = {**ent, "current": 0, "versions": []}
+            elif name not in doc["models"]:
                 raise CostRegistryError(f"unknown cost model {name!r}")
             e = doc["models"][name]
             v = len(e["versions"]) + 1

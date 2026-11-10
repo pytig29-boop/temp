@@ -1,12 +1,10 @@
 """params.preferences — 선택지 표 상식 검사 (합성 일간 수익)."""
-import shutil
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import pytest
 
-from btc_quant.params import costs as C
 from btc_quant.params import preferences as PR
 from btc_quant.params import proposals as P
 
@@ -55,10 +53,8 @@ def test_too_short_rejected():
 
 
 def test_option_proposal(tmp_path):
-    (tmp_path / "config").mkdir()
-    for f in ("gates.yaml", "splits.yaml", "exchanges.yaml", "params.yaml"):
-        shutil.copy(ROOT / "config" / f, tmp_path / "config" / f)
-    C.ensure_costs_file(tmp_path)
+    from _config_root import make_config_root
+    make_config_root(tmp_path)
     t = PR.option_tables(daily(), n_sims=300)
     pid = PR.write_option_proposal(t, "gates.risk.drawdown_floor", root=tmp_path)
     doc = P.load_proposal(pid, tmp_path)

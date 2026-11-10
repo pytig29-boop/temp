@@ -1,0 +1,15 @@
+{
+  "id": "pp-20261110-criterion-evaluation-daily-returns-reali-1888d6",
+  "approved_by": "user (explicit chat approval 2026-11-10)",
+  "ts": "2026-11-10T06:17:48+00:00",
+  "choice": null,
+  "note": "Human approval given explicitly in chat on 2026-11-10 (session https://claude.ai/code/session_016UrESoPhkmYVC4hNovJNRw); recorded by Claude through the params machinery with a non-tty confirm — acceptable only because the human approved in chat (the interactive `python -m btc_quant.params approve` is the normal path). Stricter-only methodology change, not tuned on research results; applies from the next registered campaign.",
+  "content_hash": "61eb9e969569a021",
+  "applied": [
+    {
+      "key": "evaluation.daily_returns",
+      "version": 2,
+      "applies_from_campaign": 25
+    }
+  ]
+}

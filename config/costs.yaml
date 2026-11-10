@@ -139,3 +139,243 @@ models:
       source: research/campaign.py UPBIT_STRESS (코인원 stress 스프레드·슬리피지 + 업비트 수수료)
       evidence: null
       proposal_id: null
+  coinone_base@XRP-KRW:
+    venue: coinone
+    role: base
+    symbol: XRP-KRW
+    current: 1
+    versions:
+    - version: 1
+      fee_rate: 0.0
+      spread_bps: 6.7
+      slip_bps: 0.65
+      tick: 0.0
+      created: '2026-11-10'
+      created_at: '2026-11-10T06:16:37+00:00'
+      direction: initial
+      applied_by: human:user (explicit chat approval 2026-11-10)
+      source: per-asset cost models XRP-KRW / ETH-KRW (D17)
+      evidence: research/reports/params_costs_per_asset_20261110.md
+      proposal_id: pp-20261110-per-asset-cost-models-xrp-krw-eth-krw-d1-3e9607
+      provisional: true
+      derived_from: coinone_base
+  coinone_conservative@XRP-KRW:
+    venue: coinone
+    role: conservative
+    symbol: XRP-KRW
+    current: 1
+    versions:
+    - version: 1
+      fee_rate: 0.0
+      spread_bps: 6.7
+      slip_bps: 1.65
+      tick: 0.0
+      created: '2026-11-10'
+      created_at: '2026-11-10T06:16:37+00:00'
+      direction: initial
+      applied_by: human:user (explicit chat approval 2026-11-10)
+      source: per-asset cost models XRP-KRW / ETH-KRW (D17)
+      evidence: research/reports/params_costs_per_asset_20261110.md
+      proposal_id: pp-20261110-per-asset-cost-models-xrp-krw-eth-krw-d1-3e9607
+      provisional: true
+      derived_from: coinone_conservative
+  coinone_stress@XRP-KRW:
+    venue: coinone
+    role: stress
+    symbol: XRP-KRW
+    current: 1
+    versions:
+    - version: 1
+      fee_rate: 0.0
+      spread_bps: 6.7
+      slip_bps: 3.65
+      tick: 0.0
+      created: '2026-11-10'
+      created_at: '2026-11-10T06:16:37+00:00'
+      direction: initial
+      applied_by: human:user (explicit chat approval 2026-11-10)
+      source: per-asset cost models XRP-KRW / ETH-KRW (D17)
+      evidence: research/reports/params_costs_per_asset_20261110.md
+      proposal_id: pp-20261110-per-asset-cost-models-xrp-krw-eth-krw-d1-3e9607
+      provisional: true
+      derived_from: coinone_stress
+  coinone_base@ETH-KRW:
+    venue: coinone
+    role: base
+    symbol: ETH-KRW
+    current: 1
+    versions:
+    - version: 1
+      fee_rate: 0.0
+      spread_bps: 3.5
+      slip_bps: 0.75
+      tick: 0.0
+      created: '2026-11-10'
+      created_at: '2026-11-10T06:16:37+00:00'
+      direction: initial
+      applied_by: human:user (explicit chat approval 2026-11-10)
+      source: per-asset cost models XRP-KRW / ETH-KRW (D17)
+      evidence: research/reports/params_costs_per_asset_20261110.md
+      proposal_id: pp-20261110-per-asset-cost-models-xrp-krw-eth-krw-d1-3e9607
+      provisional: true
+      derived_from: coinone_base
+  coinone_conservative@ETH-KRW:
+    venue: coinone
+    role: conservative
+    symbol: ETH-KRW
+    current: 1
+    versions:
+    - version: 1
+      fee_rate: 0.0
+      spread_bps: 3.5
+      slip_bps: 2.25
+      tick: 0.0
+      created: '2026-11-10'
+      created_at: '2026-11-10T06:16:37+00:00'
+      direction: initial
+      applied_by: human:user (explicit chat approval 2026-11-10)
+      source: per-asset cost models XRP-KRW / ETH-KRW (D17)
+      evidence: research/reports/params_costs_per_asset_20261110.md
+      proposal_id: pp-20261110-per-asset-cost-models-xrp-krw-eth-krw-d1-3e9607
+      provisional: true
+      derived_from: coinone_conservative
+  coinone_stress@ETH-KRW:
+    venue: coinone
+    role: stress
+    symbol: ETH-KRW
+    current: 1
+    versions:
+    - version: 1
+      fee_rate: 0.0
+      spread_bps: 3.5
+      slip_bps: 5.25
+      tick: 0.0
+      created: '2026-11-10'
+      created_at: '2026-11-10T06:16:37+00:00'
+      direction: initial
+      applied_by: human:user (explicit chat approval 2026-11-10)
+      source: per-asset cost models XRP-KRW / ETH-KRW (D17)
+      evidence: research/reports/params_costs_per_asset_20261110.md
+      proposal_id: pp-20261110-per-asset-cost-models-xrp-krw-eth-krw-d1-3e9607
+      provisional: true
+      derived_from: coinone_stress
+  upbit_base@XRP-KRW:
+    venue: upbit
+    role: base
+    symbol: XRP-KRW
+    current: 1
+    versions:
+    - version: 1
+      fee_rate: 0.0005
+      spread_bps: 6.7
+      slip_bps: 1.0
+      tick: 0.0
+      created: '2026-11-10'
+      created_at: '2026-11-10T06:16:37+00:00'
+      direction: initial
+      applied_by: human:user (explicit chat approval 2026-11-10)
+      source: per-asset cost models XRP-KRW / ETH-KRW (D17)
+      evidence: research/reports/params_costs_per_asset_20261110.md
+      proposal_id: pp-20261110-per-asset-cost-models-xrp-krw-eth-krw-d1-3e9607
+      provisional: true
+      derived_from: upbit_base
+  upbit_conservative@XRP-KRW:
+    venue: upbit
+    role: conservative
+    symbol: XRP-KRW
+    current: 1
+    versions:
+    - version: 1
+      fee_rate: 0.0005
+      spread_bps: 6.7
+      slip_bps: 3.0
+      tick: 0.0
+      created: '2026-11-10'
+      created_at: '2026-11-10T06:16:37+00:00'
+      direction: initial
+      applied_by: human:user (explicit chat approval 2026-11-10)
+      source: per-asset cost models XRP-KRW / ETH-KRW (D17)
+      evidence: research/reports/params_costs_per_asset_20261110.md
+      proposal_id: pp-20261110-per-asset-cost-models-xrp-krw-eth-krw-d1-3e9607
+      provisional: true
+      derived_from: upbit_conservative
+  upbit_stress@XRP-KRW:
+    venue: upbit
+    role: stress
+    symbol: XRP-KRW
+    current: 1
+    versions:
+    - version: 1
+      fee_rate: 0.0005
+      spread_bps: 13.4
+      slip_bps: 8.0
+      tick: 0.0
+      created: '2026-11-10'
+      created_at: '2026-11-10T06:16:37+00:00'
+      direction: initial
+      applied_by: human:user (explicit chat approval 2026-11-10)
+      source: per-asset cost models XRP-KRW / ETH-KRW (D17)
+      evidence: research/reports/params_costs_per_asset_20261110.md
+      proposal_id: pp-20261110-per-asset-cost-models-xrp-krw-eth-krw-d1-3e9607
+      provisional: true
+      derived_from: upbit_stress
+  upbit_base@ETH-KRW:
+    venue: upbit
+    role: base
+    symbol: ETH-KRW
+    current: 1
+    versions:
+    - version: 1
+      fee_rate: 0.0005
+      spread_bps: 3.5
+      slip_bps: 1.0
+      tick: 0.0
+      created: '2026-11-10'
+      created_at: '2026-11-10T06:16:37+00:00'
+      direction: initial
+      applied_by: human:user (explicit chat approval 2026-11-10)
+      source: per-asset cost models XRP-KRW / ETH-KRW (D17)
+      evidence: research/reports/params_costs_per_asset_20261110.md
+      proposal_id: pp-20261110-per-asset-cost-models-xrp-krw-eth-krw-d1-3e9607
+      provisional: true
+      derived_from: upbit_base
+  upbit_conservative@ETH-KRW:
+    venue: upbit
+    role: conservative
+    symbol: ETH-KRW
+    current: 1
+    versions:
+    - version: 1
+      fee_rate: 0.0005
+      spread_bps: 3.5
+      slip_bps: 3.0
+      tick: 0.0
+      created: '2026-11-10'
+      created_at: '2026-11-10T06:16:37+00:00'
+      direction: initial
+      applied_by: human:user (explicit chat approval 2026-11-10)
+      source: per-asset cost models XRP-KRW / ETH-KRW (D17)
+      evidence: research/reports/params_costs_per_asset_20261110.md
+      proposal_id: pp-20261110-per-asset-cost-models-xrp-krw-eth-krw-d1-3e9607
+      provisional: true
+      derived_from: upbit_conservative
+  upbit_stress@ETH-KRW:
+    venue: upbit
+    role: stress
+    symbol: ETH-KRW
+    current: 1
+    versions:
+    - version: 1
+      fee_rate: 0.0005
+      spread_bps: 10.4
+      slip_bps: 8.0
+      tick: 0.0
+      created: '2026-11-10'
+      created_at: '2026-11-10T06:16:37+00:00'
+      direction: initial
+      applied_by: human:user (explicit chat approval 2026-11-10)
+      source: per-asset cost models XRP-KRW / ETH-KRW (D17)
+      evidence: research/reports/params_costs_per_asset_20261110.md
+      proposal_id: pp-20261110-per-asset-cost-models-xrp-krw-eth-krw-d1-3e9607
+      provisional: true
+      derived_from: upbit_stress

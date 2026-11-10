@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def make_root(tmp_path: Path) -> Path:
     (tmp_path / "config").mkdir()
-    for f in ("gates.yaml", "splits.yaml", "exchanges.yaml", "params.yaml", "costs.yaml"):
+    for f in ("gates.yaml", "splits.yaml", "exchanges.yaml", "params.yaml", "costs.yaml", "ticks.yaml"):
         shutil.copy(ROOT / "config" / f, tmp_path / "config" / f)
     return tmp_path
 
@@ -45,7 +45,8 @@ def test_params_version_is_stable_short_hash():
     assert a == b and len(a) == 12
     snap = R.params_snapshot(ROOT)
     assert snap["params_version"] == a
-    assert set(snap["cost_versions"]) == set(C.SEED_MODELS)
+    assert set(snap["cost_versions"]) == set(C.SEED_MODELS) | set(C.load_costs(ROOT)["models"])
+    assert set(C.SEED_MODELS) <= set(snap["cost_versions"])            # + 자산별 모델 (D17)
 
 
 def test_hash_changes_with_values_and_drift_detected(tmp_path):
@@ -89,7 +90,9 @@ def test_cost_seed_identical_to_presets():
     # config/costs.yaml 는 아직 보정이 승인·적용되지 않았으면 프리셋과 같다 (적용된 버전은 history 로 재현 가능)
     for m in presets:
         assert C.cost_model(m.name, version=1, root=ROOT) == m
-    assert set(repo) == {m.name for m in presets}
+    # 자산별 모델(`<name>@<SYM>`, PLAN D17)은 프리셋에 없던 새 모델 — 사람 승인 제안으로 version 1 부터
+    assert {n for n in repo if "@" not in n} == {m.name for m in presets}
+    assert all(n.split("@")[0] in {m.name for m in presets} for n in repo)
 
 
 def test_cost_registry_versions_and_ordering(tmp_path):

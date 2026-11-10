@@ -5,6 +5,11 @@ primary_metric:
   half_life_days: 365          # D1/§2.2 반감기 12개월, Dev 끝 기준
   annualization: 365
   cost: conservative           # D3
+# 관문 일간 수익 회계 (PLAN D18, class ② — config/params.yaml evaluation.daily_returns). realized = 청산일 귀속 실현 기준,
+# mtm = 보유 분할을 매 UTC 일 종가에 청산 평가(평가 기준). 캠페인 등록 시점 값(gate_config_for_campaign)을 매니페스트
+# `daily_returns` 에 고정 → G2~G6·몬테카를로·견고성·§7 한도가 그 회계. 변경 = class ② 승인, 다음 캠페인부터.
+evaluation:
+  daily_returns: mtm           # realized | mtm
 G0:
   max_filters: 2
   max_params: 8                # 청산 3개 포함
@@ -110,9 +115,10 @@ robustness:
   alpha_min_tstat: 2.0         # 알파 t ≥ 2 (Newey–West)
   alpha_nw_lags: 5             # Newey–West 시차
   cross_venue_min_ratio: 0.5   # Sharpe(다른 거래소)/Sharpe(대상) ≥ 0.5, 다른 거래소 Sharpe > 0
-  # 꼬리 위험 검사 'tail' (2026-11-10, 분할 매수 사다리·부분 사이징과 함께 추가, PLAN D16). 기본 정보 전용 —
-  # tail_enabled: false 인 동안 판정(견고성 통과 여부)에 쓰지 않고 flag 만 기록. 켜기 = class ② 변경 + 사람 승인.
-  tail_enabled: false          # 꼬리 위험 검사를 판정에 사용 (false = 정보 전용)
+  # 꼬리 위험 검사 'tail' (2026-11-10, 분할 매수 사다리·부분 사이징과 함께 추가, PLAN D16; D19).
+  # tail_enabled: false = 정보 전용(flag 만 기록) | ladder = 분할 매수 사다리 스펙만 판정에 사용(그 밖은 정보 전용) | true = 모든 스펙.
+  # 변경 = class ② 변경 + 사람 승인 (다음 캠페인부터).
+  tail_enabled: ladder         # false | ladder | true
   tail_max_worst_day: 0.10     # 평가 기준(MTM) 최악 일 손실 ≤ 10% (자산 대비)
   tail_max_worst_week: 0.15    # MTM 최악 주(월~일) 손실 ≤ 15%
   tail_max_cvar5: 0.03         # MTM 일간 하위 5% 평균 손실 ≤ 3%

@@ -1,0 +1,51 @@
+# 거래소 호가 단위 정책 (class ① 시장 측정치, 버전 관리) — src/btc_quant/data/ticks.py, docs/PARAMS.md
+# 페이퍼(실시간) 지정가·사다리 주문의 호가 단위. 백테스트는 데이터 추정(signals.infer_ticks)을 쓴다.
+# 갱신: python -m btc_quant.data.ticks refresh (거래소 공개 API → 바뀌었으면 새 버전). 손으로 고치지 말 것.
+schema: 1
+venues:
+  coinone:
+    KRW:
+      version: 1
+      fetched_at: '2026-11-10T06:19:03+00:00'
+      checked_at: '2026-11-10T06:19:06+00:00'
+      source: https://api.coinone.co.kr/public/v2/range_units/KRW/{BTC,XRP,ETH}
+      symbols_checked:
+      - BTC-KRW
+      - XRP-KRW
+      - ETH-KRW
+      note: band = [range_min, price_unit]; unit applies for range_min <= price < next range_min (exchange order-price
+        rule)
+      bands:
+      - - 0.0
+        - 0.0001
+      - - 1.0
+        - 0.001
+      - - 5.0
+        - 0.005
+      - - 10.0
+        - 0.01
+      - - 50.0
+        - 0.05
+      - - 100.0
+        - 0.1
+      - - 500.0
+        - 0.5
+      - - 1000.0
+        - 1.0
+      - - 5000.0
+        - 5.0
+      - - 10000.0
+        - 10.0
+      - - 50000.0
+        - 50.0
+      - - 100000.0
+        - 100.0
+      - - 500000.0
+        - 500.0
+      - - 1000000.0
+        - 1000.0
+      - - 5000000.0
+        - 5000.0
+      - - 10000000.0
+        - 10000.0
+      history: []

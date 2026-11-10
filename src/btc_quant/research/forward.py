@@ -533,7 +533,7 @@ def evaluate(env: ResearchEnv, fs: ForwardStrategy, fwd_start: pd.Timestamp, win
             return {**base, "status": "warmup_unavailable", "note": str(e), "_persist": False}
         except CampaignError as e:
             return {**base, "status": "no_data", "note": str(e)}
-        c_sym = cost if len(syms) == 1 else get_sleeve_cost(fs.cost, sym, config_root(env))
+        c_sym = get_sleeve_cost(fs.cost, sym, config_root(env))     # 자산별 모델 (D17; BTC-KRW = `cost` 와 같은 모델)
         res = fast.run_fast(fs.spec, m1, c_sym, eval_start, window_end, ctx=ctx)
         _assert_forward_only(res, eval_start)
         sleeves[sym], raws[sym], m1s[sym] = res, raw, m1

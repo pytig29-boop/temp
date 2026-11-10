@@ -16,8 +16,9 @@
 시각은 모두 UTC ISO. 결정·리스크 판단의 `now` 는 봉 논리 시각(재생 시 결정적)이다.
 
 지정가 집행(`spec.execution`, docs/ENGINE_SPEC.md "지정가 집행"·"페이퍼 훅"): 엔진에 같은 집행·체결 규칙
-(`LIMIT_FILL_DEFAULT`)을 넘기고, 1분봉마다 거래량과 호가 단위(그 UTC 일자의 실시간 1분봉 종가에서 `signals.infer_ticks`
-— 백테스트와 같은 추정)를 준다. 걸린 진입 지정가(`engine.order`)·익절 지정가(`position.tp_order`)·지정가 진입 여부
+(`LIMIT_FILL_DEFAULT`)을 넘기고, 1분봉마다 거래량과 호가 단위를 준다. 호가 단위 = 거래소 가격대별 호가 단위 정책
+(config/ticks.yaml, `data.ticks` — 코인원 공개 API range_units 캐시; 2026-11-10 이후 기본). 정책표가 없는 거래소(1분봉 이력의
+exchange 가 없거나 표 없음)나 `tick_source='infer'` 면 그 UTC 일자의 실시간 1분봉 종가에서 `signals.infer_ticks`(백테스트와 같은 추정). 걸린 진입 지정가(`engine.order`)·익절 지정가(`position.tp_order`)·지정가 진입 여부
 (`position.maker`)는 상태에 저장(STATE_VERSION 2; 버전 1 상태도 읽음). 지정가 체결은 체결가 = 지정가라 호가 대입 비교를
 건너뛴다(`maker: true`). 리스크 강제 청산·정지 시 걸린 진입 지정가를 취소한다. `engine.fill_oracle` 에
 `backtest.queue.QueueFillOracle` 을 꽂으면(서비스 `limit_fill="queue"`) 1분봉 규칙 대신 실시간 체결·호가 대기열 재현으로
@@ -249,7 +250,7 @@ class PaperTrader:
                  ctx: Context | None = None, conservative: CostModel = COINONE_CONSERVATIVE,
                  aux_hist: dict[str, M1History] | None = None,
                  clock=time.time, persist: bool = True, group: SleeveGroup | None = None,
-                 symbol: str | None = None):
+                 symbol: str | None = None, tick_source: str = "auto"):
         if grade not in ("A", "B"):
             raise ValueError("grade must be A or B")
         spec.validate(registry)
@@ -283,7 +284,13 @@ class PaperTrader:
         else:
             self.engine = ReferenceEngine.from_exit(spec.exit, cost, start=start, end=None,
                                                     timeframe=spec.timeframe)
-        self._tick_cache: tuple[int, float] | None = None   # (UTC 일, 호가 단위)
+        self._tick_cache: tuple[int, float] | None = None   # (UTC 일, 호가 단위) — 데이터 추정 대체 경로
+        # 호가 단위 출처: "auto" = 1분봉 이력의 거래소(M1History.exchange)에 정책표(config/ticks.yaml)가 있으면 그것,
+        # 없으면 데이터 추정 | "policy" = 정책표 필수 | "infer" = 데이터 추정(백테스트와 같은 함수; 재생 비교용)
+        if tick_source not in ("auto", "policy", "infer"):
+            raise ValueError("tick_source must be 'auto', 'policy' or 'infer'")
+        self.tick_source = tick_source
+        self._tick_policy: dict[str | None, object] = {}
         self.initial_equity = float(initial_equity)
         self.equity = float(initial_equity)          # 실현 자산 (청산마다 복리)
         self.qty = 0.0                               # 보유 수량 (BTC) — 사다리면 분할 합계
@@ -458,8 +465,31 @@ class PaperTrader:
             self.save_state()
         return events
 
+    def _policy(self, exchange: str | None):
+        if exchange not in self._tick_policy:
+            from btc_quant.data.ticks import tick_policy
+            pol = None
+            try:
+                pol = tick_policy(exchange)
+            except Exception as e:  # noqa: BLE001 — 캐시 손상 등: auto 는 데이터 추정으로 대체 (경고)
+                if self.tick_source == "policy":
+                    raise
+                log.warning("tick policy for %s unavailable (%s); falling back to data inference", exchange, e)
+            if pol is None and self.tick_source == "policy":
+                raise ValueError(f"no tick policy for exchange {exchange!r} (config/ticks.yaml)")
+            self._tick_policy[exchange] = pol
+        return self._tick_policy[exchange]
+
     def _tick(self, hist: M1History, ts: pd.Timestamp) -> float:
-        """봉 ts 의 호가 단위: 그 UTC 일자(+ 직전 일) 실시간 1분봉 종가로 `signals.infer_ticks` (백테스트와 같은 함수)."""
+        """봉 ts 의 호가 단위. 거래소 정책표가 있으면(기본, `tick_source='auto'`) 그 봉 시가(없으면 마지막 종가)의 가격대
+        호가 단위 — 실거래 주문 가격 규칙 그대로 (data/ticks.py, config/ticks.yaml). 정책표가 없거나 tick_source='infer' 면
+        그 UTC 일자(+ 직전 일) 실시간 1분봉 종가로 `signals.infer_ticks` (백테스트와 같은 함수)."""
+        if self.tick_source != "infer":
+            pol = self._policy(getattr(hist, "exchange", None))
+            if pol is not None:
+                b = hist.bar_at(ts)
+                px = float(b.open) if b is not None and b.open == b.open else hist.last_close
+                return float(pol.tick(px)) if px else math.nan
         m = ts_minute(ts)
         day = m // 1440
         if self._tick_cache is not None and self._tick_cache[0] == day and self._tick_cache[1] > 0:

@@ -4,7 +4,8 @@
   (대화형 터미널에서 id 를 직접 타이핑; 연구 모드 hook 이 AI 의 실행을 차단).
 - 승인 시 제안의 `from` 값이 지금 값과 같은지 확인한다(그 사이 다른 변경이 있었으면 낡은 제안 → 거부).
 - 종류(kind)
-  cost_models : class ① 느슨한 비용 변경 (config/costs.yaml 새 버전)
+  cost_models : class ① 느슨한 비용 변경 (config/costs.yaml 새 버전). 변경에 `create: {venue, role, symbol}` 이 있으면
+                새 모델(자산별 `<name>@<SYM>`, PLAN D17) 생성 — `from_model` = 그 슬리브가 지금까지 쓰던 대체 모델
   criterion   : class ② 증거 기준 변경 (gates.yaml 값 + params.yaml 이력, applies_from = 승인 시점의 다음 캠페인)
   preference  : class ③ 선택지 표 (사람이 --choice 로 하나를 고름)
 """
@@ -186,8 +187,18 @@ def _check_not_stale(doc: dict, changes: list[dict], root: Path) -> None:
     from .costs import cost_model
     from .registry import load_registry
     if doc["kind"] == "cost_models":
+        from .costs import load_costs
+        models = load_costs(root)["models"]
         for c in changes:
-            cur = cost_model(c["name"], root=root)
+            if c.get("create"):
+                # 새 모델(자산별 `<name>@<SYM>`): 아직 없어야 하고, 'from' 은 그 슬리브가 지금 쓰는 대체 모델(from_model)
+                if c["name"] in models:
+                    raise ProposalError(f"stale proposal: {c['name']} already exists")
+                if not c.get("from_model"):
+                    continue
+                cur = cost_model(c["from_model"], root=root)
+            else:
+                cur = cost_model(c["name"], root=root)
             f = c["from"]
             if (abs(cur.fee_rate - f["fee_rate"]) > 1e-12 or abs(cur.spread_bps - f["spread_bps"]) > 1e-9
                     or abs(cur.slip_bps - f["slip_bps"]) > 1e-9):
@@ -216,11 +227,15 @@ def _apply(doc: dict, changes: list[dict], by: str, root: Path) -> list[dict]:
         items = []
         for c in changes:
             t = c["to"]
+            extra = {"provisional": bool(doc.get("provisional"))}
+            if c.get("create") and c.get("from_model"):
+                extra["derived_from"] = c["from_model"]
             items.append({"name": c["name"], "model": CostModel(c["name"], t["fee_rate"], t["spread_bps"],
                                                                  t["slip_bps"], t.get("tick", 0.0)),
-                          "direction": c.get("direction", "looser"), "applied_by": f"human:{by}",
+                          "direction": c.get("direction", "initial" if c.get("create") else "looser"),
+                          "applied_by": f"human:{by}", "create": c.get("create"),
                           "source": doc.get("title", ""), "evidence": doc.get("evidence"), "proposal_id": doc["id"],
-                          "extra": {"provisional": bool(doc.get("provisional"))}})
+                          "extra": extra})
         vs = add_versions(items, root=root)
         out = [{"name": n, "version": v} for n, v in vs.items()]
     elif doc["kind"] == "criterion":

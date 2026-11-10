@@ -75,6 +75,10 @@
   판정한다 — 낙폭 관문(G6 MDD·MC MDD95, §7 한도)은 크기에 따라 달라지는 것이 의도(entry_fraction 을 줄이면 MDD 가 줄어든다)이고,
   엣지 관문(G2 = 같은 사이징 귀무 대비 백분위, G5 = Sharpe 기반 DSR/PBO)은 크기에 거의 불변이라 크기를 줄여 통과할 수 없다.
   몬테카를로 MDD 는 포지션(사다리)당 슬리브 손익 Σ w·r 을 재표본한다.
+- 관문 일간 수익 회계 (PLAN D18, `gates.yaml evaluation.daily_returns`, class ②): 캠페인 매니페스트 `daily_returns`
+  (등록 시점 설정 고정; 키 없음 = D18 이전 = realized)를 따른다. 'mtm' 이면 Dev 재실행·G2 귀무·기여도·G6(primary/stress/grade)·
+  견고성·§7 한도가 평가 기준 일간 수익이고, 몬테카를로 MDD95 에 포지션 중간 MTM 저점(`universe.portfolio_trade_troughs`)을
+  넣는다. 결과 `daily_returns` 키로 보고. 자산별 비용 모델(D17): 슬리브마다 `get_sleeve_cost` (단일 비-BTC 자산도).
 - 주문 집행(`spec.execution`, 지정가 — docs/ENGINE_SPEC.md "지정가 집행"): 모든 Dev 재실행·G2 귀무(같은 집행·같은
   체결 규칙 `LIMIT_FILL_DEFAULT` 로 무작위 진입 시각에 지정가)·G3 인접(집행 격자 한 칸 이동 포함)·기여도·견고성·G6
   (run_fast/run_reference 가 스펙 집행을 따름)이 스펙의 집행 그대로. 신호 캐시는 fast.prepare 를 직접 쓰므로 집행을
@@ -107,7 +111,7 @@ from btc_quant.strategy.spec import BlockRef, SizingSpec, StrategySpec
 from . import universe as U
 from .campaign import (HALF_LIFE_DAYS, LIVE_AUX, CampaignResult, ResearchEnv, SignalCache,
                        aux_context, config_root, data_snapshot, get_cost, get_sleeve_cost, git_commit, load_aux_m1,
-                       load_campaign, load_segment, prepare_m1, run_param_fields, run_params)
+                       load_campaign, load_segment, manifest_accounting, prepare_m1, run_param_fields, run_params)
 from .nulls import null_distribution, null_distribution_universe, weighted_sharpe_rows
 
 VAL_WARMUP_DAYS = 14
@@ -401,6 +405,8 @@ class Pipeline:
         self.cfg = (copy.deepcopy(gate_cfg) if gate_cfg is not None
                     else gate_config_for_campaign(cr.campaign_id, root=config_root(env)))
         self.params = run_params(env)                  # params_version + cost_versions (실행 기록용)
+        # 관문 일간 수익 회계 (PLAN D18): 캠페인 매니페스트에 고정된 값 (D18 이전 캠페인 = realized → 재계산 불변)
+        self.accounting = manifest_accounting(getattr(cr, "manifest", None))
         self.n_null = int(n_null if n_null is not None else self.cfg["G2"]["null_runs"])
         self.null_seed0 = null_seed0
         self.register = register
@@ -455,6 +461,10 @@ class Pipeline:
             self._caches = {sym: out[sym] for sym in self.syms}
         return self._caches
 
+    def _cost(self, cost_name: str, sym: str | None = None):
+        """슬리브 비용 모델: 자산별 `<name>@<SYM>` 이 있으면 그것 (PLAN D17; BTC-KRW·기본 유니버스 = `get_cost(name)`)."""
+        return get_sleeve_cost(cost_name, sym or self.syms[0])
+
     def dev_sleeves(self, spec: StrategySpec, cost_name: str) -> dict:
         """자산별 Dev 결과 {심볼: BacktestResult} (빠른 엔진, 캠페인과 같은 계산)."""
         ex = spec.exit
@@ -462,7 +472,7 @@ class Pipeline:
         for sym, c in self.caches.items():
             p = c.prepared(spec.entry, spec.filters)
             _, _, si, ei = p.bounds(self.start, self.end)
-            cost = get_sleeve_cost(cost_name, sym) if self.multi else get_cost(cost_name)
+            cost = self._cost(cost_name, sym)
             if spec.execution.is_default and not spec.is_sized:          # 시장가·전액 = 기존 호출 그대로
                 tr = fast.simulate_prepared(p, ex.sl, ex.tp, ex.max_hold_min,
                                             cost, si, ei, ex.atr_bars if ex.is_atr else None)
@@ -472,7 +482,8 @@ class Pipeline:
                                             fill=LIMIT_FILL_DEFAULT,
                                             sizing=None if spec.sizing.is_default else spec.sizing,
                                             ladder=spec.ladder)
-            out[sym] = fast.to_result(p, tr, cost, self.start, self.end, spec.id, spec.logic_hash())
+            out[sym] = fast.to_result(p, tr, cost, self.start, self.end, spec.id, spec.logic_hash(),
+                                      accounting=self.accounting)
         return out
 
     def dev_result(self, spec: StrategySpec, cost_name: str):
@@ -593,11 +604,11 @@ class Pipeline:
         c = self.cache
         ex = spec.exit
         nd = null_distribution(self.cache.m1, c.bars.index, c.block(spec.entry), c.filter_ok(spec.filters),
-                               ex.sl, ex.tp, ex.max_hold_min, get_cost(cost_name),
+                               ex.sl, ex.tp, ex.max_hold_min, self._cost(cost_name),
                                self.start, self.end, self.n_null, self.null_seed0, HALF_LIFE_DAYS,
                                calibration=self.null_calibration, target_trades=_n_positions(observed),
                                tf_min=spec.tf_min, atr_bars=ex.atr_bars if ex.is_atr else None, bars=c.bars,
-                               **_exec_kw(spec))
+                               accounting=self.accounting, **_exec_kw(spec))
         ok, d = G.check_g2(observed, nd["sharpe_w"], self.cfg)
         enough = self.n_null >= self.cfg["G2"]["null_runs"]
         d.update({k: nd.get(k) for k in ("p", "p_signal_rate", "calibration", "calibration_probe_trades",
@@ -619,7 +630,8 @@ class Pipeline:
         nd = null_distribution_universe(sleeves, ex.sl, ex.tp, ex.max_hold_min, get_cost(cost_name),
                                         self.start, self.end, self.n_null, self.null_seed0, HALF_LIFE_DAYS,
                                         calibration=self.null_calibration, tf_min=spec.tf_min,
-                                        atr_bars=ex.atr_bars if ex.is_atr else None, **_exec_kw(spec))
+                                        atr_bars=ex.atr_bars if ex.is_atr else None,
+                                        accounting=self.accounting, **_exec_kw(spec))
         ok, d = G.check_g2(observed, nd["sharpe_w"], self.cfg)
         enough = self.n_null >= self.cfg["G2"]["null_runs"]
         d.update({k: nd.get(k) for k in ("p", "p_signal_rate", "calibration", "calibration_probe_trades",
@@ -793,31 +805,36 @@ class Pipeline:
                 return _gate(False, val_budget=vbd, cost=cost_name, val_status="exhausted"), None, None, None
         multi = isinstance(m1v, dict)
         if multi:          # 다자산: 자산별 빠른 엔진 → 포트폴리오 (같은 슬리브 회계)
-            vsl = {sym: fast.run_fast(spec, m1v[sym], get_sleeve_cost(cost_name, sym), vs, ve, ctx=ctx[sym])
+            acct = self.accounting
+            vsl = {sym: fast.run_fast(spec, m1v[sym], get_sleeve_cost(cost_name, sym), vs, ve, ctx=ctx[sym],
+                                      accounting=acct)
                    for sym in m1v}
             res = U.portfolio_result(vsl)
             st = U.portfolio_result({sym: fast.run_fast(spec, m1v[sym], get_sleeve_cost(stress_name, sym), vs, ve,
-                                                        ctx=ctx[sym]) for sym in m1v})
+                                                        ctx=ctx[sym], accounting=acct) for sym in m1v})
         else:
-            res = fast.run_fast(spec, m1v, get_cost(cost_name), vs, ve, ctx=ctx)
-            st = fast.run_fast(spec, m1v, get_cost(stress_name), vs, ve, ctx=ctx)
+            res = fast.run_fast(spec, m1v, self._cost(cost_name), vs, ve, ctx=ctx, accounting=self.accounting)
+            st = fast.run_fast(spec, m1v, self._cost(stress_name), vs, ve, ctx=ctx, accounting=self.accounting)
         bh = self.val_benchmark(m1v, res.daily_returns.index, vs)
         met = M.summarize(res, HALF_LIFE_DAYS, benchmark=bh, neutral_exposure=self.neutral_exposure)
         smet = M.summarize(st, HALF_LIFE_DAYS, benchmark=bh, neutral_exposure=self.neutral_exposure)
-        mc = montecarlo.worst_case_mdd95(U.portfolio_trade_returns(res), n_sims=self.cfg["G6"]["mc_sims"])
+        mc = montecarlo.worst_case_mdd95(U.portfolio_trade_returns(res), n_sims=self.cfg["G6"]["mc_sims"],
+                                         troughs=self._mc_troughs(res, m1v))
         ok, d = G.check_g6(met, smet, mc, self.cfg, dev_metrics=dev_metrics)
         # Val B&H 비교 (사람 전용: pipeline.json / human 리포트. 에이전트 사본은 G6 를 결과 코드로 대체)
         d["benchmark_val"] = {k: met.get(k) for k in VAL_BENCHMARK_KEYS if k in met}
         d.update(cost=cost_name, stress_cost=stress_name, n_trades=met["n_trades"],
                  total_return=met["total_return"], max_dd=met["max_dd"], n_days=met["n_days"],
-                 sharpe_w=met["sharpe_w"])
+                 sharpe_w=met["sharpe_w"], daily_returns=self.accounting)
+        if self.accounting != "realized" and getattr(res, "daily_realized", None) is not None:
+            d["max_dd_realized"] = M.max_drawdown(res.daily_realized)[0]      # 보고용 (판정은 MTM)
         if multi:          # 자산별 Val 요약 (사람 전용 — G6 세부 안; 에이전트 사본은 결과 코드만)
             d["universe"] = list(m1v)
             d["per_asset_val"] = U.per_asset_metrics(res.sleeves, HALF_LIFE_DAYS)
         if self.reference_check:
             pairs = ([(res.sleeves[sym], run_reference(spec, m1v[sym], get_sleeve_cost(cost_name, sym), vs, ve,
                                                        ctx=ctx[sym])) for sym in m1v] if multi else
-                     [(res, run_reference(spec, m1v, get_cost(cost_name), vs, ve, ctx=ctx))])
+                     [(res, run_reference(spec, m1v, self._cost(cost_name), vs, ve, ctx=ctx))])
             match = all(_trades_match(a.trades, b.trades) for a, b in pairs)
             d["reference_engine_match"] = bool(match)
             ok = ok and match
@@ -858,6 +875,13 @@ class Pipeline:
                 per, snap, git_commit(self.env.code_root), tpl.family, **run_param_fields(self.params))
         return _gate(ok, **d), res, met, mc
 
+    def _mc_troughs(self, res, m1v):
+        """몬테카를로 MDD 의 포지션 중간 평가 저점 (accounting='mtm' 일 때만, PLAN D18; realized = None → 기존과 같음)."""
+        if self.accounting == "realized":
+            return None
+        closes = {sym: df["close"] for sym, df in m1v.items()} if isinstance(m1v, dict) else m1v["close"]
+        return U.portfolio_trade_troughs(res, closes)
+
     # ---------------------------------------------------------- 견고성 (Dev)
     def other_venue(self) -> str:
         return "upbit" if self.cr.template.exchange != "upbit" else "coinone"
@@ -897,7 +921,7 @@ class Pipeline:
                 get_cost(self.costs["primary"]), other_m1s=other, other_venue=self.other_venue(),
                 costs={sym: get_sleeve_cost(self.costs["primary"], sym) for sym in self.syms},
                 ctxs={sym: c.ctx for sym, c in self.caches.items()}, checks=checks,
-                thresholds=self.cfg.get("robustness"))
+                thresholds=self.cfg.get("robustness"), accounting=self.accounting)
             if uses_aux:
                 out["checks"]["cross_venue"] = {
                     "passed": None, "other_venue": self.other_venue(),
@@ -912,9 +936,9 @@ class Pipeline:
         uses_aux = sorted({r for b in _blocks(spec) for r in REGISTRY.get(b.block).requires})
         checks = CHECKS if not uses_aux else tuple(k for k in CHECKS if k != "cross_venue")
         other = self._other_m1() if "cross_venue" in checks else None
-        out = robustness_suite(spec, c.m1, self.start, self.end, get_cost(self.costs["primary"]),
+        out = robustness_suite(spec, c.m1, self.start, self.end, self._cost(self.costs["primary"]),
                                other_m1=other, other_venue=self.other_venue(), ctx=c.ctx, checks=checks,
-                               thresholds=self.cfg.get("robustness"))
+                               thresholds=self.cfg.get("robustness"), accounting=self.accounting)
         if uses_aux:
             out["checks"]["cross_venue"] = {
                 "passed": None, "other_venue": self.other_venue(),
@@ -944,6 +968,7 @@ class Pipeline:
                "screen": (cr.manifest.get("screen") or None),
                "n_null": self.n_null, "funnel_all": self.funnel_all(), "campaign_stats": stats,
                "gate_config_version": self.cfg.get("version"), "candidates": [],
+               "daily_returns": self.accounting,
                "params_version": self.params.get("params_version"),
                "cost_versions": self.params.get("cost_versions"),
                "code_commit": git_commit(self.env.code_root)}
@@ -1007,8 +1032,9 @@ class Pipeline:
             if self.multi:      # 슬리브별 §7 한도 (같은 공식, 슬리브 Val 수익) — 페이퍼 슬리브 리스크 관리자용
                 c["sleeve_risk_limits"] = {
                     sym: G.risk_limits_from_validation(
-                        r.daily_returns, montecarlo.worst_case_mdd95(frame_position_returns(r.trades),
-                                                                     n_sims=self.cfg["G6"]["mc_sims"]),
+                        r.daily_returns, montecarlo.worst_case_mdd95(
+                            frame_position_returns(r.trades), n_sims=self.cfg["G6"]["mc_sims"],
+                            troughs=self._mc_troughs(r, m1v[sym])),
                         float(len(r.trades) / max(len(r.daily_returns), 1)), self.cfg)
                     for sym, r in vres.sleeves.items()}
             # 등급: grade 비용으로 G2/G4/G6 재확인

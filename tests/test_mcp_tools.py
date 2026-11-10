@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
-import shutil
 from pathlib import Path
 
 import pytest
@@ -348,11 +347,8 @@ def test_propose_block(tmp_path):
 
 # ------------------------------------------------------------------ 파라미터
 def test_params_status_and_propose_criterion(tmp_path):
-    from btc_quant.params import costs as C
-    (tmp_path / "config").mkdir()
-    for f in ("gates.yaml", "splits.yaml", "exchanges.yaml", "params.yaml"):
-        shutil.copy(ROOT / "config" / f, tmp_path / "config" / f)
-    C.ensure_costs_file(tmp_path)
+    from _config_root import make_config_root
+    make_config_root(tmp_path)
 
     def runner(tasks):     # 가짜 합성 보정: 0.9 가 목표 충족
         return [{**t, "any_validated": False, "star_validated": t["value"] == 0.9,

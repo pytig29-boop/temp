@@ -1,10 +1,8 @@
 """params.criteria — anti-goalpost 거부, 합성 보정 결과 → 제안 (가짜 runner, 네트워크·장시간 실행 없음)."""
-import shutil
 from pathlib import Path
 
 import pytest
 
-from btc_quant.params import costs as C
 from btc_quant.params import criteria as Q
 from btc_quant.params import proposals as P
 
@@ -13,11 +11,8 @@ K_FOR = {2.0: 0.03}
 
 
 def make_root(tmp_path: Path) -> Path:
-    (tmp_path / "config").mkdir()
-    for f in ("gates.yaml", "splits.yaml", "exchanges.yaml", "params.yaml"):
-        shutil.copy(ROOT / "config" / f, tmp_path / "config" / f)
-    C.ensure_costs_file(tmp_path)
-    return tmp_path
+    from _config_root import make_config_root
+    return make_config_root(tmp_path)
 
 
 def fake_runner(fpr_by_value: dict, power_by_value: dict):

@@ -180,8 +180,10 @@ def test_paper_limit_execution_hooks(tmp_path, limit_fill):
                         execution=ExecutionSpec(entry="limit", offset_bp=2.0, tif_bars=2, take_profit="limit"))
     rng = np.random.default_rng(3)
     raw = synth_raw(rng, t0 - pd.Timedelta(days=4), 4 * 1440 + 10)
+    # 가격 격자 = 코인원 현재 호가 단위(1천만 원 이상 10,000원) — 페이퍼는 거래소 호가 단위 정책을 쓴다(config/ticks.yaml)
+    tick = 10_000.0
     for c in ("open", "high", "low", "close"):
-        raw[c] = (raw[c] / 1000).round() * 1000
+        raw[c] = (raw[c] / tick).round() * tick
     raw["high"] = raw[["open", "high", "close"]].max(axis=1)
     raw["low"] = raw[["open", "low", "close"]].min(axis=1)
 
@@ -194,8 +196,8 @@ def test_paper_limit_execution_hooks(tmp_path, limit_fill):
     tr = svc.traders["svc_lim_v1"]
     assert tr.limit and tr.engine.execution == spec.execution
     assert (tr.engine.fill_oracle is not None) == (limit_fill == "queue")
-    trades = [(ts, _grid(p), q) for ts, p, q in synth_trades(rng, t0 - pd.Timedelta(seconds=30), 150,
-                                                             p0=float(raw["close"].iloc[-1]), wick_frac=0.0)]
+    trades = [(ts, _grid(p, tick), q) for ts, p, q in synth_trades(rng, t0 - pd.Timedelta(seconds=30), 150,
+                                                                   p0=float(raw["close"].iloc[-1]), wick_frac=0.0)]
     for ts_ms, p, q in trades:
         clock.t = ts_ms / 1000
         svc.on_event("coinone", "orderbook", {**book_at(p, spread=2000, step=1000, ts_recv=clock.t), "ts": ts_ms})
@@ -206,6 +208,7 @@ def test_paper_limit_execution_hooks(tmp_path, limit_fill):
         svc.process(clock.t)
     clock.t = trades[-1][0] / 1000 + 120
     svc.process(clock.t)
+    assert tr._tick(svc.hists["BTC-KRW"], svc.hists["BTC-KRW"].last_ts) == tick       # 정책표 (코인원 ≥ 1천만 원)
     fills = S.read_jsonl(svc.cfg.out / "svc_lim_v1" / "fills.jsonl")
     buys = [f for f in fills if f.get("side") == "buy"]
     assert tr.n_decisions >= 28 and buys and all(f.get("maker") for f in buys)

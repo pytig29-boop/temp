@@ -100,27 +100,30 @@ LIVE_AUX = ("upbit",)
 GROSS_KEYS = ("gross_sharpe_w", "gross_expectancy")
 
 
-def gross_metrics(p: fast.Prepared, tr: fast.TradeArrays, cost: CostModel, start, end) -> dict:
+def gross_metrics(p: fast.Prepared, tr: fast.TradeArrays, cost: CostModel, start, end,
+                  accounting: str = "realized") -> dict:
     """같은 거래를 zero-cost(수수료·스프레드·슬리피지 0, tick 은 원래 실행 값)로 → {gross_sharpe_w, gross_expectancy}.
-    gross_sharpe_w = 가중 Sharpe(`metrics.summarize` 의 sharpe_w 와 같은 식), gross_expectancy = 평균 gross 거래 수익."""
+    gross_sharpe_w = 가중 Sharpe(`metrics.summarize` 의 sharpe_w 와 같은 식), gross_expectancy = 평균 gross 거래 수익.
+    accounting: 캠페인 일간 수익 회계(PLAN D18) — 'mtm' 이면 zero-cost 평가 기준."""
     zero = CostModel("zero_cost", 0.0, 0.0, 0.0, cost.tick)
     tr0 = fast.reprice(tr, zero)
-    days, mat = fast.daily_returns_matrix(p, [tr0], start, end)
+    days, mat = fast.daily_returns_matrix(p, [tr0], start, end, accounting=accounting, cost=zero)
     ws = M.weighted_sharpe(pd.Series(mat[0], index=days), HALF_LIFE_DAYS)
     return {"gross_sharpe_w": float(ws.sharpe),
             "gross_expectancy": float(tr0.net_ret.mean()) if len(tr0.net_ret) else 0.0}
 
 
-def gross_metrics_sleeves(pairs: list[tuple[fast.Prepared, fast.TradeArrays]], cost: CostModel, start, end) -> dict:
+def gross_metrics_sleeves(pairs: list[tuple[fast.Prepared, fast.TradeArrays]], cost: CostModel, start, end,
+                          accounting: str = "realized") -> dict:
     """다자산 유니버스: 슬리브마다 zero-cost 재가격 → 포트폴리오(평균) 일간 수익의 가중 Sharpe, 풀링 거래 평균.
     슬리브 1개면 `gross_metrics` 그대로."""
     if len(pairs) == 1:
-        return gross_metrics(pairs[0][0], pairs[0][1], cost, start, end)
+        return gross_metrics(pairs[0][0], pairs[0][1], cost, start, end, accounting)
     zero = CostModel("zero_cost", 0.0, 0.0, 0.0, cost.tick)
     mats, nets, days = [], [], None
     for p, tr in pairs:
         tr0 = fast.reprice(tr, zero)
-        days, mat = fast.daily_returns_matrix(p, [tr0], start, end)
+        days, mat = fast.daily_returns_matrix(p, [tr0], start, end, accounting=accounting, cost=zero)
         mats.append(mat)
         nets.append(np.asarray(tr0.net_ret, float))
     ws = M.weighted_sharpe(pd.Series(U.combine_matrix(mats)[0], index=days), HALF_LIFE_DAYS)
@@ -183,6 +186,19 @@ def sleeve_cost_name(name: str, symbol: str, root: str | Path | None = None) -> 
 
 def get_sleeve_cost(name: str, symbol: str, root: str | Path | None = None) -> CostModel:
     return get_cost(sleeve_cost_name(name, symbol, root), root)
+
+
+def campaign_accounting(campaign_id: str | None, env: "ResearchEnv | None" = None) -> str:
+    """캠페인의 관문 일간 수익 회계 (PLAN D18): 등록 시점의 `evaluation.daily_returns`
+    (`gate_config_for_campaign` — 승인 전에 등록된 캠페인은 'realized' 그대로)."""
+    from btc_quant.evaluation.gates import daily_returns_mode
+    from btc_quant.params import gate_config_for_campaign
+    return daily_returns_mode(gate_config_for_campaign(campaign_id, root=config_root(env)))
+
+
+def manifest_accounting(manifest: dict | None) -> str:
+    """저장된 캠페인의 일간 수익 회계 — 매니페스트 `daily_returns` (D18 이전 캠페인은 키가 없음 = 'realized')."""
+    return str((manifest or {}).get("daily_returns") or "realized")
 
 
 def __getattr__(name: str):
@@ -1078,6 +1094,10 @@ def run_campaign(template: CampaignTemplate | str | Path, root: str | Path | Non
     pver = run_params(env)                             # 파라미터·비용 모델 버전 (docs/PARAMS.md §4)
     hyp_id, camp_id = register_campaign(env, tpl, snap, period, n_specs)   # ① ② 사전등록
     log(f"registered {hyp_id} / {camp_id}: {n_specs} specs, snapshot {snap}, code {commit}")
+    # 관문 일간 수익 회계 (PLAN D18, class ②): 등록 시점 기준 설정 → 매니페스트에 고정 (파이프라인이 따른다)
+    acct = campaign_accounting(camp_id, env)
+    if acct != "realized":
+        log(f"daily returns: {acct} (mark-to-market at each UTC day close; PLAN D18)")
 
     t0 = time.time()
     syms = list(tpl.universe)
@@ -1119,7 +1139,8 @@ def run_campaign(template: CampaignTemplate | str | Path, root: str | Path | Non
             if cost_name == tpl.costs["primary"]:
                 mats = []
                 for sym in syms:
-                    days, m_ = fast.daily_returns_matrix(ps[sym], trs[sym], start, end)
+                    days, m_ = fast.daily_returns_matrix(ps[sym], trs[sym], start, end, accounting=acct,
+                                                         cost=sleeve_costs[sym][cost_name])
                     mats.append(m_)
                 mat = U.combine_matrix(mats)
             for xi, (sl, tp, hold) in enumerate(exits):
@@ -1127,12 +1148,12 @@ def run_campaign(template: CampaignTemplate | str | Path, root: str | Path | Non
                 lh = spec.logic_hash()
                 specs[lh] = spec
                 sleeves = {sym: fast.to_result(ps[sym], trs[sym][xi], sleeve_costs[sym][cost_name], start, end,
-                                               spec.id, lh) for sym in syms}
+                                               spec.id, lh, accounting=acct) for sym in syms}
                 res = U.portfolio_result(sleeves)
                 if bh is None or not bh.index.equals(res.daily_returns.index):
                     bh = U.buy_hold_universe({sym: m1s[sym]["close"] for sym in syms}, res.daily_returns.index)
                 met = {**M.summarize(res, HALF_LIFE_DAYS, benchmark=bh),
-                       **gross_metrics_sleeves([(ps[sym], trs[sym][xi]) for sym in syms], cost, start, end)}
+                       **gross_metrics_sleeves([(ps[sym], trs[sym][xi]) for sym in syms], cost, start, end, acct)}
                 if not bench_const:
                     bench_const = {k: met.get(k) for k in M.BENCHMARK_CONSTANT_KEYS if k in met}
                 pa_cols = {}
@@ -1173,6 +1194,7 @@ def run_campaign(template: CampaignTemplate | str | Path, root: str | Path | Non
         "power": pw, "screen": screen,
         "benchmark": {"kind": "BTC buy & hold (same venue 1m close, no cost)", **bench_const},
         "params": pver, "params_version": pver.get("params_version"), "cost_versions": pver.get("cost_versions"),
+        "daily_returns": acct,
     }
     if tpl.execution:                       # 지정가 집행 격자 (시장가 템플릿은 매니페스트가 이전과 같다)
         manifest["execution"] = {"grid": dict(tpl.execution), "n_variants": len(xcombos),
@@ -1185,7 +1207,9 @@ def run_campaign(template: CampaignTemplate | str | Path, root: str | Path | Non
                                 "n_variants": len(pcombos), "gridded_mode_params": tpl.gridded_mode_params(),
                                 "max_exposure_cap": max_exposure_cap(config_root(env)),
                                 "accounting": "sleeve equity; tranche size = max_exposure/N of equity at the first "
-                                              "fill; cash earns 0; realized daily returns (ENGINE_SPEC)",
+                                              "fill; cash earns 0; "
+                                              + ("realized daily returns (ENGINE_SPEC)" if acct == "realized" else
+                                                 "mark-to-market daily returns at each UTC day close (PLAN D18)"),
                                 "fill_model": {k: getattr(LIMIT_FILL_DEFAULT, k) for k in
                                                ("name", "through_ticks", "tick", "through_bp", "fill_prob",
                                                 "min_volume", "seed", "tick_from_data")}}

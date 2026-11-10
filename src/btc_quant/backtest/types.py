@@ -149,4 +149,8 @@ class BacktestResult:
     start: pd.Timestamp
     end: pd.Timestamp
     trades: pd.DataFrame          # TRADE_COLUMNS
-    daily_returns: pd.Series      # UTC 일자 index, 거래 없는 날 0 포함, 청산일 기준 복리 합산
+    daily_returns: pd.Series      # UTC 일자 index, 거래 없는 날 0 포함, 청산일 기준 복리 합산 (accounting='mtm' 이면 평가 기준)
+    # 관문 일간 수익 회계 (PLAN D18): 'realized'(기본, 위 설명) | 'mtm'(보유 분할을 매 UTC 일 종가에 청산 평가).
+    # mtm 이면 daily_returns = 평가 기준, daily_realized = 실현 기준(보고용).
+    accounting: str = "realized"
+    daily_realized: pd.Series | None = None

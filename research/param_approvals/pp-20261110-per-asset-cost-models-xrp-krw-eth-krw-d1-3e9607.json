@@ -1,0 +1,58 @@
+{
+  "id": "pp-20261110-per-asset-cost-models-xrp-krw-eth-krw-d1-3e9607",
+  "approved_by": "user (explicit chat approval 2026-11-10)",
+  "ts": "2026-11-10T06:16:37+00:00",
+  "choice": null,
+  "note": "Human approval given explicitly in chat on 2026-11-10 (session https://claude.ai/code/session_016UrESoPhkmYVC4hNovJNRw); recorded by Claude through the params machinery with a non-tty confirm — acceptable only because the human approved in chat (the interactive `python -m btc_quant.params approve` is the normal path).",
+  "content_hash": "96c54ec24e8c998e",
+  "applied": [
+    {
+      "name": "coinone_base@XRP-KRW",
+      "version": 1
+    },
+    {
+      "name": "coinone_conservative@XRP-KRW",
+      "version": 1
+    },
+    {
+      "name": "coinone_stress@XRP-KRW",
+      "version": 1
+    },
+    {
+      "name": "coinone_base@ETH-KRW",
+      "version": 1
+    },
+    {
+      "name": "coinone_conservative@ETH-KRW",
+      "version": 1
+    },
+    {
+      "name": "coinone_stress@ETH-KRW",
+      "version": 1
+    },
+    {
+      "name": "upbit_base@XRP-KRW",
+      "version": 1
+    },
+    {
+      "name": "upbit_conservative@XRP-KRW",
+      "version": 1
+    },
+    {
+      "name": "upbit_stress@XRP-KRW",
+      "version": 1
+    },
+    {
+      "name": "upbit_base@ETH-KRW",
+      "version": 1
+    },
+    {
+      "name": "upbit_conservative@ETH-KRW",
+      "version": 1
+    },
+    {
+      "name": "upbit_stress@ETH-KRW",
+      "version": 1
+    }
+  ]
+}

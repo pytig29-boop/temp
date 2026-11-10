@@ -117,6 +117,8 @@ class PortfolioResult:
     trades: pd.DataFrame
     daily_returns: pd.Series
     sleeves: dict[str, BacktestResult] = field(default_factory=dict)
+    accounting: str = "realized"                 # 관문 일간 수익 회계 (PLAN D18; 슬리브와 같음)
+    daily_realized: pd.Series | None = None      # accounting='mtm' 이면 실현 기준 포트폴리오 일간 수익 (보고용)
 
     @property
     def n_sleeves(self) -> int:
@@ -149,8 +151,13 @@ def portfolio_result(sleeves: dict[str, BacktestResult]) -> BacktestResult | Por
         return next(iter(sleeves.values()))
     first = next(iter(sleeves.values()))
     daily = combine_daily({k: v.daily_returns for k, v in sleeves.items()})
+    acct = getattr(first, "accounting", "realized")
+    if any(getattr(v, "accounting", "realized") != acct for v in sleeves.values()):
+        raise UniverseError("sleeves use different daily-return accounting")
+    real = (combine_daily({k: v.daily_realized for k, v in sleeves.items()})
+            if acct != "realized" and all(v.daily_realized is not None for v in sleeves.values()) else None)
     return PortfolioResult(first.spec_id, first.logic_hash, first.cost, first.start, first.end,
-                           pooled_trades(sleeves), daily, dict(sleeves))
+                           pooled_trades(sleeves), daily, dict(sleeves), acct, real)
 
 
 def n_sleeves(result) -> int:
@@ -170,6 +177,22 @@ def portfolio_trade_returns(result) -> np.ndarray:
         r = frame_position_returns(result.trades) if len(result.trades) else np.zeros(0)
     n = n_sleeves(result)
     return r if n == 1 else r / n
+
+
+def portfolio_trade_troughs(result, closes) -> np.ndarray:
+    """몬테카를로 MTM 낙폭 입력 (PLAN D18): `portfolio_trade_returns` 와 같은 순서·같은 1/N 배율의 포지션별 보유 중
+    최악 평가 손익 (`sizing.position_mtm_troughs`, 슬리브 비용 모델로 청산 평가). closes: {심볼: 1분 close} 또는
+    단일 자산이면 close Series."""
+    from btc_quant.backtest.sizing import position_mtm_troughs
+    sl = getattr(result, "sleeves", None) or {}
+    if len(sl) > 1:
+        parts = [position_mtm_troughs(r.trades, closes[s], r.daily_returns.index, r.cost) for s, r in sl.items()]
+        t = np.concatenate(parts) if parts else np.zeros(0)
+    else:
+        c = next(iter(closes.values())) if isinstance(closes, dict) else closes
+        t = position_mtm_troughs(result.trades, c, result.daily_returns.index, result.cost)
+    n = n_sleeves(result)
+    return t if n == 1 else t / n
 
 
 def buy_hold_universe(closes: dict[str, pd.Series], days: pd.DatetimeIndex,
@@ -241,4 +264,4 @@ __all__ = ["DEFAULT_SYMBOL", "DEFAULT_UNIVERSE", "FIXED_ASSETS", "PER_ASSET_KEYS
            "UniverseError", "asset_metrics", "asset_name", "buy_hold_universe", "combine_daily",
            "combine_matrix", "is_default", "market_code", "market_index_close", "n_sleeves",
            "normalize_universe", "per_asset_columns", "per_asset_metrics", "per_asset_yearly",
-           "pooled_trades", "portfolio_result", "portfolio_trade_returns"]
+           "pooled_trades", "portfolio_result", "portfolio_trade_returns", "portfolio_trade_troughs"]

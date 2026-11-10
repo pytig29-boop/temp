@@ -34,8 +34,11 @@
                   Dev 약세장 연도(2022) 총수익, 실현 기준 일간 수익의 같은 값, B&H 최악 낙폭 구간 수익.
                   판정: worst_day ≥ −tail_max_worst_day, worst_week ≥ −tail_max_worst_week, cvar5 ≥ −tail_max_cvar5,
                   최대 비중 최장 기간 ≤ tail_max_full_inventory_days, 약세장 총수익 ≥ tail_min_bear_return (연도가 없으면 그 항목 제외).
-                  **tail_enabled = false (기본)** 이면 정보 전용(passed=True, informational=True, flag 만 표시) — 관문을 바꾸지 않는다.
-                  켜기는 class ② 기준 변경(사람 승인).
+                  **tail_enabled = false** 이면 정보 전용(passed=True, informational=True, flag 만 표시) — 관문을 바꾸지 않는다.
+                  tail_enabled = 'ladder' (PLAN D19, 사용자 승인 2026-11-10 — 이후 등록 캠페인부터): 분할 매수 사다리 스펙만
+                  판정에 사용, 그 밖의 스펙은 정보 전용. true = 모든 스펙. 켜기·바꾸기는 class ② 기준 변경(사람 승인).
+일간 수익 회계 (PLAN D18): `accounting='mtm'`(캠페인 매니페스트 `daily_returns`)이면 모든 검사의 일간 수익이 평가 기준이다
+(꼬리 검사의 '실현 기준' 값은 그대로 실현 기준으로 따로 계산).
 
 수치 기준은 config/gates.yaml 의 `robustness:` (class ② 증거 기준, config/params.yaml 에 등급·근거 수록)에서
 읽는다. 아래 모듈 상수는 같은 값의 대체값(설정에 항목이 없을 때)이다. 파이프라인은 캠페인 시점 관문 설정
@@ -76,7 +79,7 @@ CROSS_VENUE_MIN_RATIO = 0.5        # Sharpe(다른 거래소)/Sharpe(대상) ≥
 REGIME_MODE = "pnl_share"          # 국면 검사 판정 방식: pnl_share(현재) | dominant_alpha | informational
 REGIME_DOMINANT_MIN_EXCESS = 0.0   # dominant_alpha: 지배 국면 안 노출-맞춤 B&H 대비 초과수익(연율) 하한
 REGIME_MODES = ("pnl_share", "dominant_alpha", "informational")
-TAIL_ENABLED = False               # 꼬리 위험 검사 판정 사용 (기본 false = 정보 전용)
+TAIL_ENABLED = "ladder"            # 꼬리 위험 검사 판정: false(정보 전용) | 'ladder'(사다리 스펙만, D19) | true
 TAIL_MAX_WORST_DAY = 0.10          # MTM 최악 일 손실 ≤ 10% (슬리브·포트폴리오 자산 대비)
 TAIL_MAX_WORST_WEEK = 0.15         # MTM 최악 주(월~일) 손실 ≤ 15%
 TAIL_MAX_CVAR5 = 0.03              # MTM 일간 하위 5% 평균 손실 ≤ 3%
@@ -133,6 +136,7 @@ class Candidate:
     bar_minutes: int = 5
     name: str = ""
     atr_bars: int | None = None     # ATR 청산: sl_pct/tp_pct 자리는 ATR 배수 (Prepared.atr_frac[atr_bars])
+    has_ladder: bool = False        # 분할 매수 사다리 스펙 (tail_enabled='ladder' 이면 꼬리 검사 판정 사용, PLAN D19)
 
     @classmethod
     def from_spec(cls, spec, ctx=None, other_ctx=None) -> Candidate:
@@ -140,7 +144,8 @@ class Candidate:
         bar = tf_minutes(str(getattr(spec, "timeframe", "5m") or "5m"))
         ex = spec.exit
         return cls(lambda m1, _c=ctx: fast.prepare_spec(spec, m1, _c), ex.sl, ex.tp,
-                   int(ex.max_hold_min), max(bar, 1), spec.id, ex.atr_bars if ex.is_atr else None)
+                   int(ex.max_hold_min), max(bar, 1), spec.id, ex.atr_bars if ex.is_atr else None,
+                   getattr(spec, "ladder", None) is not None)
 
     @classmethod
     def from_signals(cls, signal_fn: Callable[[pd.DataFrame], tuple[pd.Series, pd.Series | None]],
@@ -157,6 +162,7 @@ class Candidate:
 class _Run:
     tr: fast.TradeArrays
     daily: pd.Series
+    cost: CostModel | None = None
 
 
 def scale_cost(cost: CostModel, mult: float) -> CostModel:
@@ -169,14 +175,17 @@ def _subset(tr: fast.TradeArrays, mask: np.ndarray) -> fast.TradeArrays:
 
 
 class _Engine:
-    def __init__(self, cand: Candidate, m1: pd.DataFrame, start, end):
+    def __init__(self, cand: Candidate, m1: pd.DataFrame, start, end, accounting: str = "realized"):
         self.cand, self.m1 = cand, m1
         self.p = cand.build(m1)
         self.s, self.e, self.si, self.ei = self.p.bounds(start, end)
         self.n = len(self.p.index)
+        self.accounting = accounting
 
-    def daily(self, tr: fast.TradeArrays) -> pd.Series:
-        days, mat = fast.daily_returns_matrix(self.p, [tr], self.s, self.e)
+    def daily(self, tr: fast.TradeArrays, cost: CostModel | None = None, accounting: str | None = None) -> pd.Series:
+        """일간 수익 (엔진 회계 — PLAN D18 'mtm' 이면 평가 기준; cost = 청산 평가 비용 모델)."""
+        acct = self.accounting if accounting is None else accounting
+        days, mat = fast.daily_returns_matrix(self.p, [tr], self.s, self.e, accounting=acct, cost=cost)
         return pd.Series(mat[0], index=days, name="ret")
 
     def _shift_positions(self, pos: np.ndarray, d: int) -> np.ndarray:
@@ -208,7 +217,7 @@ class _Engine:
                                     c.atr_bars)
         if delay and len(tr.reason):
             tr = self._delay_exits(tr, cost, delay)
-        return _Run(tr, self.daily(tr))
+        return _Run(tr, self.daily(tr, cost), cost)
 
     def _shift_frac(self, frac: np.ndarray, d: int) -> np.ndarray:
         """ATR 모드 지연: 결정 행 i 의 ATR(절대값 = frac[i]·o_i)을 지연 진입 행 j(= i + d 분)로 옮겨
@@ -301,7 +310,7 @@ def check_outliers(eng: _Engine, base: _Run, th: dict | None = None) -> dict:
         k = min(k, n)
         keep = np.ones(n, dtype=bool)
         keep[order[:k]] = False
-        d = eng.daily(_subset(base.tr, keep))
+        d = eng.daily(_subset(base.tr, keep), base.cost)
         rows.append({"removed": label, "k": int(k), "sharpe": _sr(d),
                      "total_return": float(np.prod(1 + d.to_numpy()) - 1),
                      "removed_pnl_share": float(net[order[:k]].sum() / net.sum()) if net.sum() > 0 else float("nan")})
@@ -505,11 +514,12 @@ def check_alpha(eng: _Engine, base: _Run, th: dict | None = None) -> dict:
 
 
 def check_cross_venue(cand: Candidate, base: _Run, other_m1: pd.DataFrame | None, start, end,
-                      cost: CostModel, other_venue: str | None, th: dict | None = None) -> dict:
+                      cost: CostModel, other_venue: str | None, th: dict | None = None,
+                      accounting: str = "realized") -> dict:
     th = th or DEFAULT_THRESHOLDS
     if other_m1 is None or len(other_m1) == 0:
         return {"passed": None, "reason": "no other-venue data", "other_venue": other_venue}
-    eng = _Engine(cand, other_m1, start, end)
+    eng = _Engine(cand, other_m1, start, end, accounting)
     r = eng.run(cost)
     sr0, sr1 = _sr(base.daily), _sr(r.daily)
     a, b = base.daily.align(r.daily, join="inner")
@@ -539,14 +549,32 @@ def tail_verdict(stats: dict, th: dict | None = None) -> dict:
     return {k: bool(v) for k, v in items.items()}
 
 
-def _tail_result(stats: dict, th: dict) -> dict:
+TAIL_ENABLED_MODES = (False, True, "ladder")
+
+
+def tail_enabled_for(th: dict, has_ladder: bool) -> bool:
+    """꼬리 검사 판정 사용 여부. tail_enabled: false(정보 전용) | true(모든 스펙) | 'ladder'(분할 매수 사다리 스펙만 —
+    PLAN D19, 그 밖의 스펙은 정보 전용)."""
+    v = th.get("tail_enabled", TAIL_ENABLED)
+    if isinstance(v, str):
+        if v.strip().lower() == "ladder":
+            return bool(has_ladder)
+        if v.strip().lower() in ("true", "false"):
+            return v.strip().lower() == "true"
+        raise ValueError(f"robustness.tail_enabled must be false | true | 'ladder', got {v!r}")
+    return bool(v)
+
+
+def _tail_result(stats: dict, th: dict, has_ladder: bool = False) -> dict:
     items = tail_verdict(stats, th)
     flagged = not all(items.values())
-    enabled = bool(th.get("tail_enabled", TAIL_ENABLED))
+    enabled = tail_enabled_for(th, has_ladder)
     out = {"passed": (not flagged) if enabled else True, "flag": flagged, **items, **stats,
-           "enabled": enabled,
-           "note": "MTM = inventory marked at each UTC day close (liquidation value incl. costs); realized = gate "
-                   "daily returns. Thresholds: config/gates.yaml robustness.tail_* (class ②)."}
+           "enabled": enabled, "tail_enabled_setting": th.get("tail_enabled", TAIL_ENABLED),
+           "has_ladder": bool(has_ladder),
+           "note": "MTM = inventory marked at each UTC day close (liquidation value incl. costs); realized = "
+                   "exit-day attribution. Thresholds: config/gates.yaml robustness.tail_* (class ②); "
+                   "tail_enabled='ladder' → binding for ladder specs only (PLAN D19)."}
     if not enabled:
         out["informational"] = True
     return out
@@ -578,21 +606,23 @@ def check_tail(eng: _Engine, base: _Run, cost: CostModel, th: dict | None = None
     th = th or DEFAULT_THRESHOLDS
     trades = _tail_frame(eng, base.tr, cost)
     mtm = mtm_daily_returns(trades, eng.m1["close"], base.daily.index, cost)
+    real = base.daily if eng.accounting == "realized" else eng.daily(base.tr, cost, "realized")
     bh = M.buy_hold_daily(eng.m1["close"], base.daily.index)
-    return _tail_result(_tail_stats(base.daily, mtm, trades, 1, bh), th)
+    return _tail_result(_tail_stats(real, mtm, trades, 1, bh), th, eng.cand.has_ladder)
 
 
 # ============================================================== 묶음
 def run_suite(cand: Candidate, m1: pd.DataFrame, start, end, cost: CostModel = COINONE_CONSERVATIVE, *,
               other_m1: pd.DataFrame | None = None, other_venue: str | None = None,
               checks: tuple[str, ...] = CHECKS, half_life_days: float = 365,
-              thresholds: dict | None = None) -> dict:
-    """thresholds: 견고성 기준 (관문 설정 또는 그 `robustness` 절; None → config/gates.yaml, 없으면 상수)."""
+              thresholds: dict | None = None, accounting: str = "realized") -> dict:
+    """thresholds: 견고성 기준 (관문 설정 또는 그 `robustness` 절; None → config/gates.yaml, 없으면 상수).
+    accounting: 일간 수익 회계 'realized' | 'mtm' (PLAN D18 — 캠페인과 같은 값; 모든 Sharpe·연도 제외·국면·알파가 이것)."""
     th = load_thresholds(thresholds)
     unknown = set(checks) - set(CHECKS)
     if unknown:
         raise ValueError(f"unknown checks {sorted(unknown)}")
-    eng = _Engine(cand, m1, start, end)
+    eng = _Engine(cand, m1, start, end, accounting)
     base = eng.run(cost)
     res: dict[str, dict] = {}
     if "latency" in checks:
@@ -608,7 +638,7 @@ def run_suite(cand: Candidate, m1: pd.DataFrame, start, end, cost: CostModel = C
     if "alpha" in checks:
         res["alpha"] = check_alpha(eng, base, th)
     if "cross_venue" in checks:
-        res["cross_venue"] = check_cross_venue(cand, base, other_m1, start, end, cost, other_venue, th)
+        res["cross_venue"] = check_cross_venue(cand, base, other_m1, start, end, cost, other_venue, th, accounting)
     if "tail" in checks:
         res["tail"] = check_tail(eng, base, cost, th)
     failed = [k for k, v in res.items() if v["passed"] is False]
@@ -624,16 +654,17 @@ def run_suite(cand: Candidate, m1: pd.DataFrame, start, end, cost: CostModel = C
         "verdict": ("robust" if passed and not skipped else
                     f"robust on available checks (skipped: {', '.join(skipped)})" if passed else
                     f"fragile: failed {', '.join(failed)}"),
-        "thresholds": th,
+        "thresholds": th, "daily_returns": accounting,
     }
 
 
 def robustness_suite(spec, m1: pd.DataFrame, start, end, cost: CostModel = COINONE_CONSERVATIVE, *,
                      other_m1: pd.DataFrame | None = None, other_venue: str | None = None, ctx=None,
-                     checks: tuple[str, ...] = CHECKS, thresholds: dict | None = None) -> dict:
+                     checks: tuple[str, ...] = CHECKS, thresholds: dict | None = None,
+                     accounting: str = "realized") -> dict:
     """StrategySpec 하나에 대한 견고성 묶음. m1 = 엔진 입력 1분봉(regularize 된; 구간 앞 워밍업 포함 권장)."""
     return run_suite(Candidate.from_spec(spec, ctx), m1, start, end, cost, other_m1=other_m1,
-                     other_venue=other_venue, checks=checks, thresholds=thresholds)
+                     other_venue=other_venue, checks=checks, thresholds=thresholds, accounting=accounting)
 
 
 def robustness_for_spec(spec, env=None, segment: str = "dev", exchange: str = "coinone",
@@ -668,7 +699,8 @@ def robustness_suite_universe(spec, m1s: dict[str, pd.DataFrame], start, end,
                               other_m1s: dict[str, pd.DataFrame | None] | None = None,
                               other_venue: str | None = None, ctxs: dict | None = None,
                               checks: tuple[str, ...] = CHECKS, thresholds: dict | None = None,
-                              half_life_days: float = 365, costs: dict[str, CostModel] | None = None) -> dict:
+                              half_life_days: float = 365, costs: dict[str, CostModel] | None = None,
+                              accounting: str = "realized") -> dict:
     """다자산 유니버스 스펙의 견고성 묶음: 자산(슬리브)마다 같은 방식으로 흔든 뒤 슬리브 일간 수익을 평균한
     포트폴리오로 판정한다 (기준·판정 규칙은 단일 자산과 같다).
 
@@ -689,7 +721,7 @@ def robustness_suite_universe(spec, m1s: dict[str, pd.DataFrame], start, end,
     syms = list(m1s)
     ctxs = ctxs or {}
     cands = {s: Candidate.from_spec(spec, ctxs.get(s)) for s in syms}
-    engs = {s: _Engine(cands[s], m1s[s], start, end) for s in syms}
+    engs = {s: _Engine(cands[s], m1s[s], start, end, accounting) for s in syms}
     sc = {s: (costs or {}).get(s) or cost for s in syms}
     base = {s: engs[s].run(sc[s]) for s in syms}
     bdaily = _combine([base[s].daily for s in syms])
@@ -730,7 +762,7 @@ def robustness_suite_universe(spec, m1s: dict[str, pd.DataFrame], start, end,
                 for i, s in enumerate(syms):
                     keep = np.ones(len(base[s].tr.net_ret), dtype=bool)
                     keep[pos[drop[tags[drop] == i]]] = False
-                    dailies.append(engs[s].daily(_subset(base[s].tr, keep)))
+                    dailies.append(engs[s].daily(_subset(base[s].tr, keep), base[s].cost))
                 d = _combine(dailies)
                 rows.append({"removed": label, "k": int(k), "sharpe": _sr(d),
                              "total_return": float(np.prod(1 + d.to_numpy()) - 1),
@@ -806,7 +838,7 @@ def robustness_suite_universe(spec, m1s: dict[str, pd.DataFrame], start, end,
         else:
             per, od = {}, []
             for s in avail:
-                r = _Engine(cands[s], others[s], start, end).run(sc[s])
+                r = _Engine(cands[s], others[s], start, end, accounting).run(sc[s])
                 od.append(r.daily)
                 a, b = base[s].daily.align(r.daily, join="inner")
                 per[s] = {"sharpe_target": _sr(base[s].daily), "sharpe_other": _sr(r.daily),
@@ -832,7 +864,10 @@ def robustness_suite_universe(spec, m1s: dict[str, pd.DataFrame], start, end,
         pooled = pd.concat(frames, ignore_index=True) if frames else None
         from .universe import buy_hold_universe
         bh = buy_hold_universe({s: m1s[s]["close"] for s in syms}, bdaily.index)
-        res["tail"] = _tail_result(_tail_stats(bdaily, _combine(mtms), pooled, len(syms), bh), th)
+        real = (bdaily if accounting == "realized" else
+                _combine([engs[s].daily(base[s].tr, sc[s], "realized") for s in syms]))
+        res["tail"] = _tail_result(_tail_stats(real, _combine(mtms), pooled, len(syms), bh), th,
+                                   getattr(spec, "ladder", None) is not None)
         res["tail"]["per_asset_mtm_worst_day"] = {s: float(m.min()) if len(m) else 0.0 for s, m in zip(syms, mtms)}
     failed = [k for k, v in res.items() if v["passed"] is False]
     skipped = [k for k, v in res.items() if v["passed"] is None]
@@ -849,5 +884,5 @@ def robustness_suite_universe(spec, m1s: dict[str, pd.DataFrame], start, end,
         "verdict": ("robust" if passed and not skipped else
                     f"robust on available checks (skipped: {', '.join(skipped)})" if passed else
                     f"fragile: failed {', '.join(failed)}"),
-        "thresholds": th,
+        "thresholds": th, "daily_returns": accounting,
     }

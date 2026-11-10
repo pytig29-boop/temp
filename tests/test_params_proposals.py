@@ -1,6 +1,5 @@
 """params.proposals — 사람 승인 흐름: 비대화형 거부, 확인 불일치, 승인 적용, 낡은 제안·변조 거부."""
 import json
-import shutil
 from pathlib import Path
 
 import pytest
@@ -16,11 +15,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def make_root(tmp_path: Path) -> Path:
-    (tmp_path / "config").mkdir()
-    for f in ("gates.yaml", "splits.yaml", "exchanges.yaml", "params.yaml"):
-        shutil.copy(ROOT / "config" / f, tmp_path / "config" / f)
-    C.ensure_costs_file(tmp_path)
-    return tmp_path
+    from _config_root import make_config_root
+    return make_config_root(tmp_path)      # 프리셋 시드 비용 (+ 자산별 모델·ticks.yaml — 카탈로그 일치)
 
 
 def cost_proposal(root: Path) -> str:

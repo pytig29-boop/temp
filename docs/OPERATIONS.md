@@ -237,7 +237,10 @@ docker compose -f deploy/docker-compose.yml up -d --build
   (기본 3일, 블록 파라미터가 더 요구하면 그만큼 — 예: `vol_regime` 7일, EMA 계열은 수렴 길이, 상한 120일).
 - 결정 주기 B(스펙 `timeframe`: 5분 또는 1분) 경계 + 2초: 방금 닫힌 결정 봉의 신호(ATR 청산 모드면 ATR 포함)를
   백테스트와 같은 블록 함수로 후행 창에서 계산 → 리스크 게이트(`can_enter`) → 다음 1분봉 시가에 모델 체결
-  (시가 ± 비용 모델, 기본 `coinone_conservative`).
+  (시가 ± 비용 모델, 기본 `coinone_conservative`; 다자산 슬리브는 자산별 모델 `<cost>@<SYM>` — PLAN D17).
+- 지정가·사다리 주문의 호가 단위 = 코인원 가격대별 호가 단위 정책(`config/ticks.yaml`, 공개 API `range_units` 캐시).
+  거래소가 표를 바꾸면 `uv run python -m btc_quant.data.ticks refresh`(바뀌었으면 새 버전 + 레지스트리 이력), 서비스 재시작.
+  `uv run python -m btc_quant.data.ticks check` = Dev 데이터 추정 단위와 비교.
 - 업비트 보조 데이터 블록(실험 블록 `upbit_lead_impulse`, `venue_gap_revert` 등)을 쓰는 전략이 있으면 업비트
   체결로 업비트 1분봉도 같은 방식(REST 워밍업 + 실시간)으로 만들어 `ctx.aux["upbit"]` 로 넘긴다.
 - 실측 비교용 **호가 체결 추정**: 결정 시점의 코인원 호가에 실제 금액(기본 300,000원, 이후 복리 자산)을 대입.

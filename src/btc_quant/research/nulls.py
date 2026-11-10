@@ -172,8 +172,9 @@ def null_distribution(m1: pd.DataFrame, bars_index: pd.DatetimeIndex, entry: np.
                       half_life_days: float = 365, calibration: str = "trade_count",
                       target_trades: int | None = None, tf_min: int = 5, atr_bars: int | None = None,
                       bars: pd.DataFrame | None = None, execution=None, fill=None, sizing=None,
-                      ladder=None) -> dict:
+                      ladder=None, accounting: str = "realized") -> dict:
     """귀무 가중 Sharpe 분포. 반환: sharpe_w(np.ndarray), n_trades(np.ndarray), p, seeds 등.
+    accounting: 일간 수익 회계 (후보와 같아야 한다 — PLAN D18 'mtm' 이면 귀무도 평가 기준).
 
     calibration="signal_rate": p = 필터 통과 봉 중 진입 신호 비율 (calibrated_rate).
     calibration="trade_count" (기본): 신호 비율에서 출발해 귀무 거래 수 중앙값이 후보 거래 수
@@ -201,11 +202,11 @@ def null_distribution(m1: pd.DataFrame, bars_index: pd.DatetimeIndex, entry: np.
     for c0 in range(0, n_seeds, chunk):
         seeds = range(seed0 + c0, seed0 + min(n_seeds, c0 + chunk))
         trs = [gen.simulate(p, sd, sl, tp, hold, cost, si, ei) for sd in seeds]
-        days, mat = fast.daily_returns_matrix(pr, trs, start, end)
+        days, mat = fast.daily_returns_matrix(pr, trs, start, end, accounting=accounting, cost=cost)
         srs[c0:c0 + len(trs)] = weighted_sharpe_rows(mat, days, half_life_days)
         ntr[c0:c0 + len(trs)] = [t.n_positions for t in trs]
     return {"sharpe_w": srs, "n_trades": ntr, **cal, **info, "p": p, "n_seeds": int(n_seeds),
-            "tf_min": int(tf_min), "atr_bars": atr_bars,
+            "tf_min": int(tf_min), "atr_bars": atr_bars, "daily_returns": accounting,
             "seed0": int(seed0),
             "n_trades_median": float(np.median(ntr)) if n_seeds else 0.0,
             "sharpe_w_p95": float(np.percentile(srs, 95)) if n_seeds else float("nan"),
@@ -216,7 +217,7 @@ def null_distribution_universe(sleeves: list[dict], sl: float, tp: float, hold: 
                                start, end, n_seeds: int = 1000, seed0: int = 0, half_life_days: float = 365,
                                calibration: str = "trade_count", tf_min: int = 5,
                                atr_bars: int | None = None, execution=None, fill=None, sizing=None,
-                               ladder=None) -> dict:
+                               ladder=None, accounting: str = "realized") -> dict:
     """다자산 유니버스(PLAN D15) G2 귀무: **자산마다** 같은 필터·청산 + random_entry, p 는 자산별로 보정
     (그 자산의 신호 비율 → 그 자산 후보 거래 수에 맞춤). seed 마다 슬리브 일간 수익을 평균(포트폴리오, 후보와
     같은 회계)해 가중 Sharpe 를 계산한다.
@@ -232,7 +233,7 @@ def null_distribution_universe(sleeves: list[dict], sl: float, tp: float, hold: 
         return null_distribution(sv["m1"], sv["bars_index"], sv["entry"], sv["filter_ok"], sl, tp, hold, cost,
                                  start, end, n_seeds, seed0, half_life_days, calibration,
                                  sv.get("target_trades"), tf_min, atr_bars, sv.get("bars"), execution, fill,
-                                 sizing, ladder)
+                                 sizing, ladder, accounting)
     gens, ps, per, scost = [], [], {}, []
     for sv in sleeves:
         sym = sv["symbol"]
@@ -263,7 +264,7 @@ def null_distribution_universe(sleeves: list[dict], sl: float, tp: float, hold: 
         acc, days = None, None
         for (gen, si, ei), p, cs in zip(gens, ps, scost):
             trs = [gen.simulate(p, sd, sl, tp, hold, cs, si, ei) for sd in seeds]
-            days, mat = fast.daily_returns_matrix(gen.prepared, trs, start, end)
+            days, mat = fast.daily_returns_matrix(gen.prepared, trs, start, end, accounting=accounting, cost=cs)
             acc = mat if acc is None else acc + mat
             ntr[c0:c0 + len(seeds)] += np.array([t.n_positions for t in trs], dtype=np.int64)
         srs[c0:c0 + len(seeds)] = weighted_sharpe_rows(acc / len(gens), days, half_life_days)
@@ -276,6 +277,7 @@ def null_distribution_universe(sleeves: list[dict], sl: float, tp: float, hold: 
             **({"calibration_probe_trades": by("calibration_probe_trades"), "target_trades": by("target_trades")}
                if calibration == "trade_count" else {}),
             "n_seeds": int(n_seeds), "tf_min": int(tf_min), "atr_bars": atr_bars, "seed0": int(seed0),
+            "daily_returns": accounting,
             "n_trades_median": float(np.median(ntr)) if n_seeds else 0.0,
             "sharpe_w_p95": float(np.percentile(srs, 95)) if n_seeds else float("nan"),
             "sharpe_w_median": float(np.median(srs)) if n_seeds else float("nan"),

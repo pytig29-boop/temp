@@ -199,14 +199,17 @@ def test_shrinking_entry_fraction_cannot_trivially_pass_g2_g5(root):
     assert b["mdd"] < 0.2 * a["mdd"] + 1e-9                          # 낙폭은 크기에 비례 (의도)
 
 
-def test_tail_check_informational_by_default(root):
+def test_tail_check_informational_before_d19(root):
+    """D19 이전 캠페인(tail_enabled=false)은 정보 전용. D19 이후 기본은 'ladder'(tests/test_mtm_gates.py)."""
+    from btc_quant.params import gate_config_for_campaign
     env = ResearchEnv.at(root)
     m1 = load_segment(env, "dev", "coinone", "BTC-KRW", "1m")
     s, e = env.data.segment_bounds("dev")
-    assert "tail" in CHECKS and load_thresholds()["tail_enabled"] is False
+    assert "tail" in CHECKS and load_thresholds()["tail_enabled"] == "ladder"
     spec = StrategySpec("t", BlockRef("donchian_breakout", {"lookback": 48}), ExitSpec(0.6, 0.8, 120),
                         ladder=LadderSpec(3, step_bp=30.0))
-    th = load_thresholds()
+    th = load_thresholds(gate_config_for_campaign("camp-000024"))
+    assert th["tail_enabled"] is False
     th.update(tail_max_worst_day=1e-9)                                 # 무조건 flag 되는 기준
     out = robustness_suite(spec, m1, s, e, get_cost("coinone_conservative"), checks=("tail",), thresholds=th)
     t = out["checks"]["tail"]

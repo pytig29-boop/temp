@@ -992,10 +992,102 @@ def equity_contrib(p: Prepared, tr: TradeArrays) -> np.ndarray:
     return equity_returns(tr.weight, tr.net_ret, tr.ladder, tr.tranche, p.tmin[tr.exit_idx])
 
 
-def daily_returns_matrix(p: Prepared, results: list[TradeArrays], start, end
-                         ) -> tuple[pd.DatetimeIndex, np.ndarray]:
+ACCOUNTING_MODES = ("realized", "mtm")
+
+
+@njit(cache=True)
+def _ladder_start_equity(order, w, r, lad):
+    """행별 사다리 시작 자산 E_g (실현 회계 경로; `sizing.equity_returns` 와 같은 순서)."""
+    n = order.shape[0]
+    out = np.empty(w.shape[0], np.float64)
+    e = 1.0
+    eg = 1.0
+    cur = -(2 ** 62)
+    for q in range(n):
+        i = order[q]
+        if lad[i] != cur:
+            cur = lad[i]
+            eg = e
+        out[i] = eg
+        e = e + w[i] * r[i] * eg
+    return out
+
+
+@njit(cache=True)
+def _mtm_core(eg, w, r, ef, ed, xd, day_close, side_cost, fee_rate, n_days):
+    realized = np.zeros(n_days)
+    unreal = np.zeros(n_days)
+    for i in range(eg.shape[0]):
+        realized[xd[i]] += eg[i] * w[i] * r[i]
+        for d in range(ed[i], xd[i]):          # 진입일 ~ 청산 전날 종가 평가 (청산일은 실현)
+            px = day_close[d]
+            mark = (px * (1 - side_cost) * (1 - fee_rate)) / (ef[i] * (1 + fee_rate)) - 1
+            if np.isfinite(mark):
+                unreal[d] += eg[i] * w[i] * mark
+    out = np.empty(n_days)
+    cum = 0.0
+    prev = 1.0
+    for d in range(n_days):
+        cum += realized[d]
+        eq = 1.0 + cum + unreal[d]
+        out[d] = eq / prev - 1.0
+        prev = eq
+    return out
+
+
+def _day_close(p: Prepared, days: pd.DatetimeIndex) -> np.ndarray:
+    """일자별 UTC 일 종가 = 그날 마지막 1분봉 close (그날 봉이 없으면 직전 값, 그 전도 없으면 NaN)."""
+    d0 = days[0].as_unit("ns").value // 86_400_000_000_000
+    ends = (d0 + np.arange(1, len(days) + 1, dtype=np.int64)) * 1440
+    j = np.searchsorted(p.tmin, ends, side="left") - 1
+    out = np.full(len(days), np.nan)
+    ok = j >= 0
+    out[ok] = p.c[j[ok]]
+    return out
+
+
+def mtm_daily_matrix(p: Prepared, results: list[TradeArrays], start, end, cost: CostModel
+                     ) -> tuple[pd.DatetimeIndex, np.ndarray]:
+    """평가 기준(MTM) 일간 수익 [n_combo, n_days] — 보유 분할을 매 UTC 일 종가에 청산했다고 본 자산의 일간 변화
+    (`sizing.mtm_daily_returns` 와 같은 식: 청산 평가가 = close·(1−side_cost)·(1−fee) / (진입 체결가·(1+fee)) − 1,
+    실현 손익은 실제 청산일, 사다리 시작 자산은 실현 회계 경로). 보유가 없는 날의 자산은 실현 기준과 같다."""
+    s, e, _, _ = p.bounds(start, end)
+    days = day_index(s, e)
+    nd = len(days)
+    out = np.zeros((len(results), nd))
+    if nd == 0:
+        return days, out
+    dc = _day_close(p, days)
+    d0 = days[0].as_unit("ns").value // 86_400_000_000_000
+    for j, tr in enumerate(results):
+        m = len(tr.net_ret)
+        if m == 0:
+            continue
+        w = np.ones(m) if tr.weight is None else np.asarray(tr.weight, np.float64)
+        lad = np.arange(m, dtype=np.int64) if tr.ladder is None else np.asarray(tr.ladder, np.int64)
+        jj = np.zeros(m, np.int64) if tr.tranche is None else np.asarray(tr.tranche, np.int64)
+        xm = p.tmin[tr.exit_idx]
+        order = np.lexsort((jj, xm, lad)).astype(np.int64)
+        r = np.asarray(tr.net_ret, np.float64)
+        eg = _ladder_start_equity(order, w, r, lad)
+        ed = np.clip(p.tmin[tr.entry_idx] // 1440 - d0, 0, nd).astype(np.int64)
+        xd = np.clip(xm // 1440 - d0, 0, nd - 1).astype(np.int64)
+        out[j] = _mtm_core(eg, w, r, np.asarray(tr.entry_price, np.float64), ed, xd, dc,
+                           float(cost.side_cost), float(cost.fee_rate), nd)
+    return days, out
+
+
+def daily_returns_matrix(p: Prepared, results: list[TradeArrays], start, end, *, accounting: str = "realized",
+                         cost: CostModel | None = None) -> tuple[pd.DatetimeIndex, np.ndarray]:
     """격자 결과 → (일자, [n_combo, n_days] 일간 수익률). 청산일 기준 복리.
-    부분 사이징·사다리 결과는 행별 자산 기여 c (ENGINE_SPEC "부분 사이징·분할 매수")."""
+    부분 사이징·사다리 결과는 행별 자산 기여 c (ENGINE_SPEC "부분 사이징·분할 매수").
+    accounting='mtm' (PLAN D18): 평가 기준 일간 수익 (`mtm_daily_matrix`, cost 필요 — 청산 평가에 쓰는 비용 모델)."""
+    if accounting == "mtm":
+        if cost is None:
+            raise ValueError("accounting='mtm' needs the cost model (liquidation marks)")
+        return mtm_daily_matrix(p, results, start, end, cost)
+    if accounting != "realized":
+        raise ValueError(f"accounting must be one of {ACCOUNTING_MODES}, got {accounting!r}")
     s, e, _, _ = p.bounds(start, end)
     days = day_index(s, e)
     out = np.ones((len(results), len(days)))
@@ -1005,7 +1097,8 @@ def daily_returns_matrix(p: Prepared, results: list[TradeArrays], start, end
 
 
 def to_result(p: Prepared, tr: TradeArrays, cost: CostModel, start, end,
-              spec_id: str = "", logic_hash: str = "") -> BacktestResult:
+              spec_id: str = "", logic_hash: str = "", *, accounting: str = "realized") -> BacktestResult:
+    """accounting='mtm' (PLAN D18): daily_returns = 평가 기준, daily_realized = 실현 기준."""
     s, e, _, _ = p.bounds(start, end)
     cols = {
         "entry_time": p.index[tr.entry_idx],
@@ -1025,7 +1118,11 @@ def to_result(p: Prepared, tr: TradeArrays, cost: CostModel, start, end,
     trades = pd.DataFrame(cols, columns=names).astype({"exit_reason": "str"})
     days, mat = daily_returns_matrix(p, [tr], s, e)
     daily = pd.Series(mat[0], index=days, name="ret")
-    return BacktestResult(spec_id, logic_hash, cost, s, e, trades, daily)
+    if accounting == "realized":
+        return BacktestResult(spec_id, logic_hash, cost, s, e, trades, daily)
+    _, mm = daily_returns_matrix(p, [tr], s, e, accounting=accounting, cost=cost)
+    return BacktestResult(spec_id, logic_hash, cost, s, e, trades, pd.Series(mm[0], index=days, name="ret"),
+                          accounting=accounting, daily_realized=daily)
 
 
 def run_fast_signals(m1: pd.DataFrame, entry_ok: pd.Series, exit_sig: pd.Series | None,
@@ -1035,9 +1132,10 @@ def run_fast_signals(m1: pd.DataFrame, entry_ok: pd.Series, exit_sig: pd.Series 
                      sl_atr: float | None = None, tp_atr: float | None = None,
                      execution: ExecutionSpec | None = None,
                      fill: LimitFillModel | None = None, sizing: SizingSpec | None = None,
-                     ladder: LadderSpec | None = None) -> BacktestResult:
+                     ladder: LadderSpec | None = None, accounting: str = "realized") -> BacktestResult:
     """`reference.run_reference_signals` 와 같은 인자. ATR 모드: sl_atr/tp_atr + atr(봉별 ATR).
-    execution: 지정가 집행 (ATR 오프셋이면 atr 필요). fill: 지정가 체결 규칙. sizing/ladder: 부분 사이징·사다리."""
+    execution: 지정가 집행 (ATR 오프셋이면 atr 필요). fill: 지정가 체결 규칙. sizing/ladder: 부분 사이징·사다리.
+    accounting: 일간 수익 회계 'realized' | 'mtm' (PLAN D18, `to_result`)."""
     if (sl_atr is None) != (tp_atr is None):
         raise ValueError("sl_atr and tp_atr must be given together")
     execution = execution or MARKET
@@ -1055,13 +1153,14 @@ def run_fast_signals(m1: pd.DataFrame, entry_ok: pd.Series, exit_sig: pd.Series 
         if frac is not None:   # 고정 % 청산 + ATR 오프셋/ATR 간격: 그 비율만
             p = replace(p, atr_frac={DEFAULT_ATR_BARS: frac})
         tr = _sim(p, sl_pct, tp_pct, max_hold_min, cost, si, ei, None, execution, fill, sizing=sizing, ladder=ladder)
-    return to_result(p, tr, cost, start, end, spec_id, logic_hash)
+    return to_result(p, tr, cost, start, end, spec_id, logic_hash, accounting=accounting)
 
 
 def run_fast(spec: StrategySpec, m1: pd.DataFrame, cost: CostModel, start, end,
              ctx: Context | None = None, registry: Registry = REGISTRY,
-             fill: LimitFillModel | None = None) -> BacktestResult:
-    """fill: 지정가 체결 규칙 (spec.execution 이 지정가일 때만 쓰임; 기본 LIMIT_FILL_DEFAULT)."""
+             fill: LimitFillModel | None = None, accounting: str = "realized") -> BacktestResult:
+    """fill: 지정가 체결 규칙 (spec.execution 이 지정가일 때만 쓰임; 기본 LIMIT_FILL_DEFAULT).
+    accounting: 일간 수익 회계 'realized'(기본) | 'mtm' (PLAN D18)."""
     bars, entry_ok, exit_sig = build_signals(spec, m1, ctx, registry)
     ex = spec.exit
     atr = atr_series(bars, ex.atr_bars) if spec.needs_atr else None
@@ -1069,4 +1168,4 @@ def run_fast(spec: StrategySpec, m1: pd.DataFrame, cost: CostModel, start, end,
                             ex.max_hold_min, cost, start, end, spec.id, spec.logic_hash(),
                             timeframe=spec.timeframe, atr=atr, sl_atr=ex.stop_loss_atr,
                             tp_atr=ex.take_profit_atr, execution=spec.execution, fill=fill,
-                            sizing=spec.sizing, ladder=spec.ladder)
+                            sizing=spec.sizing, ladder=spec.ladder, accounting=accounting)

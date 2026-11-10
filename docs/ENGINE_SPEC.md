@@ -202,7 +202,10 @@ execution:            # 생략 = 시장가 (기존)
 - 페이퍼 트레이더(`paper/trader.py`, 2026-11-10 반영): (1) 엔진 생성에 `execution=spec.execution`,
   `fill=LIMIT_FILL_DEFAULT`; (2) 서비스 `limit_fill="queue"`(CLI `--limit-fill queue`)면 `QueueFillOracle` 을 꽂고 수신
   체결·호가를 `add_trade/add_book` 으로 넣는다(기본 "bar" = 1분봉 관통 규칙 = 백테스트와 같은 판정);
-  (3) `on_bar_1m(..., bar.volume, tick)` — tick = 그 UTC 일자(+ 직전 일) 실시간 1분봉 종가에서 `infer_ticks`;
+  (3) `on_bar_1m(..., bar.volume, tick)` — tick = **거래소 가격대별 호가 단위 정책**(2026-11-10~: `data.ticks`, 캐시
+  `config/ticks.yaml` = 코인원 공개 API `range_units`)에서 그 봉 시가의 단위. 정책표가 없는 거래소(1분봉 이력 exchange 없음)나
+  `PaperTrader(tick_source="infer")` 면 그 UTC 일자(+ 직전 일) 실시간 1분봉 종가에서 `infer_ticks`(백테스트와 같은 추정).
+  백테스트는 데이터 추정 유지(과거 표가 달랐다 — research/reports/ticks_policy_check_20261110.md);
   (4) `_on_fill` 은 지정가 체결에서 호가 대입 비교를 건너뛰고 `maker: true` 로 기록; (5) 상태(STATE_VERSION 2, 1 도 읽음)에
   `engine.order`·`position.tp_order`·`position.maker`; (6) 리스크 강제 청산·사람 정지 시 걸린 진입 지정가 취소
   (`fills.jsonl` `order_cancel`).
@@ -318,6 +321,12 @@ ladder:                # 생략 = 단일 진입 (기존). sizing 과 함께 쓸 
   최대 손실을 묶지만) **평가 기준(MTM) 일간 수익**을 따로 계산해 꼬리 위험에 보고한다: `sizing.mtm_daily_returns` = 보유
   분할을 매 UTC 일 종가에 청산했다고 본 자산(`CostModel.sell_fill` + 수수료)의 일간 변화(실현 손익은 청산일에) —
   견고성 'tail' 검사·리포트의 MTM 최악 일/주·CVaR·MDD.
+  **관문 회계 (PLAN D18, 사용자 승인 2026-11-10)**: camp-000025 부터 등록되는 캠페인은 MTM 일간 수익이 관문 입력이다
+  (`gates.yaml evaluation.daily_returns: mtm`, 등록 시점 값을 매니페스트 `daily_returns` 에 고정). 빠른 엔진
+  `fast.mtm_daily_matrix` / `daily_returns_matrix(…, accounting="mtm", cost=)` / `to_result|run_fast(…, accounting="mtm")`
+  (`BacktestResult.daily_returns` = MTM, `daily_realized` = 실현)는 `sizing.mtm_daily_returns` 와 같은 식(시험: 1e-13).
+  평가 = 진입일 ~ 청산 전날 종가, 청산일은 실현; 보유가 없는 날의 자산·기간 총수익은 실현 기준과 같다.
+  몬테카를로 MDD 는 포지션 손익과 함께 포지션 중간 최악 평가 저점(`sizing.position_mtm_troughs`)을 재표본한다.
 - 독립 포지션 수 `n_positions` = 사다리 수(기본 = 거래 수): G1 표본, G2 귀무 거래 수 맞춤, 몬테카를로 MDD 의 재표본 단위
   (포지션 손익 = Σ_g w·r, `sizing.position_returns`).
 - 노출: `exposure_time` = Σ weight × 보유 분 / 구간 분(자본 가중 평균 보유 비중), `max_inventory` = 최대 보유 비중(Σ 보유

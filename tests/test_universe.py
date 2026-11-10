@@ -17,7 +17,8 @@ from btc_quant.data.store import write_ohlcv
 from btc_quant.evaluation import gates as G
 from btc_quant.evaluation import metrics as M
 from btc_quant.research import universe as U
-from btc_quant.research.campaign import (CampaignError, CampaignTemplate, ResearchEnv, get_cost, load_segment,
+from btc_quant.research.campaign import (CampaignError, CampaignTemplate, ResearchEnv, get_sleeve_cost,
+                                         load_segment,
                                          run_campaign, run_screen)
 from btc_quant.research.pipeline import public_pipeline, run_pipeline
 from btc_quant.research.report import render
@@ -155,8 +156,9 @@ def test_pooled_campaign_equals_mean_of_sleeves(ucamp):
     lh = cr.ranked()["logic_hash"].iloc[0]
     spec = cr.specs[lh]
     assert spec.universe == tuple(UNI)
-    cost = get_cost("coinone_conservative")
-    sleeves = {sym: fast.run_fast(spec, load_segment(env, "dev", "coinone", sym, "1m"), cost, s, e) for sym in UNI}
+    # 슬리브 비용 = 자산별 모델 `<name>@<SYM>` (PLAN D17; BTC-KRW 는 기본 모델)
+    sleeves = {sym: fast.run_fast(spec, load_segment(env, "dev", "coinone", sym, "1m"),
+                                  get_sleeve_cost("coinone_conservative", sym), s, e) for sym in UNI}
     port = np.mean([r.daily_returns.to_numpy() for r in sleeves.values()], axis=0)
     np.testing.assert_allclose(cr.returns[lh].to_numpy(), port, rtol=0, atol=1e-15)
     row = cr.primary().loc[lh]
@@ -284,7 +286,7 @@ def test_forward_universe(tmp_path):
     rets = []
     for sym in UNI:
         m1 = prepare_m1(env.data.read_range("2024-04-01", end, "coinone", sym, "1m"), "coinone")
-        rets.append(fast.run_fast(spec, m1, get_cost("coinone_conservative"), eval_start, end).daily_returns)
+        rets.append(fast.run_fast(spec, m1, get_sleeve_cost("coinone_conservative", sym), eval_start, end).daily_returns)
     assert r["net_return"] == pytest.approx(float(np.prod(1 + np.mean(rets, axis=0)) - 1), abs=1e-12)
 
 
@@ -417,8 +419,12 @@ def test_sleeve_cost_lookup(monkeypatch):
     """자산별 비용 모델 `<name>@<SYM>` 이 레지스트리에 있으면 그 슬리브에 쓰고, 없으면 같은 모델 (BTC 는 항상 같은 모델)."""
     from btc_quant.research import campaign as C
     doc = C._cost_doc()
-    assert C.sleeve_cost_name("coinone_conservative", "XRP-KRW") == "coinone_conservative"
-    fake = {**doc, "models": {**doc["models"], "coinone_conservative@XRP-KRW": doc["models"]["coinone_conservative"],
+    # 레지스트리에는 XRP·ETH 자산별 모델이 있다 (PLAN D17, 2026-11-10)
+    assert C.sleeve_cost_name("coinone_conservative", "XRP-KRW") == "coinone_conservative@XRP-KRW"
+    base = {n: e for n, e in doc["models"].items() if "@" not in n}
+    monkeypatch.setattr(C, "_cost_doc", lambda root=None: {**doc, "models": base})
+    assert C.sleeve_cost_name("coinone_conservative", "XRP-KRW") == "coinone_conservative"      # 없으면 같은 모델
+    fake = {**doc, "models": {**base, "coinone_conservative@XRP-KRW": doc["models"]["coinone_conservative"],
                               "coinone_conservative@BTC-KRW": doc["models"]["coinone_conservative"]}}
     monkeypatch.setattr(C, "_cost_doc", lambda root=None: fake)
     assert C.sleeve_cost_name("coinone_conservative", "XRP-KRW") == "coinone_conservative@XRP-KRW"

@@ -26,6 +26,9 @@
 | D14 | 롱 온리 국면 의존 평가 | **초안 — 사람 승인 대기 (관문 변경은 비활성)**. ① 모든 백테스트·리포트에 BTC 매수보유(B&H) 기준 지표(노출, B&H 대비 수익·Sharpe·MDD, 노출 맞춤 B&H, 상승/하락 capture, 최악 B&H 낙폭 구간) — 정보 전용, 반영됨. ② 노출 인식 G4/G6 변형(`gates.yaml exposure_aware`, **enabled: false**) — 켜기는 class ② 기준 변경(합성 국면 보정 근거만, 다음 캠페인부터, 이미 Val 을 쓴 스펙은 구제 불가). 합성 보정 결과 검정력 증가 없음 → **제안 없음**(§10c). ③ 사이드 계산 시도 기록 `log_exploration` — 반영됨 | 11-10 |
 | D15 | 거래 자산 유니버스 | **고정 3자산: 코인원 KRW-BTC·XRP·ETH** (코인원 KRW 비스테이블코인 24h 거래대금 상위 3, 자산마다 업비트가 참조·보조 거래소). 전략 스펙 하나를 선언된 유니버스(`universe: [BTC-KRW, XRP-KRW, ETH-KRW]`)의 **모든 자산에 똑같이** 적용하고 **하나의 풀링 전략**으로 평가 — 파라미터는 늘지 않음(추가 자유도 0, 원장 시도 1회), 거래·증거만 약 3배. 자본 = 자산별 **동일 고정 슬리브 1/3**, 자산별 독립 포지션(최대 1개·롱 온리 그대로), 포트폴리오 일간 수익 = 슬리브 일간 수익의 평균. 관문 수치·의미 불변(포트폴리오 일간 수익·풀링 거래로 판정, G1 = 자산 합계), 자산별 결과는 보고 전용. 기본 유니버스 [BTC-KRW] 는 해시·동작이 이전과 같음. 상세 §10d | 11-10 |
 | D16 | 부분 사이징·분할 매수 사다리 | **사용자 요청("떨어지면 일부 사고, 더 떨어지면 또 일부 산다") — 반영**. ① `sizing.entry_fraction`(0<f≤1, 진입마다 슬리브 자산의 f, 나머지 현금 수익 0). ② `ladder`: N=2~5 **동일·고정 크기** 분할(max_exposure/N, 첫 체결 시 슬리브 자산 기준 — 비중 맞춤 없음), 첫 체결가 아래 bp 또는 ATR 간격, 분할 주문 = 시장가 트리거(보수적 1 tick 관통, min(시가, 단 가격)) 또는 지정가, 청산 = 분할별 익절(그리드) 또는 평균단가 익절(전량). **공동 손절 필수**(마지막 단 × (1 − 손절폭), 전량 시장가), 만기 = 첫 분할 + 최대보유, 완전 청산 + 쿨다운 전 새 사다리 없음. ③ **max_exposure 기본 1.0 = 자산 슬리브당 100%(3자산이면 모든 분할 체결 시 총자본의 1/3) — 사용자 결정(채팅 2026-11-10)**, class ③ 상한 `risk_prefs.max_exposure_per_sleeve`(config/params.yaml, added_by user). ④ 꼬리 위험 지표(최악 일·주, CVaR 5%, 최대 보유 비중·그 지속, 왜도, B&H 최악 낙폭 구간 수익, Dev 2022 약세장) 보고 + 견고성 'tail' 검사 **정보 전용**(`gates.yaml robustness.tail_enabled: false`, 켜기는 class ② + 사람 승인). 관문 수치 불변: G1 = 독립 포지션(사다리) 수, G2 귀무 = 같은 사다리 구조 + 무작위 첫 진입, 낙폭 관문은 실제 사이징 기준(크기 의존이 의도), 엣지 관문(G2·G5)은 크기 불변. 기본값(전액 단일 진입)은 해시·결과 불변. 상세 docs/ENGINE_SPEC.md "부분 사이징·분할 매수", §10e | 11-10 |
+| D17 | 자산별 비용 모델 | **사용자 명시 승인 (채팅 2026-11-10)**. XRP·ETH 슬리브는 자산별 비용 모델 `<name>@<SYM>`(config/costs.yaml, class ①)을 쓴다 — 호가 단위·스프레드가 BTC 와 다름(15분 REST 호가 표본: 코인원 편도 중앙값/p99 BTC 0.49/1.38, XRP 3.36/3.37(스프레드 6.7bp = 1원 tick), ETH 1.74/5.20bp). 코인원 왕복 XRP **8 / 10 / 14bp**, ETH **5 / 8 / 14bp**(수수료 0, 스프레드 = 측정 중앙값, 나머지 slip), 업비트(등급) XRP 18.7 / 22.7 / 39.4, ETH 15.5 / 19.5 / 36.4bp(수수료 0.05% + 측정 스프레드(stress = p99) + 업비트 BTC 프리셋 slip). BTC 모델 불변. 캠페인·파이프라인(G2·G6·등급·견고성)·신호 선별·전진·페이퍼 모두 사용. 근거 research/reports/params_costs_per_asset_20261110.md, 기록 research/param_approvals/pp-20261110-per-asset-cost-models-* | 11-10 |
+| D18 | 관문 일간 수익 = MTM | **사용자 명시 승인 (채팅 2026-11-10), class ② 엄격화**. `gates.yaml evaluation.daily_returns: mtm` — 보유 분할을 매 UTC 일 종가에 청산 평가한 일간 수익으로 G2~G6·몬테카를로 MDD95(포지션 중간 MTM 저점 포함)·견고성·§7 한도를 판정. **모든 전략**(사다리는 필수, 단일 진입도 전향적으로). **다음 캠페인(camp-000025)부터** — 그 전에 등록된 캠페인은 realized 그대로(매니페스트 `daily_returns` 고정, 재계산 불변). 근거 research/reports/criteria_mtm_and_ladder_tail_20261110.md | 11-10 |
+| D19 | 사다리 스펙 꼬리 검사 판정 | **사용자 명시 승인 (채팅 2026-11-10), class ② 엄격화**. `robustness.tail_enabled: ladder` — 분할 매수 사다리 스펙은 견고성 'tail' 검사가 판정에 쓰이고(실패 = 견고성 실패 → candidate 에서 멈춤), 그 밖의 스펙은 정보 전용 그대로. 기준은 기존 기본값(MTM 최악 일 10%, 최악 주 15%, CVaR5 3%, 최대 보유 연속 30일, 2022 총수익 ≥ −20%). 다음 캠페인(camp-000025)부터 | 11-10 |
 | D8 | 비용 등급 | 모든 후보를 코인원 0%와 업비트 비용 양쪽에서 평가. **A등급**: 업비트 비용에서도 관문 통과(이벤트 종료에 강함) / **B등급**: 0%에서만 통과(이벤트 종료 시 자동 정지). 성과가 비슷하면 A 우선 | 11-09 |
 
 ### Phase 0 결과 (1년 데이터 기준)
@@ -165,6 +168,8 @@ exit:
 
 G8 통과 → Promotion Review → **사람 승인** → Active.
 
+관문 일간 수익 회계(D18): camp-000025 부터 모든 관문 입력 일간 수익은 **평가 기준(MTM)** — 보유 분할을 매 UTC 일 종가에 청산 평가(종가 × (1 − 편도 비용) × (1 − 수수료)). 실현 기준(청산일 귀속)은 보유 중 평가손을 숨긴다(떨어지는 칼 사다리 합성 예: 실현 MDD 0% vs MTM 37%). 몬테카를로 MDD95 는 포지션 재표본에 포지션 중간 최악 평가 저점을 함께 넣는다. 그 전 캠페인은 등록 시점 설정(realized) 그대로.
+
 관문과 크기(D16): 모든 관문은 **실제 사이징**의 포트폴리오 일간 수익으로 판정한다. 낙폭 관문(G6 MDD·MC MDD95·§7)은 크기에 따라 달라지는 것이 의도(작게 운용하면 낙폭도 작다)이고, 엣지 관문(G2 같은 사이징 귀무 대비 백분위, G5 DSR/PBO)은 크기에 거의 불변이라 크기를 줄여 통과할 수 없다. G1 거래 수 = 독립 포지션(사다리) 수.
 
 ### 5.3 잠금 구간 규칙 (D4: 후보마다 1회)
@@ -206,7 +211,7 @@ Draft → Candidate → Validated → Challenger(페이퍼) → Promotion Review
 | 수동 | 킬스위치 명령 / 텔레그램 | 즉시 중지 |
 
 - 같은 한도를 백테스트에도 적용해 실운용과 비교 가능하게 한다.
-- 분할 매수 사다리(D16): 몬테카를로 MDD 는 포지션(사다리)당 슬리브 손익을 재표본(같은 사다리 분할은 함께 움직임), 거래 폭주 한도의 거래 수는 분할 체결 수. 노출 상한 = class ③ `risk_prefs.max_exposure_per_sleeve`(기본 1.0, 사용자 결정 2026-11-10).
+- 분할 매수 사다리(D16): 몬테카를로 MDD 는 포지션(사다리)당 슬리브 손익을 재표본(같은 사다리 분할은 함께 움직임; D18 이후 포지션 중간 MTM 저점 포함, §7 한도의 Val 일간 수익도 MTM), 거래 폭주 한도의 거래 수는 분할 체결 수. 노출 상한 = class ③ `risk_prefs.max_exposure_per_sleeve`(기본 1.0, 사용자 결정 2026-11-10).
 - 연속 손실 중지는 두지 않는다(정상적인 연패에 반응해 전략을 왜곡).
 
 ---
@@ -323,11 +328,19 @@ Sharpe ≤ 0 이면 떨어뜨린다. **거버넌스**: 최근 한 후보가 G6 �
 |---|---|---|
 | 스펙 | `sizing.entry_fraction` · `ladder{tranches, step_bp 또는 step_atr, order, exit, max_exposure}` — 기본값이면 직렬화·해시에서 생략 | `strategy.spec.SizingSpec/LadderSpec` |
 | 엔진 | 빠른(numba `_core_l`)·기준 엔진 동일 의미론, 차등 320+12 사례 비트 단위 일치 | `backtest.fast`, `backtest.reference`, `backtest.sizing` |
-| 회계 | 슬리브 자산 기준 실현 일간 수익(청산일 귀속의 일반화, 기본값 비트 단위 동일) + 평가 기준(MTM) 일간 수익은 꼬리 위험 보고용 | `sizing.equity_returns`, `sizing.mtm_daily_returns` |
+| 회계 | 슬리브 자산 기준 실현 일간 수익(청산일 귀속의 일반화, 기본값 비트 단위 동일) + 평가 기준(MTM) 일간 수익 — D18 이후 캠페인은 MTM 이 관문 입력 | `sizing.equity_returns`, `sizing.mtm_daily_returns`, `fast.mtm_daily_matrix` |
 | 연구 | 템플릿 `sizing`/`ladder` 격자(작게: 분할 수 ≤ 2값, 간격 ≤ 3값, 동일 비중 고정), 파라미터 수 = 스펙(+2) + 격자 모드(+1), MAX_PARAMS 8 은 그대로(넘으면 거부·보고). G2 귀무 = 같은 사다리 + 무작위 첫 진입(포지션 수 맞춤), G3 인접 = 분할 수·간격 한 칸 | `research.campaign`, `research.nulls`, `research.pipeline` |
-| 꼬리 위험 | 지표(정보 전용) + 견고성 `tail`(기본 정보 전용, `tail_enabled: false`) — 리포트·MCP `get_campaign_report.tail_risk_dev` | `evaluation.metrics.tail_metrics`, `research.robustness.check_tail` |
+| 꼬리 위험 | 지표(정보 전용) + 견고성 `tail` — D19 이후(camp-000025~) **사다리 스펙은 판정**(`tail_enabled: ladder`), 그 밖은 정보 전용 — 리포트·MCP `get_campaign_report.tail_risk_dev` | `evaluation.metrics.tail_metrics`, `research.robustness.check_tail` |
 | 페이퍼 | 같은 엔진 API, 분할 주문 여러 개·대기열 오라클, 상태 v3, 노출 상한 검증 | `paper.trader` |
 | 노출 상한 | `max_exposure` 기본 1.0 / 슬리브 (사용자 결정 2026-11-10), class ③ `risk_prefs.max_exposure_per_sleeve` | `params.max_exposure_cap` |
+
+## 10f. D17~D19 + 페이퍼 호가 단위 (2026-11-10, 사용자 명시 승인)
+| 항목 | 규칙 | 구현·기록 |
+|---|---|---|
+| D17 자산별 비용 | `<name>@<SYM>` 모델이 있으면 그 슬리브에, 없으면 기본 모델(BTC-KRW 는 항상 기본). costs.yaml 검증 = 거래소 × 심볼마다 base ≤ conservative ≤ stress. 새 모델 생성은 사람 승인 제안(`create`)만, 보정(calibrate)은 기본 모델만 | `params.costs`, `research.campaign.sleeve_cost_name`; `tests/test_costs_per_asset.py` |
+| D18 MTM 관문 | `evaluation.daily_returns` (class ②) — 캠페인 등록 시점 값(`gate_config_for_campaign`)을 매니페스트 `daily_returns` 에 고정, 파이프라인은 매니페스트를 따름(없으면 realized). 캠페인 수익 행렬·결과표·G2 귀무·G6·MC(포지션 중간 저점)·견고성·§7 | `fast.mtm_daily_matrix`, `sizing.position_mtm_troughs`, `montecarlo.bootstrap_mdd(troughs=)`; `tests/test_mtm_gates.py` |
+| D19 꼬리 검사 | `robustness.tail_enabled: false \| ladder \| true` — ladder = 사다리 스펙만 판정 | `robustness.tail_enabled_for` |
+| 페이퍼 호가 단위 | 지정가·사다리 주문의 호가 단위 = 거래소 가격대별 정책표(코인원 공개 API `range_units` 캐시 `config/ticks.yaml`, class ① `ticks.coinone.KRW`). 백테스트는 데이터 추정 유지(과거 표가 달랐음: 2024-09-29 이전 BTC 1,000원 등). Dev 점검: 현재 표 시기(2024-09-30~) 불일치는 ETH 500만 원 경계일 3일뿐 | `data.ticks`, `PaperTrader._tick`; research/reports/ticks_policy_check_20261110.md |
 
 ## 11. 미결 항목
 - **잠금 구간 사전 노출 (공개)**: Phase 0 비용 분석(2026-11-09)은 업비트 2025-11~2026-11 데이터를 사용해 잠금 구간(2026-05~11)의 *기술통계*(시간대별 변동폭, 변동성 국면, 바이낸스 선행 상관)를 이미 보았다. 전략 수익률은 보지 않았지만, `session_kst`·`vol_regime`·`binance_*` 블록 가설은 이 관찰에서 나왔으므로 해당 블록을 쓰는 후보의 잠금 평가는 약간 낙관 편향될 수 있다. 대응: (1) 이후 모든 분석 CLI는 DataAccess를 경유(기본 Dev~Val), (2) 이 블록 계열 후보는 리포트에 노출 사실을 표기, (3) 최종 판정은 노출이 전혀 없는 Forward(페이퍼) 구간이 담당.

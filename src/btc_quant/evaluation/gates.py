@@ -72,6 +72,21 @@ def check_g3(selected_sharpe: float, neighbor_sharpes, cfg: dict | None = None
                 "required": need, "n_neighbors": int(nb.size)}
 
 
+DAILY_RETURN_MODES = ("realized", "mtm")
+
+
+def daily_returns_mode(cfg: dict | None = None) -> str:
+    """관문용 일간 수익 회계 (gates.yaml `evaluation.daily_returns`, class ②, PLAN D18).
+    'realized' = 청산일 귀속 실현 기준(기존), 'mtm' = 보유 분할을 매 UTC 일 종가에 청산 평가(평가 기준).
+    항목이 없으면 'realized' (D18 이전 설정·임시 저장소). 캠페인은 등록 시점 설정(`gate_config_for_campaign`)으로
+    정하고 매니페스트 `daily_returns` 에 남긴다 — 파이프라인은 매니페스트 값을 따른다(재현성)."""
+    c = cfg if cfg is not None else load_gate_config()
+    v = str(((c or {}).get("evaluation") or {}).get("daily_returns") or "realized")
+    if v not in DAILY_RETURN_MODES:
+        raise ValueError(f"evaluation.daily_returns must be one of {DAILY_RETURN_MODES}, got {v!r}")
+    return v
+
+
 def exposure_aware_cfg(cfg: dict | None = None) -> dict:
     """gates.yaml exposure_aware (없으면 꺼짐). PLAN D14 초안 — 기본 OFF."""
     c = (cfg or load_gate_config()).get("exposure_aware") or {}

@@ -1,5 +1,4 @@
 """params.calibrate — 비대칭 규칙, 표본 부족 거부, 잠정 처리, 호가 파일 적재 (합성 데이터, 네트워크 없음)."""
-import shutil
 from pathlib import Path
 
 import numpy as np
@@ -14,11 +13,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def make_root(tmp_path: Path) -> Path:
-    (tmp_path / "config").mkdir()
-    for f in ("gates.yaml", "splits.yaml", "exchanges.yaml", "params.yaml"):
-        shutil.copy(ROOT / "config" / f, tmp_path / "config" / f)
-    C.ensure_costs_file(tmp_path)          # 프리셋과 같은 version 1
-    return tmp_path
+    from _config_root import make_config_root
+    return make_config_root(tmp_path)      # 프리셋과 같은 version 1 (+ 자산별 모델·ticks.yaml — 카탈로그 일치)
 
 
 def samples(level_bps: float, spread_bps: float, days: int, hours_per_day: int = 24, per_hour: int = 80,

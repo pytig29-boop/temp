@@ -167,7 +167,17 @@ def render(campaign_id: str, root: str | Path | None = None, env: ResearchEnv | 
     L.append(f"- Exits ({tpl.exit_mode} mode{', ATR window ' + str(tpl.atr_bars) + ' bars' if tpl.exit_mode == 'atr' else ''}): "
              f"{tpl.exits} → {len(tpl.exit_combos())} exit variants")
     L.append(f"- Costs: primary `{tpl.costs['primary']}`, grade `{tpl.costs['grade']}`, "
-             f"stress `{tpl.costs['stress']}` / `{tpl.costs['grade_stress']}`")
+             f"stress `{tpl.costs['stress']}` / `{tpl.costs['grade_stress']}`"
+             + (" — per-asset models where defined (PLAN D17): "
+                + "; ".join(f"{sym}: {', '.join(sorted(set(v.values())))}"
+                            for sym, v in ((man.get("sleeves") or {}).get("costs") or {}).items())
+                if (man.get("sleeves") or {}).get("costs") else ""))
+    acct = man.get("daily_returns") or "realized"
+    L.append("- Daily returns for gates (PLAN D18): "
+             + ("**mark-to-market** — open inventory marked at each UTC day close (liquidation value incl. costs); "
+                "G2–G6, Monte Carlo MDD95 (with intra-position MTM troughs), robustness and §7 limits use it"
+                if acct == "mtm" else
+                "**realized** — exit-day attribution (campaign registered before D18, or setting realized)"))
     L.append(f"- Specs: **{man['n_specs']}** (template budget {tpl.budget}); runs recorded: {man['n_runs']}; "
              f"runtime {man['runtime_sec']}s\n")
 

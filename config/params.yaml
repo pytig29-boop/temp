@@ -85,6 +85,126 @@ params:
   last_updated: '2026-11-09'
   owner: auto
   history: []
+- key: costs.coinone_base@XRP-KRW
+  class: 1
+  source: costs:coinone_base@XRP-KRW
+  rationale: coinone XRP-KRW 슬리브 기본 비용 (중앙값 수준) — 자산별 비용 모델 (PLAN D17; 호가 단위·스프레드가 BTC 와 다름)
+  evidence: research/reports/params_costs_per_asset_20261110.md · config/costs.yaml (버전 이력)
+  version: 1
+  last_updated: '2026-11-10'
+  owner: auto
+  history: []
+  note: '신설 2026-11-10 — provenance: user (explicit chat approval 2026-11-10), proposal pp-20261110-per-asset-cost-models-xrp-krw-eth-krw-d1-3e9607'
+- key: costs.coinone_conservative@XRP-KRW
+  class: 1
+  source: costs:coinone_conservative@XRP-KRW
+  rationale: coinone XRP-KRW 슬리브 보수 비용 (primary/grade 지표 비용) — 자산별 비용 모델 (PLAN D17; 호가 단위·스프레드가 BTC 와 다름)
+  evidence: research/reports/params_costs_per_asset_20261110.md · config/costs.yaml (버전 이력)
+  version: 1
+  last_updated: '2026-11-10'
+  owner: auto
+  history: []
+  note: '신설 2026-11-10 — provenance: user (explicit chat approval 2026-11-10), proposal pp-20261110-per-asset-cost-models-xrp-krw-eth-krw-d1-3e9607'
+- key: costs.coinone_stress@XRP-KRW
+  class: 1
+  source: costs:coinone_stress@XRP-KRW
+  rationale: coinone XRP-KRW 슬리브 stress 비용 (G6 stress) — 자산별 비용 모델 (PLAN D17; 호가 단위·스프레드가 BTC 와 다름)
+  evidence: research/reports/params_costs_per_asset_20261110.md · config/costs.yaml (버전 이력)
+  version: 1
+  last_updated: '2026-11-10'
+  owner: auto
+  history: []
+  note: '신설 2026-11-10 — provenance: user (explicit chat approval 2026-11-10), proposal pp-20261110-per-asset-cost-models-xrp-krw-eth-krw-d1-3e9607'
+- key: costs.coinone_base@ETH-KRW
+  class: 1
+  source: costs:coinone_base@ETH-KRW
+  rationale: coinone ETH-KRW 슬리브 기본 비용 (중앙값 수준) — 자산별 비용 모델 (PLAN D17; 호가 단위·스프레드가 BTC 와 다름)
+  evidence: research/reports/params_costs_per_asset_20261110.md · config/costs.yaml (버전 이력)
+  version: 1
+  last_updated: '2026-11-10'
+  owner: auto
+  history: []
+  note: '신설 2026-11-10 — provenance: user (explicit chat approval 2026-11-10), proposal pp-20261110-per-asset-cost-models-xrp-krw-eth-krw-d1-3e9607'
+- key: costs.coinone_conservative@ETH-KRW
+  class: 1
+  source: costs:coinone_conservative@ETH-KRW
+  rationale: coinone ETH-KRW 슬리브 보수 비용 (primary/grade 지표 비용) — 자산별 비용 모델 (PLAN D17; 호가 단위·스프레드가 BTC 와 다름)
+  evidence: research/reports/params_costs_per_asset_20261110.md · config/costs.yaml (버전 이력)
+  version: 1
+  last_updated: '2026-11-10'
+  owner: auto
+  history: []
+  note: '신설 2026-11-10 — provenance: user (explicit chat approval 2026-11-10), proposal pp-20261110-per-asset-cost-models-xrp-krw-eth-krw-d1-3e9607'
+- key: costs.coinone_stress@ETH-KRW
+  class: 1
+  source: costs:coinone_stress@ETH-KRW
+  rationale: coinone ETH-KRW 슬리브 stress 비용 (G6 stress) — 자산별 비용 모델 (PLAN D17; 호가 단위·스프레드가 BTC 와 다름)
+  evidence: research/reports/params_costs_per_asset_20261110.md · config/costs.yaml (버전 이력)
+  version: 1
+  last_updated: '2026-11-10'
+  owner: auto
+  history: []
+  note: '신설 2026-11-10 — provenance: user (explicit chat approval 2026-11-10), proposal pp-20261110-per-asset-cost-models-xrp-krw-eth-krw-d1-3e9607'
+- key: costs.upbit_base@XRP-KRW
+  class: 1
+  source: costs:upbit_base@XRP-KRW
+  rationale: upbit XRP-KRW 슬리브 기본 비용 (중앙값 수준) — 자산별 비용 모델 (PLAN D17; 호가 단위·스프레드가 BTC 와 다름)
+  evidence: research/reports/params_costs_per_asset_20261110.md · config/costs.yaml (버전 이력)
+  version: 1
+  last_updated: '2026-11-10'
+  owner: auto
+  history: []
+  note: '신설 2026-11-10 — provenance: user (explicit chat approval 2026-11-10), proposal pp-20261110-per-asset-cost-models-xrp-krw-eth-krw-d1-3e9607'
+- key: costs.upbit_conservative@XRP-KRW
+  class: 1
+  source: costs:upbit_conservative@XRP-KRW
+  rationale: upbit XRP-KRW 슬리브 보수 비용 (primary/grade 지표 비용) — 자산별 비용 모델 (PLAN D17; 호가 단위·스프레드가 BTC 와 다름)
+  evidence: research/reports/params_costs_per_asset_20261110.md · config/costs.yaml (버전 이력)
+  version: 1
+  last_updated: '2026-11-10'
+  owner: auto
+  history: []
+  note: '신설 2026-11-10 — provenance: user (explicit chat approval 2026-11-10), proposal pp-20261110-per-asset-cost-models-xrp-krw-eth-krw-d1-3e9607'
+- key: costs.upbit_stress@XRP-KRW
+  class: 1
+  source: costs:upbit_stress@XRP-KRW
+  rationale: upbit XRP-KRW 슬리브 stress 비용 (G6 stress) — 자산별 비용 모델 (PLAN D17; 호가 단위·스프레드가 BTC 와 다름)
+  evidence: research/reports/params_costs_per_asset_20261110.md · config/costs.yaml (버전 이력)
+  version: 1
+  last_updated: '2026-11-10'
+  owner: auto
+  history: []
+  note: '신설 2026-11-10 — provenance: user (explicit chat approval 2026-11-10), proposal pp-20261110-per-asset-cost-models-xrp-krw-eth-krw-d1-3e9607'
+- key: costs.upbit_base@ETH-KRW
+  class: 1
+  source: costs:upbit_base@ETH-KRW
+  rationale: upbit ETH-KRW 슬리브 기본 비용 (중앙값 수준) — 자산별 비용 모델 (PLAN D17; 호가 단위·스프레드가 BTC 와 다름)
+  evidence: research/reports/params_costs_per_asset_20261110.md · config/costs.yaml (버전 이력)
+  version: 1
+  last_updated: '2026-11-10'
+  owner: auto
+  history: []
+  note: '신설 2026-11-10 — provenance: user (explicit chat approval 2026-11-10), proposal pp-20261110-per-asset-cost-models-xrp-krw-eth-krw-d1-3e9607'
+- key: costs.upbit_conservative@ETH-KRW
+  class: 1
+  source: costs:upbit_conservative@ETH-KRW
+  rationale: upbit ETH-KRW 슬리브 보수 비용 (primary/grade 지표 비용) — 자산별 비용 모델 (PLAN D17; 호가 단위·스프레드가 BTC 와 다름)
+  evidence: research/reports/params_costs_per_asset_20261110.md · config/costs.yaml (버전 이력)
+  version: 1
+  last_updated: '2026-11-10'
+  owner: auto
+  history: []
+  note: '신설 2026-11-10 — provenance: user (explicit chat approval 2026-11-10), proposal pp-20261110-per-asset-cost-models-xrp-krw-eth-krw-d1-3e9607'
+- key: costs.upbit_stress@ETH-KRW
+  class: 1
+  source: costs:upbit_stress@ETH-KRW
+  rationale: upbit ETH-KRW 슬리브 stress 비용 (G6 stress) — 자산별 비용 모델 (PLAN D17; 호가 단위·스프레드가 BTC 와 다름)
+  evidence: research/reports/params_costs_per_asset_20261110.md · config/costs.yaml (버전 이력)
+  version: 1
+  last_updated: '2026-11-10'
+  owner: auto
+  history: []
+  note: '신설 2026-11-10 — provenance: user (explicit chat approval 2026-11-10), proposal pp-20261110-per-asset-cost-models-xrp-krw-eth-krw-d1-3e9607'
 - key: exchanges.coinone.taker_fee
   class: 1
   source: yaml:config/exchanges.yaml#coinone.taker_fee
@@ -105,6 +225,19 @@ params:
   last_updated: '2026-11-09'
   owner: auto
   history: []
+- key: ticks.coinone.KRW
+  class: 1
+  source: yaml:config/ticks.yaml#venues.coinone.KRW.version
+  value: 1
+  rationale: 코인원 KRW 시장 가격대별 호가 단위표 버전 (페이퍼 지정가·사다리 주문의 호가 단위; 백테스트는 데이터 추정 signals.infer_ticks 유지). 표 본문 = config/ticks.yaml
+    bands
+  evidence: 코인원 공개 API v2 GET /public/v2/range_units/KRW/{BTC,XRP,ETH} (2026-11-10 수신, 세 심볼 같은 표) · research/reports/ticks_policy_check_20261110.md
+  version: 1
+  last_updated: '2026-11-10'
+  owner: auto
+  history: []
+  note: '신설 2026-11-10 (페이퍼 호가 단위 = 거래소 정책; 엔지니어링 수정) — provenance: user (explicit chat approval 2026-11-10). 갱신:
+    python -m btc_quant.data.ticks refresh (표가 바뀌면 새 버전 + 이 항목 이력)'
 - key: risk.data_stall_minutes
   class: 1
   source: yaml:config/gates.yaml#risk.data_stall_minutes
@@ -756,8 +889,8 @@ params:
   class: 2
   source: yaml:config/gates.yaml#robustness.regime_mode
   value: pnl_share
-  rationale: '견고성 국면 검사 판정 방식 (pnl_share = 한 국면 손익 비중 > regime_max_pnl_share → 실패, 현재 동작). 대안 dominant_alpha
-    / informational 은 class ② 제안(합성 보정) + 사람 승인으로만'
+  rationale: 견고성 국면 검사 판정 방식 (pnl_share = 한 국면 손익 비중 > regime_max_pnl_share → 실패, 현재 동작). 대안 dominant_alpha / informational
+    은 class ② 제안(합성 보정) + 사람 승인으로만
   evidence: 옵션 추가(기본 = 기존 동작) · 합성 보정 research/reports/calibration_regime_check_20261110.md
   version: 1
   last_updated: '2026-11-10'
@@ -806,16 +939,47 @@ params:
   owner: human
   history: []
   note: 2026-11-09 코드 상수(research/robustness.py)에서 config/gates.yaml robustness 로 이관 — 값·버전 변경 없음
+- key: evaluation.daily_returns
+  class: 2
+  source: yaml:config/gates.yaml#evaluation.daily_returns
+  value: mtm
+  rationale: '관문용 일간 수익 회계: realized(청산일 귀속 실현 기준) | mtm(보유 분할을 매 UTC 일 종가에 청산 평가). G2~G6·몬테카를로 MDD95·견고성·§7 한도가
+    이 회계의 일간 수익으로 판정한다. 캠페인 등록 시점 값이 매니페스트 daily_returns 에 고정된다(재현성). 사다리의 ''떨어지는 칼'' 낙폭을 실현 기준은 숨긴다(PLAN D18)'
+  evidence: research/reports/criteria_mtm_and_ladder_tail_20261110.md
+  version: 2
+  last_updated: '2026-11-10'
+  owner: human
+  history:
+  - version: 2
+    previous: realized
+    value: mtm
+    date: '2026-11-10'
+    at: '2026-11-10T06:17:48+00:00'
+    by: human:user (explicit chat approval 2026-11-10)
+    proposal_id: pp-20261110-criterion-evaluation-daily-returns-reali-1888d6
+    reason: criterion evaluation.daily_returns realized -> mtm (D18)
+    applies_from_campaign: 25
+  note: '항목 신설 2026-11-10 (기존 동작 realized 를 명시화) — provenance: user (explicit chat approval 2026-11-10); mtm 전환은
+    research/param_approvals 의 승인 기록으로'
 - key: robustness.tail_enabled
   class: 2
   source: yaml:config/gates.yaml#robustness.tail_enabled
-  value: false
+  value: ladder
   rationale: 꼬리 위험 견고성 검사(tail)를 판정에 쓰는가 — 기본 false = 정보 전용(flag 만 기록, 관문 불변). 켜기는 class ② 변경 + 사람 승인
-  evidence: 신규 정보 전용 검사 기본값(관문 영향 없음, tail_enabled=false) — docs/ENGINE_SPEC.md "부분 사이징·분할 매수", PLAN D16
-  version: 1
+  evidence: research/reports/criteria_mtm_and_ladder_tail_20261110.md
+  version: 2
   last_updated: '2026-11-10'
   owner: human
-  history: []
+  history:
+  - version: 2
+    previous: false
+    value: ladder
+    date: '2026-11-10'
+    at: '2026-11-10T06:17:49+00:00'
+    by: human:user (explicit chat approval 2026-11-10)
+    proposal_id: pp-20261110-criterion-robustness-tail-enabled-false--72d1c1
+    reason: criterion robustness.tail_enabled false -> ladder (D19)
+    applies_from_campaign: 25
 - key: robustness.tail_max_worst_day
   class: 2
   source: yaml:config/gates.yaml#robustness.tail_max_worst_day
@@ -1243,8 +1407,8 @@ params:
   class: 3
   source: params:risk_prefs.max_exposure_per_sleeve
   value: 1.0
-  rationale: 슬리브(자산)당 최대 노출 상한 — 분할 매수 사다리 ladder.max_exposure 와 sizing.entry_fraction 은 이 값을
-    넘을 수 없다(캠페인 템플릿·페이퍼 검증). 1.0 = 모든 분할이 체결되면 그 자산 슬리브 100% (3자산 유니버스면 총자본의 1/3)
+  rationale: 슬리브(자산)당 최대 노출 상한 — 분할 매수 사다리 ladder.max_exposure 와 sizing.entry_fraction 은 이 값을 넘을 수 없다(캠페인 템플릿·페이퍼
+    검증). 1.0 = 모든 분할이 체결되면 그 자산 슬리브 100% (3자산 유니버스면 총자본의 1/3)
   evidence: 사용자 결정 (채팅 2026-11-10) — PLAN D16
   version: 1
   last_updated: '2026-11-10'

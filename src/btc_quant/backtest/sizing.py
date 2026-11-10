@@ -11,7 +11,8 @@
     일간 수익 = Π_{그날 청산된 분할} (1 + c) − 1   (기간 밖 청산은 마지막 날)
   c = 그 분할의 실현 손익(E_g · w · r) / 실현 직전 자산. 현금(1 − 보유 비중)은 수익 0.
   weight = 1, 사다리 = 거래마다 하나면 c = r (비트 단위) → 기존 일간 수익과 같다.
-보조(정보 전용) — 평가 기준(MTM) 일간 수익: 보유 분할을 UTC 일 종가에 청산했다고 보고(`CostModel.sell_fill` + 수수료)
+평가 기준(MTM) 일간 수익 (꼬리 위험 보고, 그리고 PLAN D18 이후 등록된 캠페인에서는 관문 일간 수익 — 빠른 엔진 `fast.mtm_daily_matrix`
+가 같은 식을 배열로 계산한다): 보유 분할을 UTC 일 종가에 청산했다고 보고(`CostModel.sell_fill` + 수수료)
 자산을 매일 평가한다(`mtm_daily_returns`). 꼬리 위험 지표(최악 일·주, CVaR)는 이것으로도 보고한다.
 """
 from __future__ import annotations
@@ -214,6 +215,62 @@ def mtm_daily_returns(trades: pd.DataFrame, close: pd.Series, days: pd.DatetimeI
     return pd.Series(eq / prev - 1.0, index=days, name="ret_mtm")
 
 
-__all__ = ["SIZED_COLUMNS", "equity_returns", "position_returns", "frame_equity_returns", "is_sized_frame",
+def _marks(trades: pd.DataFrame, close: pd.Series, days: pd.DatetimeIndex, cost=None):
+    """(진입일 슬롯, 청산일 슬롯, 일 종가) — `mtm_daily_returns` 와 같은 규칙."""
+    tz = days.tz
+    n = len(days)
+    et = _norm_times(trades["entry_time"], tz)
+    xt = _norm_times(trades["exit_time"], tz)
+    cl = pd.Series(close).dropna().astype(float)
+    if isinstance(cl.index, pd.DatetimeIndex):
+        cl.index = _norm_times(cl.index, tz)
+    day_close = cl.groupby(cl.index.floor("D")).last().reindex(days).ffill().to_numpy(float)
+    di = days.as_unit("ns").asi8
+    ed = np.clip(np.searchsorted(di, et.floor("D").as_unit("ns").asi8, side="left"), 0, n)
+    xd = np.clip(np.searchsorted(di, xt.floor("D").as_unit("ns").asi8, side="left"), 0, n - 1)
+    return ed, xd, day_close
+
+
+def position_mtm_troughs(trades: pd.DataFrame | None, close: pd.Series, days: pd.DatetimeIndex,
+                         cost=None) -> np.ndarray:
+    """포지션(사다리)별 보유 중 최악 평가 손익 (≤ 0, 포지션 시작 자산 대비) — `frame_position_returns` 와 같은 순서.
+    각 UTC 일 종가(포지션의 첫 진입일 ~ 마지막 청산 전날)에서: 이미 청산된 분할의 실현 w·r + 열린 분할의 w·평가손익
+    (`mtm_daily_returns` 와 같은 청산 평가). 몬테카를로 MTM 낙폭 입력(`montecarlo.bootstrap_mdd(troughs=…)`, PLAN D18)."""
+    if trades is None or not len(trades):
+        return np.zeros(0)
+    days = pd.DatetimeIndex(days)
+    if len(days) == 0:
+        return np.zeros(int(len(np.unique(trades["ladder"])) if is_sized_frame(trades) else len(trades)))
+    m = len(trades)
+    sized = is_sized_frame(trades)
+    w = trades["weight"].to_numpy(np.float64) if sized else np.ones(m)
+    lad = trades["ladder"].to_numpy(np.int64) if sized else np.arange(m)
+    r = trades["net_ret"].to_numpy(np.float64)
+    ep = trades["entry_price"].to_numpy(np.float64)
+    ed, xd, day_close = _marks(trades, close, days, cost)
+    u, inv = np.unique(lad, return_inverse=True)
+    out = np.zeros(u.size)
+    for g in range(u.size):
+        idx = np.flatnonzero(inv == g)
+        lo, hi = int(ed[idx].min()), int(xd[idx].max())
+        if hi <= lo:
+            continue
+        vals = np.zeros(hi - lo)
+        for i in idx:
+            a, b = int(ed[i]), int(xd[i])
+            if b < hi:
+                vals[max(b, lo) - lo:] += w[i] * r[i]          # 청산된 분할: 실현
+            if b > a:
+                px = day_close[a:b]
+                if cost is not None:
+                    mark = (px * (1 - cost.side_cost) * (1 - cost.fee_rate)) / (ep[i] * (1 + cost.fee_rate)) - 1
+                else:
+                    mark = px / ep[i] - 1
+                vals[a - lo:b - lo] += w[i] * np.where(np.isfinite(mark), mark, 0.0)
+        out[g] = min(0.0, float(vals.min()))
+    return out
+
+
+__all__ = ["SIZED_COLUMNS", "position_mtm_troughs", "equity_returns", "position_returns", "frame_equity_returns", "is_sized_frame",
            "trade_contributions", "frame_position_returns", "n_positions", "inventory_profile",
            "mtm_daily_returns"]

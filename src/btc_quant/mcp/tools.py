@@ -106,7 +106,8 @@ LOCKBOX_REQUESTS_REL = Path("research") / "lockbox_requests"
 
 
 def _tail_summary(c: dict) -> dict | None:
-    """꼬리 위험 (Dev, 정보 전용): 지표 + 견고성 'tail' 검사(MTM 기준; tail_enabled=false 면 판정에 쓰이지 않음)."""
+    """꼬리 위험 (Dev): 지표 + 견고성 'tail' 검사(MTM 기준; tail_enabled='ladder'(D19) 면 사다리 스펙만 판정에 쓰이고
+    그 밖은 정보 전용, false 면 모두 정보 전용 — 결과의 `enabled` 참조)."""
     m = c.get("metrics") or {}
     out = {k: m.get(k) for k in ("worst_day", "worst_week", "cvar5_daily", "skew", "max_inventory",
                                   "max_inventory_minutes", "bear_total_return", "bear_sharpe", "bear_max_dd",
@@ -541,6 +542,8 @@ class ResearchTools:
                                "data_snapshot": man.get("data_snapshot"), "code_commit": man.get("code_commit"),
                                "timeframe": man.get("timeframe"), "exits": man.get("exits"),
                                "period": man.get("period"), "params_version": man.get("params_version"),
+                               # 관문 일간 수익 회계 (PLAN D18): 키 없는 옛 캠페인 = realized
+                               "daily_returns": man.get("daily_returns") or "realized",
                                "benchmark_dev": _scalars(man.get("benchmark")) or None,
                                "power": {k: pw.get(k) for k in ("required_sharpe_ann", "target_sharpe_ann",
                                                                 "n_trials_dsr", "warning")},
