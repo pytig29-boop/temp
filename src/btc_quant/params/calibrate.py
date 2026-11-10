@@ -88,7 +88,8 @@ def _walk(row, side: str, notional: float) -> tuple[float, bool]:
 def book_costs(df: pd.DataFrame, notional: float, source: str) -> pd.DataFrame:
     """수집기 스키마 호가 행 → 행마다 매수·매도 편도 비용. 반환 열: ts, snap, side, cost_bps, spread_bps, complete, source."""
     out = []
-    ts = pd.to_datetime(df["ts"], unit="ms", utc=True) if np.issubdtype(df["ts"].dtype, np.number) \
+    # ts 는 숫자(ms) 이거나 이미 datetime(WS 수집기 parquet: datetime64[us, UTC] — numpy 가 해석 못 하는 확장 dtype)
+    ts = pd.to_datetime(df["ts"], unit="ms", utc=True) if pd.api.types.is_numeric_dtype(df["ts"]) \
         else pd.to_datetime(df["ts"], utc=True)
     for i, (t, r) in enumerate(zip(ts, df.to_dict("records"))):
         if not len(r.get("bid_px", [])) or not len(r.get("ask_px", [])):

@@ -139,3 +139,13 @@ def test_book_costs_from_collector_schema(tmp_path):
     assert out["complete"].all()
     big = K.load_orderbook_costs("coinone", root, notional=1e12)
     assert np.isinf(big[big["source"].str.startswith("ws")]["cost_bps"]).all()   # 깊이 부족 = ∞ (보수)
+
+
+def test_book_costs_accepts_datetime_ts_from_ws_collector():
+    """실제 WS 수집기 parquet 의 ts 는 숫자(ms)가 아니라 datetime64[us, UTC] 다 (2026-11-10 실데이터에서 TypeError)."""
+    t0 = pd.Timestamp("2026-11-10T03:00:00Z")
+    rows = [{"ts": t0 + pd.Timedelta(seconds=i), "ts_recv": 0.0, **_book()} for i in range(5)]
+    df = pd.DataFrame(rows)
+    df["ts"] = df["ts"].astype("datetime64[us, UTC]")
+    out = K.book_costs(df, 300_000, "ws:x")
+    assert len(out) == 10 and out["ts"].iloc[0] == t0 and out["cost_bps"].between(0.49, 0.51).all()
