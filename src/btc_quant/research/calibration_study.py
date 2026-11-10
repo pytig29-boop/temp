@@ -363,6 +363,10 @@ REGIME_FILTER = BlockRef("trend_regime_1h", {"span": REGIME_FILTER_SPAN})
 PLANTED_SPEC_REGIME = StrategySpec("planted_rf", BlockRef("donchian_breakout", {"lookback": PLANT_LOOKBACK}),
                                    ExitSpec(*PLANT_EXIT), (REGIME_FILTER,))
 GRIDS_REGIME: dict[str, dict] = {
+    # 베타 탐침(--rcheck-beta): 저회전·장기 보유 롱 → 귀무 시장에서도 상승 국면 베타로 Dev 손익이 양수일 수 있는 후보
+    "rb8": {"entry": {"lookback": [24, 96]},
+            "filters": [[], [{"block": "trend_regime_1h", "grid": {"span": [REGIME_FILTER_SPAN]}}]],
+            "exits": {"sl_pct": [5.0], "tp_pct": [10.0], "max_hold_min": [1440, 4320]}},
     "r12": {"entry": {"lookback": [24, 48, 96]},
             "filters": [[], [{"block": "trend_regime_1h", "grid": {"span": [REGIME_FILTER_SPAN]}}]],
             "exits": {"sl_pct": [0.6, 1.0], "tp_pct": [1.2], "max_hold_min": [60]}},
@@ -1092,6 +1096,20 @@ G4_RECENT_VARIANTS: dict[str, dict | None] = {
     "g4flat10": {"max_exposure": 0.10, "min_return": -0.02},
     "g4flat25": {"max_exposure": 0.25, "min_return": -0.02},
 }
+# 추가 파이프라인 변형 (관문 설정 덮어쓰기 + 선택적 G4 최근 조건): 노출 인식 G4/G6 변형(exposure_aware, 기본 OFF)을
+# 켠 상태에서 국면 검사가 묶는지 본다 (기본 실행 목록에는 없음 — CLI --rcheck-variants 로 선택).
+RCHECK_EXTRA_VARIANTS: dict[str, tuple[str, dict]] = {      # 이름 → (G4_RECENT_VARIANTS 이름, 관문 덮어쓰기)
+    "ea_on": ("current", {"exposure_aware.enabled": True}),
+    "ea_on_g4flat10": ("g4flat10", {"exposure_aware.enabled": True}),
+}
+
+
+def rcheck_variant_spec(name: str) -> tuple[dict | None, dict]:
+    """파이프라인 변형 이름 → (G4 최근 조건 opt, 관문 덮어쓰기)."""
+    if name in G4_RECENT_VARIANTS:
+        return G4_RECENT_VARIANTS[name], {}
+    g4, ov = RCHECK_EXTRA_VARIANTS[name]
+    return G4_RECENT_VARIANTS[g4], dict(ov)
 RCHECK_DIAG_CHECKS = ("outliers", "leave_year_out", "regime", "alpha")   # 조건부 진단(기본 실행만 쓰는 검사)
 
 
@@ -1260,9 +1278,11 @@ def run_rcheck_market(task: dict) -> list[dict]:
             root_v = _clone_root(base, tmp / vname)
             env_v = ResearchEnv.at(root_v)
             cr_v = load_campaign(cr.campaign_id, env=env_v)
-            with _G4RecentPatch(G4_RECENT_VARIANTS[vname]):
-                rec = _evaluate_record(env_v, cr_v, task, task["grid"])
-            gcfg = _gate_cfg(task)
+            g4opt, ov = rcheck_variant_spec(vname)
+            t_v = {**task, "gate_overrides": {**ov, **(task.get("gate_overrides") or {})}} if ov else task
+            with _G4RecentPatch(g4opt):
+                rec = _evaluate_record(env_v, cr_v, t_v, task["grid"])
+            gcfg = _gate_cfg(t_v)
             rec["rcheck_modes"] = rcheck_mode_outcomes(rec, gcfg)
             cur = rec["rcheck_modes"]["current"]
             rec["rcheck_consistent"] = bool(cur["any_validated"] == rec["any_validated"]
@@ -1457,10 +1477,99 @@ def run_rcheck_study(cfg: RcheckStudyConfig, progress=print, edge: dict | None =
     except Exception as e:  # noqa: BLE001
         pv = {"error": str(e)}
     return {"config": cfg.to_record(), "edge_map": edge, "runs": runs, "summary": summarize_rcheck(runs),
-            "modes": RCHECK_MODES, "g4_variants": G4_RECENT_VARIANTS,
+            "modes": RCHECK_MODES, "g4_variants": G4_RECENT_VARIANTS, "extra_variants": RCHECK_EXTRA_VARIANTS,
             "runtime_sec": round(time.time() - t0, 1), "created": pd.Timestamp.now("UTC").isoformat(),
             "gate_config_version": G.load_gate_config().get("version"),
             "params_version": pv.get("params_version"), "cost_versions": pv.get("cost_versions")}
+
+
+def beta_probe_market(task: dict) -> list[dict]:
+    """베타 탐침 (조건부 진단, 원장·Val 미사용): 귀무 시장(국면 또는 표준)에서 저회전 장기 보유 롱 스펙(격자 rb8)을
+    전부 Dev 에서 평가 — G2(같은 필터·청산 + 무작위 진입 귀무, n_null 회; p ≤ null_top_fraction 이고 가중 Sharpe > 0),
+    알파 검사, 국면 검사 방식별 판정. '국면 검사가 알파·G2 너머로 막는 귀무 후보' 를 직접 센다."""
+    from .campaign import CampaignTemplate, ResearchEnv, get_cost, run_campaign
+    from .pipeline import Pipeline
+    from .robustness import regime_verdict, robustness_suite
+
+    layout = Layout(**task["layout"])
+    tmp = Path(tempfile.mkdtemp(prefix="calibbeta_"))
+    try:
+        if task["market"] == "standard":
+            make_root(tmp, layout, task["seed"], 0.0)
+            vr = "none"
+        else:
+            sched = make_regime_root(tmp, layout, task["seed"], 0.0, "null", task.get("val_regime"))
+            vr = str(sched.iloc[-1])
+        env = ResearchEnv.at(tmp)
+        cr = run_campaign(CampaignTemplate.from_dict(template_for("rb8", "calib_rb8")), env=env)
+        cfg = _gate_cfg({})
+        p = Pipeline(cr, env, gate_cfg=cfg, n_null=int(task["n_null"]), register=False, reference_check=False,
+                     robustness=False, lessons=False, val_budget=False)
+        c = p.cache
+        out = []
+        for lh, spec in cr.specs.items():
+            row = p.prim.loc[lh].to_dict()
+            g2 = p.g2(spec, row, p.costs["primary"])
+            rb = robustness_suite(spec, c.m1, p.start, p.end, get_cost(p.costs["primary"]), ctx=c.ctx,
+                                  checks=("regime", "alpha"), thresholds=cfg.get("robustness"))
+            reg = _trim_regime(rb["checks"]["regime"])
+            out.append({"seed": task["seed"], "market": task["market"], "val_regime": vr, "logic_hash": lh,
+                        "filtered": bool(spec.filters), "sharpe_w": float(row["sharpe_w"]),
+                        "dev_total_return": rb["base"]["total_return"],
+                        "g2_p": g2.get("p_value"), "g2_pass": bool(g2.get("ok_positive") and g2.get("ok_null")),
+                        "alpha_passed": rb["checks"]["alpha"]["passed"], "alpha_t": rb["checks"]["alpha"].get("alpha_t"),
+                        "beta": rb["checks"]["alpha"].get("beta"), "regime": reg,
+                        "regime_pass": {m: bool(regime_verdict(reg, rcheck_thresholds(cfg, m))) for m in RCHECK_MODES}})
+        return out
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def run_beta_probe(n_regime_null: int = 60, n_std_null: int = 30, n_null: int = 500, jobs: int = 4,
+                   layout: Layout = FULL_LAYOUT, progress=print) -> dict:
+    """귀무 국면 시장 n_regime_null 개(seed 11000.. 30개 + 11200.. — rcheck_full_config 귀무와 같은 시장) + 표준 귀무."""
+    seeds = [11_000 + i for i in range(min(30, n_regime_null))] + [11_200 + i for i in range(max(0, n_regime_null - 30))]
+    tasks = [{"layout": asdict(layout), "seed": s, "market": "regime", "val_regime": REGIMES[s % 3], "n_null": n_null}
+             for s in seeds]
+    tasks += [{"layout": asdict(layout), "seed": 9_000 + i, "market": "standard", "n_null": n_null}
+              for i in range(n_std_null)]
+    rows = []
+    pool = ProcessPoolExecutor(max_workers=jobs, mp_context=get_context("spawn")) if jobs > 1 else None
+    try:
+        it = pool.map(beta_probe_market, tasks) if pool else map(beta_probe_market, tasks)
+        for i, r in enumerate(it, start=1):
+            rows += r
+            progress(f"[beta] {i}/{len(tasks)} seed={tasks[i - 1]['seed']}: "
+                     + ", ".join(f"{'F' if x['filtered'] else 'U'} ret={x['dev_total_return']:+.2f} g2={int(x['g2_pass'])} "
+                                 f"a={int(bool(x['alpha_passed']))} r={int(x['regime_pass']['current'])}" for x in r))
+    finally:
+        if pool:
+            pool.shutdown()
+    return {"rows": rows, "summary": summarize_beta_probe(rows), "n_null": n_null}
+
+
+def summarize_beta_probe(rows: list[dict]) -> dict:
+    """귀무 후보 중 (Dev 총수익 > 0) 에서 각 방어선 통과율과 조합: G2, 알파, 국면 검사 방식별, G2∧알파∧국면."""
+    out = {}
+    for name, sel in (("all", rows), ("dev_ret_pos", [r for r in rows if r["dev_total_return"] > 0]),
+                      ("dev_ret_pos_filtered", [r for r in rows if r["dev_total_return"] > 0 and r["filtered"]])):
+        n = len(sel)
+        if not n:
+            continue
+        row = {"n": n}
+        for k, f in (("g2", lambda r: r["g2_pass"]), ("alpha", lambda r: bool(r["alpha_passed"])),
+                     ("g2_alpha", lambda r: r["g2_pass"] and bool(r["alpha_passed"]))):
+            x = sum(bool(f(r)) for r in sel)
+            row[k] = (x, n, wilson(x, n))
+        for m in RCHECK_MODES:
+            x = sum(r["regime_pass"][m] for r in sel)
+            y = sum(r["regime_pass"][m] and bool(r["alpha_passed"]) for r in sel)
+            z = sum(r["regime_pass"][m] and bool(r["alpha_passed"]) and r["g2_pass"] for r in sel)
+            row[f"regime_{m}"] = (x, n, wilson(x, n))
+            row[f"alpha_regime_{m}"] = (y, n, wilson(y, n))
+            row[f"g2_alpha_regime_{m}"] = (z, n, wilson(z, n))
+        out[name] = row
+    return out
 
 
 def rcheck_runner_from_results(runs: list[dict], value_to_mode: dict, g4_variant: str = "current"):
@@ -1868,6 +1977,11 @@ def main(argv=None) -> int:
     ap.add_argument("--rcheck", action="store_true",
                     help="롱 온리 기준 2종 보정: 견고성 국면 검사 방식 × G4 최근 12개월 변형 (국면·표준 귀무 시장)")
     ap.add_argument("--rcheck-quick", action="store_true", help="--rcheck 의 테스트용 짧은 설정")
+    ap.add_argument("--rcheck-variants", default=None,
+                    help="--rcheck 파이프라인 변형 목록(쉼표; 기본 G4_RECENT_VARIANTS, 추가 RCHECK_EXTRA_VARIANTS)")
+    ap.add_argument("--no-diag", action="store_true", help="--rcheck 조건부 진단 생략")
+    ap.add_argument("--rcheck-beta", type=int, default=0, metavar="N",
+                    help="베타 탐침: 귀무 국면 시장 N 개(+ 표준 귀무 30)에서 저회전 롱 스펙의 G2·알파·국면 검사 조건부 진단")
     ap.add_argument("--edge-from", default=None, help="이전 결과 json 의 edge_map 재사용(같은 설정일 때만)")
     ap.add_argument("--jobs", type=int, default=min(4, os.cpu_count() or 1))
     ap.add_argument("--out", default=None, help="markdown report path")
@@ -1880,8 +1994,21 @@ def main(argv=None) -> int:
             Path(a.json).write_text(json.dumps(res, indent=1, default=str), encoding="utf-8")
         print(g6_stage_markdown(res))
         return 0
+    if a.rcheck_beta:
+        res = run_beta_probe(a.rcheck_beta, jobs=a.jobs)
+        if a.json:
+            Path(a.json).parent.mkdir(parents=True, exist_ok=True)
+            Path(a.json).write_text(json.dumps(res, indent=1, default=str), encoding="utf-8")
+        print(json.dumps(res["summary"], indent=1, default=str))
+        return 0
     if a.rcheck or a.rcheck_quick:
         ccfg = rcheck_quick_config(a.jobs) if a.rcheck_quick else rcheck_full_config(a.jobs)
+        if a.rcheck_variants:
+            ccfg.g4_variants = tuple(x.strip() for x in a.rcheck_variants.split(",") if x.strip())
+            for v in ccfg.g4_variants:
+                rcheck_variant_spec(v)
+        if a.no_diag:
+            ccfg.diag = False
         edge = json.loads(Path(a.edge_from).read_text(encoding="utf-8"))["edge_map"] if a.edge_from else None
         res = run_rcheck_study(ccfg, edge=edge)
         if a.json:

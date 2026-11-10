@@ -135,6 +135,10 @@ snap = params_snapshot()      # {"params_version": "79bc502df565", "cost_version
 - 견고성 기준: `config/gates.yaml` 의 `robustness:` (params.yaml `robustness.*`, `latency_delays_min` 만 class ①).
   `robustness.run_suite(..., thresholds=)` 로 넘기며 파이프라인은 캠페인 시점 설정의 `robustness` 를 쓴다.
   `research/robustness.py` 상수는 같은 값의 대체값이다.
+  국면 검사 판정 방식 `robustness.regime_mode`(기본 `pnl_share` = 한 국면 손익 비중 > `regime_max_pnl_share` → 실패,
+  기존 동작) · 대안 `dominant_alpha`(비중 초과 시 지배 국면 안 노출-맞춤 B&H 대비 연율 초과 ≥
+  `robustness.regime_dominant_min_excess`(0.0) 이면 통과) · `informational`(표시만). 지배 국면 초과수익은 방식과 무관하게
+  검사 출력에 정보로 남는다. 판정 재계산 함수 `robustness.regime_verdict` (보정 연구의 사후 평가와 같은 코드).
 
 ## 5. 현재 상태 (2026-11-09, 2026-11-10 추가)
 
@@ -145,6 +149,12 @@ snap = params_snapshot()      # {"params_version": "79bc502df565", "cost_version
   다른 class ② 기준과 같은 절차(propose-criteria → 사람 승인 → 다음 캠페인부터)로 바꾼다.
 - `risk_prefs.capital_fraction` 은 미정(사람 결정 대기).
 - 2026-11-10: 노출 인식 관문 변형 `gates.exposure_aware.*` 12개 추가(class ②, `enabled: false`). 합성 국면 보정 결과 검정력 증가가 없어 **제안 없음** — §6.
+- 2026-11-10: 견고성 국면 검사 옵션 `robustness.regime_mode`(`pnl_share`) · `robustness.regime_dominant_min_excess`(0.0)
+  추가(class ②, 기본 = 기존 동작; params_version bc8fb6b2bc0e → a8064a43c730 은 목록 추가 때문, 판정 변화 없음). 합성 보정
+  (`calibration_study --rcheck`, 리포트 `research/reports/calibration_regime_check_20261110.md`): 국면 검사 방식(비중 0.80/0.90,
+  dominant_alpha, informational)·G4 최근 12개월 '쉼' 변형 모두 현재 관문에서 검정력 23% → 23%(오탐 0/90) → **제안 없음**
+  (`criteria_robustness_regime_mode_20261110_regime.md`, `criteria_robustness_regime_max_pnl_share_20261110_regime.md`).
+  exposure_aware 를 켠 상태에서만 국면 검사가 묶는다(+7%p, 목표 +10%p 미달).
 
 ## 6. 노출 인식 관문 변형 (`gates.exposure_aware.*`, class ②, **기본 OFF** — PLAN D14 초안)
 

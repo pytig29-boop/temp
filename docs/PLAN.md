@@ -283,6 +283,7 @@ Sharpe ≤ 0 이면 떨어뜨린다. **거버넌스**: 최근 한 후보가 G6 �
 | 노출 인식 G4 | ⏸ 구현, **OFF** | 시장 참여일 < 10% 인 6개월 창 = 중립(분모 제외), 비중립 창 ≥ 20, Dev 시장 참여일 ≥ 20% (안 쓰는 전략이 '쉼'으로 통과 못 하게). 최근 12개월 조건은 그대로 |
 | 노출 인식 G6 | ⏸ 구현, **OFF** | Sharpe > 0 **또는** [Val 시장 참여일 ≤ 25%, B&H Val 수익 < 0, Val 수익 ≥ −2%(stress ≥ −4%), MDD ≤ 0.5 × B&H MDD, 기존 MDD·MC 조건, Dev 참여일 ≥ 20%, Val 거래 ≥ 10 — 모자라면 insufficient_evidence(통과 아님)]. 이 경로는 Val Holm 을 요구하지 않음(평균>0 증거가 아니므로) — 양의 증거는 Dev(G2·G5)·잠금(G7)·전진(G8) |
 | 합성 국면 보정 | ✅ 실행 | `calibration_study --regime`: 상승·하락·횡보 국면(수개월), Val 국면 순환(⅓ 하락), 귀무 30 · 무필터 국면 엣지 6 · 필터 국면 엣지 30 시장 × (현재·변형·완화 변형). 결과: 오탐 0/30 (하락 Val 0/10) 모두 같음, S*_f 검정력 23% → 23% (Sharpe 2). **목표(검정력 증가) 미달 → 제안 없음**. 근거 `research/reports/calibration_regime_20261110.md`, `research/reports/criteria_gates_exposure_aware_enabled_20261110_regime.md` |
+| 롱 온리 기준 2종 보정 | ✅ 실행 | `calibration_study --rcheck`(+ `--rcheck-variants ea_on,…`, `--rcheck-beta 60`): 견고성 국면 검사 방식(비중 0.70/0.80/0.90, `robustness.regime_mode` dominant_alpha·informational — 옵션 추가, 기본 = 현재) × G4 최근 12개월 '쉼' 변형(보정 전용 반사실), 귀무 90(국면 60·표준 30) · 필터 엣지 30 시장. 결과: 오탐 0/90 전부, S*_f 검정력 현재 관문에서 23% → 23%; exposure_aware ON 일 때만 국면 검사가 묶어 23% → 30%(+7%p). **목표(+10%p) 미달 → 제안 없음**. 근거 `research/reports/calibration_regime_check_20261110.md` |
 | 탐색 시도 기록 | ✅ 반영 | MCP `log_exploration` / `research.exploration.log_exploration`: 사이드 계산을 원장 시도로(계열 N·주간 예산), Dev 만, 연구 모드 직접 호출 차단. researcher·skill 필수 규칙 |
 
 변형이 검정력을 못 올린 이유(합성 근거, §6 docs/PARAMS.md): ① 현실적인 추세 필터(60일 EMA)는 하락 국면에서도 새서 Val

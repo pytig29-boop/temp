@@ -188,3 +188,43 @@ def test_regime_proposal_refuses_real_campaign_motivation(tmp_path):
         Q.propose_criterion("gates.exposure_aware.enabled", [True], Q.Targets(), "rescue camp-000013 after G6 fail",
                             ["synthetic:regime"], root=root, study="regime", runner=lambda t: [],
                             k_for={"null": 0.0, "regime_filter": 0.03})
+
+
+# ------------------------------------------------------------------ 견고성 국면 검사 방식 (robustness.regime_mode, 기본 pnl_share)
+def test_regime_mode_option_is_a_proposable_class2_criterion(tmp_path):
+    root = make_root(tmp_path)
+    from btc_quant.params.registry import load_registry
+    reg = load_registry(root, validate_=False)
+    for key, default in (("robustness.regime_mode", "pnl_share"), ("robustness.regime_dominant_min_excess", 0.0)):
+        p = reg.get(key)
+        assert p.cls == 2 and p.owner == "human" and reg.resolve(p) == default     # 기본 = 현재 동작
+    Q.check_anti_goalpost("robustness.regime_mode", "long-only regime check calibration on synthetic markets",
+                          ["synthetic:calibration_study --rcheck"], root)
+    with pytest.raises(Q.GoalpostError):
+        Q.check_anti_goalpost("robustness.regime_mode", "candidate in camp-000014 failed the regime check", [], root)
+
+    def runner(gain: float):
+        def run(tasks):
+            out = []
+            for t in tasks:
+                for name, ov in t["variant_overrides"].items():
+                    v = ov["robustness.regime_mode"]
+                    hit = t["kind"] != "null" and (t["seed"] % 10) < (3 + (10 * gain if v == "informational" else 0))
+                    out.append({**t, "variant": name, "any_validated": hit, "star_validated": hit,
+                                "star_dev_passed": True})
+            return Q.regime_runs_to_value_runs(out, ["pnl_share", "dominant_alpha", "informational"])
+        return run
+    kw = dict(root=root, study="regime", k_for={"null": 0.0, "regime_filter": 0.03, "regime_cond_f": 0.03},
+              n_null_markets=6, n_planted_markets=5, progress=lambda *a: None)
+    t = Q.Targets(0.05, 0.0, 2.0, max_fpr_bearish_val=0.05, min_power_gain=0.10)
+    st = Q.propose_criterion("robustness.regime_mode", ["dominant_alpha", "informational"], t,
+                             "synthetic regime-check calibration", ["synthetic:calibration_study --rcheck"],
+                             runner=runner(0.0), **kw)
+    assert st.current == "pnl_share" and st.status == "no_change" and st.proposal_id is None
+    st = Q.propose_criterion("robustness.regime_mode", ["dominant_alpha", "informational"], t,
+                             "synthetic regime-check calibration", ["synthetic:calibration_study --rcheck"],
+                             runner=runner(0.3), **kw)
+    assert st.status == "proposed" and st.recommended == "informational"
+    doc = P.load_proposal(st.proposal_id, root)
+    assert doc["changes"][0]["target"] == "yaml:config/gates.yaml#robustness.regime_mode"
+    assert doc["changes"][0]["from"] == "pnl_share" and doc["changes"][0]["to"] == "informational"

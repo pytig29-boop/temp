@@ -230,3 +230,39 @@ def test_rcheck_quick_mode_runs():
     assert len(rows) == 2 * len(C.RCHECK_MODES) and res["summary"]["inconsistent"] == []
     md = C.rcheck_tables_markdown(res)
     assert "G4 최근 조건" in md and "조건부 진단" in md
+
+
+def test_rcheck_variant_spec_and_runner_adapter():
+    assert C.rcheck_variant_spec("current") == (None, {})
+    assert C.rcheck_variant_spec("g4flat10")[0] == C.G4_RECENT_VARIANTS["g4flat10"]
+    g4, ov = C.rcheck_variant_spec("ea_on_g4flat10")
+    assert g4 == C.G4_RECENT_VARIANTS["g4flat10"] and ov == {"exposure_aware.enabled": True}
+    runs = [{"seed": 1, "kind": "null", "g4_variant": "current", "val_regime": "bear", "star_dev_passed": False,
+             "rcheck_modes": {"current": {"any_validated": False, "star_validated": False},
+                              "info": {"any_validated": True, "star_validated": False}}},
+            {"seed": 2, "kind": "regime_filter", "g4_variant": "current", "val_regime": "bull",
+             "star_dev_passed": True,
+             "rcheck_modes": {"current": {"any_validated": False, "star_validated": False},
+                              "info": {"any_validated": True, "star_validated": True}}}]
+    run = C.rcheck_runner_from_results(runs, {"pnl_share": "current", "informational": "info"})
+    out = run([{"seed": 1, "kind": "null"}, {"seed": 2, "kind": "regime_filter"}])
+    by = {(r["seed"], r["value"]): r for r in out}
+    assert by[(1, "informational")]["any_validated"] and not by[(1, "pnl_share")]["any_validated"]
+    assert by[(2, "informational")]["star_validated"] and by[(2, "informational")]["kind"] == "planted"
+
+
+def test_beta_probe_grid_and_summary():
+    from btc_quant.research.campaign import CampaignTemplate
+    tpl = CampaignTemplate.from_dict(C.template_for("rb8", "t_rb8"))
+    assert tpl.n_specs() == 8
+    modes = list(C.RCHECK_MODES)
+    rows = [{"dev_total_return": 0.1, "filtered": True, "g2_pass": False, "alpha_passed": False,
+             "regime_pass": {m: m in ("dom_alpha", "info") for m in modes}},
+            {"dev_total_return": 0.2, "filtered": False, "g2_pass": True, "alpha_passed": True,
+             "regime_pass": {m: True for m in modes}},
+            {"dev_total_return": -0.1, "filtered": True, "g2_pass": False, "alpha_passed": False,
+             "regime_pass": {m: m == "info" for m in modes}}]
+    s = C.summarize_beta_probe(rows)
+    assert s["all"]["n"] == 3 and s["dev_ret_pos"]["n"] == 2 and s["dev_ret_pos_filtered"]["n"] == 1
+    assert s["dev_ret_pos"]["regime_current"][0] == 1 and s["dev_ret_pos"]["regime_info"][0] == 2
+    assert s["dev_ret_pos"]["alpha_regime_info"][0] == 1 and s["dev_ret_pos"]["g2_alpha_regime_dom_alpha"][0] == 1

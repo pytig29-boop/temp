@@ -751,6 +751,27 @@ params:
   owner: human
   history: []
   note: 2026-11-09 코드 상수(research/robustness.py)에서 config/gates.yaml robustness 로 이관 — 값·버전 변경 없음
+- key: robustness.regime_mode
+  class: 2
+  source: yaml:config/gates.yaml#robustness.regime_mode
+  value: pnl_share
+  rationale: '견고성 국면 검사 판정 방식 (pnl_share = 한 국면 손익 비중 > regime_max_pnl_share → 실패, 현재 동작). 대안 dominant_alpha
+    / informational 은 class ② 제안(합성 보정) + 사람 승인으로만'
+  evidence: 옵션 추가(기본 = 기존 동작) · 합성 보정 research/reports/calibration_regime_check_20261110.md
+  version: 1
+  last_updated: '2026-11-10'
+  owner: human
+  history: []
+- key: robustness.regime_dominant_min_excess
+  class: 2
+  source: yaml:config/gates.yaml#robustness.regime_dominant_min_excess
+  value: 0.0
+  rationale: regime_mode=dominant_alpha 전용 — 지배 국면 안 노출(보유 시간)-맞춤 매수보유 대비 연율 초과수익 하한 (기본 모드에서는 쓰지 않음)
+  evidence: 옵션 추가(기본 = 기존 동작) · 합성 보정 research/reports/calibration_regime_check_20261110.md
+  version: 1
+  last_updated: '2026-11-10'
+  owner: human
+  history: []
 - key: robustness.alpha_min_tstat
   class: 2
   source: yaml:config/gates.yaml#robustness.alpha_min_tstat
