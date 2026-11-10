@@ -696,6 +696,8 @@ def _evaluate_record(env, cr, task: dict, grid: str) -> dict:
             star_val_bh_return=bv.get("bh_total_return"), star_val_n_trades=(g6 or {}).get("n_trades"),
             validated_paths=[(c["gates"].get("G6") or {}).get("path") for c, lab in zip(cands, labels)
                              if lab == "validated"])
+    if task.get("rcheck"):         # 국면 검사·G4 최근 조건 보정: 후보별 사후 판정 입력
+        rec["rcheck_cands"] = _rcheck_candidates(cands, labels, rep[0]["logic_hash"] if rep else None)
     return rec
 
 
@@ -1063,6 +1065,428 @@ def regime_tables_markdown(result: dict) -> str:
     return "\n".join(L)
 
 
+# ============================================================== 롱 온리 기준 2종 보정 (견고성 '국면' 검사 · G4 최근 12개월)
+# 질문: 롱 온리 국면 필터 추세 전략은 구조적으로 상승 국면에서 손익 대부분을 번다. 견고성 '국면' 검사(한 국면 손익
+# 비중 > 70% → 실패)가 알파 검사(노출-맞춤 B&H, 알파 t ≥ 2)와 G2(거래 수 맞춤 무작위 진입 귀무) 너머의 보호를 더하는지,
+# 아니면 참 엣지만 지우는지. G4 의 '최근 12개월 Sharpe > 0' 도 같은 질문(최근 1년이 하락장이면 필터 전략은 대부분 쉼).
+# 설계(공통 난수): 시장마다 캠페인 1회 → G4 변형마다 *복사한 원장*에서 파이프라인 1회(Dev 생존·Val 사용이 바뀌므로)
+# → 국면 검사 방식별 판정은 같은 파이프라인 결과에 사후 적용(견고성 묶음은 G6 통과 후보에만 돌고 원장·Val 에 되먹이지
+# 않으므로 사후 적용 = 해당 설정으로 돌린 결과; robustness.regime_verdict 를 check_regime 과 함께 쓴다).
+RCHECK_MODES: dict[str, dict] = {           # 국면 검사 방식 (gates.yaml robustness.* 덮어쓰기)
+    "current": {},                                                       # 비중 > 0.70 → 실패
+    "share80": {"robustness.regime_max_pnl_share": 0.80},
+    "share90": {"robustness.regime_max_pnl_share": 0.90},
+    "dom_alpha": {"robustness.regime_mode": "dominant_alpha"},           # 비중 > 0.70 이면 지배 국면 안 노출-맞춤 B&H 초과 ≥ 0
+    "info": {"robustness.regime_mode": "informational"},                 # 표시만, 판정 제외
+}
+# G4 최근 12개월 조건 변형: Sharpe > 0 OR (최근 12개월 시장 참여일 < max_exposure AND 최근 12개월 총수익 ≥ min_return).
+# gates.py 를 바꾸지 않는 *보정 전용 반사실*(calibration 프로세스 안에서만 check_g4 를 감쌈) — 채택하려면 관문 코드 변경 필요.
+G4_RECENT_VARIANTS: dict[str, dict | None] = {
+    "current": None,
+    "g4flat10": {"max_exposure": 0.10, "min_return": -0.02},
+    "g4flat25": {"max_exposure": 0.25, "min_return": -0.02},
+}
+RCHECK_DIAG_CHECKS = ("outliers", "leave_year_out", "regime", "alpha")   # 조건부 진단(기본 실행만 쓰는 검사)
+
+
+def recent_flat_metrics(daily: pd.Series, trades: pd.DataFrame | None, days: int = 365) -> dict:
+    """최근 `days` 일(metrics.recent 와 같은 창)의 시장 참여일 비율·총수익 (G4 최근 조건 변형 입력)."""
+    s = pd.Series(daily).dropna().astype(float)
+    if not s.size:
+        return {"recent_exposure_days": float("nan"), "recent_total_return": float("nan")}
+    inm = M.days_in_market(trades, s.index) if isinstance(s.index, pd.DatetimeIndex) else np.zeros(s.size, bool)
+    m = (s.index > s.index.max() - pd.Timedelta(days=days)) if isinstance(s.index, pd.DatetimeIndex) \
+        else np.arange(s.size) >= s.size - days
+    return {"recent_exposure_days": float(np.mean(inm[m])) if m.any() else float("nan"),
+            "recent_total_return": float(np.prod(1 + s.to_numpy()[m]) - 1)}
+
+
+def g4_recent_variant(metrics: dict, cfg: dict | None, opt: dict | None, base_check=None) -> tuple[bool, dict]:
+    """기존 G4 판정 + 최근 12개월 '쉼' 대체 경로: 롤링 조건은 통과했고 최근 Sharpe 조건만 실패했을 때,
+    최근 참여일 < opt.max_exposure 이고 최근 총수익 ≥ opt.min_return 이면 통과. opt=None → 기존 판정 그대로."""
+    ok, d = (base_check or G.check_g4)(metrics, cfg)
+    if not opt:
+        return ok, d
+    ex, rr = metrics.get("recent_exposure_days"), metrics.get("recent_total_return")
+    d = {**d, "recent_flat": {"max_exposure": opt["max_exposure"], "min_return": opt["min_return"],
+                              "recent_exposure_days": ex, "recent_total_return": rr, "applied": False}}
+    if (not ok and d.get("ok_rolling") and not d.get("ok_recent") and ex is not None and rr is not None
+            and ex == ex and rr == rr and ex < opt["max_exposure"] and rr >= opt["min_return"]):
+        d["recent_flat"]["applied"] = True
+        d["ok_recent"] = True
+        return True, d
+    return ok, d
+
+
+class _G4RecentPatch:
+    """보정 프로세스 안에서만 G.check_g4 와 Pipeline.exposure_metrics 를 감싼다(opt=None 이면 아무것도 안 함)."""
+
+    def __init__(self, opt: dict | None):
+        self.opt = opt
+
+    def __enter__(self):
+        if not self.opt:
+            return self
+        from . import pipeline as PL
+        self._g4, self._em, self._PL = G.check_g4, PL.Pipeline.exposure_metrics, PL
+        orig_g4, orig_em, opt = self._g4, self._em, self.opt
+
+        def em(pself, res):
+            out = orig_em(pself, res)
+            out.update(recent_flat_metrics(res.daily_returns, res.trades,
+                                           int(pself.cfg["G4"].get("recent_days", 365))))
+            return out
+
+        G.check_g4 = lambda metrics, cfg=None: g4_recent_variant(metrics, cfg, opt, orig_g4)
+        PL.Pipeline.exposure_metrics = em
+        return self
+
+    def __exit__(self, *exc):
+        if self.opt:
+            G.check_g4 = self._g4
+            self._PL.Pipeline.exposure_metrics = self._em
+        return False
+
+
+def _trim_regime(chk: dict | None) -> dict | None:
+    if not chk:
+        return None
+    keys = ("total_pnl_log", "max_pnl_share", "dominant", "dominant_exposure",
+            "dominant_excess_vs_matched_bh_annual", "dominant_mean_annual", "dominant_matched_bh_annual")
+    return {d: {k: chk[d].get(k) for k in keys} for d in ("trend", "vol") if d in chk}
+
+
+def rcheck_thresholds(gate_cfg: dict, mode: str) -> dict:
+    """국면 검사 방식 mode 의 견고성 기준 (gate_cfg 의 robustness + RCHECK_MODES 덮어쓰기)."""
+    from .robustness import load_thresholds
+    th = load_thresholds(gate_cfg.get("robustness") or {})
+    for dotted, v in RCHECK_MODES[mode].items():
+        th[dotted.split(".", 1)[1]] = v
+    return th
+
+
+def rcheck_candidate_validated(c: dict, th: dict) -> bool:
+    """후보 레코드(_rcheck_candidates) 가 국면 검사 기준 th 에서 validated 인가 (G6 통과 + 견고성 통과)."""
+    from .robustness import regime_verdict
+    if not c["g6_passed"]:
+        return False
+    if c["rob_failed"] is None:                  # 견고성 미실행(robustness=False) → 기존 라벨
+        return True
+    if any(f != "regime" for f in c["rob_failed"]):
+        return False
+    return True if c["regime"] is None else bool(regime_verdict(c["regime"], th))
+
+
+def _rcheck_candidates(cands: list[dict], labels: list[str], rep_lh: str | None) -> list[dict]:
+    out = []
+    for c, lab in zip(cands, labels):
+        rob = c.get("robustness")
+        out.append({"logic_hash": c["logic_hash"], "filtered": bool(c["spec"].get("filters")),
+                    "dev_passed": bool(c.get("dev_passed")), "first_failed": c.get("first_failed"),
+                    "g2_passed": bool((c["gates"].get("G2") or {}).get("passed")),
+                    "g4_recent_flat": bool(((c["gates"].get("G4") or {}).get("recent_flat") or {}).get("applied")),
+                    "g6_passed": str(c.get("status", "")).startswith("validated"), "label": lab,
+                    "rob_failed": None if not rob else list(rob.get("failed") or []),
+                    "regime": None if not rob else _trim_regime((rob.get("checks") or {}).get("regime")),
+                    "is_rep": c["logic_hash"] == rep_lh})
+    return out
+
+
+def rcheck_mode_outcomes(rec: dict, gate_cfg: dict) -> dict:
+    """레코드(rcheck_cands 포함) → 국면 검사 방식별 {any_validated, star_validated}."""
+    out = {}
+    for mode in RCHECK_MODES:
+        th = rcheck_thresholds(gate_cfg, mode)
+        val = [c for c in rec["rcheck_cands"] if rcheck_candidate_validated(c, th)]
+        out[mode] = {"any_validated": bool(val), "star_validated": any(c["is_rep"] for c in val),
+                     "n_validated": len(val)}
+    return out
+
+
+def _rcheck_diag(env, cr, task: dict, cands: list[dict]) -> None:
+    """조건부 진단: 상위 후보 *모두*(Dev·Val 관문과 무관)에 Dev 견고성 검사(RCHECK_DIAG_CHECKS)를 돌려
+    국면 검사 방식별 판정·알파 판정을 붙인다 (원장·Val 미사용)."""
+    from .campaign import get_cost
+    from .pipeline import Pipeline
+    from .robustness import regime_verdict, robustness_suite
+    cfg = _gate_cfg(task)
+    p = Pipeline(cr, env, gate_cfg=cfg, register=False, reference_check=False, robustness=False,
+                 lessons=False, val_budget=False)
+    c = p.cache
+    for cd in cands:
+        rb = robustness_suite(cr.specs[cd["logic_hash"]], c.m1, p.start, p.end, get_cost(p.costs["primary"]),
+                              ctx=c.ctx, checks=RCHECK_DIAG_CHECKS, thresholds=cfg.get("robustness"))
+        ch = rb["checks"]
+        reg = _trim_regime(ch["regime"])
+        cd["diag"] = {"alpha_passed": ch["alpha"]["passed"], "alpha_t": ch["alpha"].get("alpha_t"),
+                      "excess_vs_matched_bh_annual": ch["alpha"].get("excess_vs_matched_bh_annual"),
+                      "outliers_passed": ch["outliers"]["passed"], "loyo_passed": ch["leave_year_out"]["passed"],
+                      "dev_sharpe": rb["base"]["sharpe"], "regime": reg,
+                      "regime_pass": {m: bool(regime_verdict(reg, rcheck_thresholds(cfg, m))) for m in RCHECK_MODES}}
+
+
+def run_rcheck_market(task: dict) -> list[dict]:
+    """시장 1개(국면 시장 또는 표준 귀무 시장): 캠페인 1회 → G4 변형마다 복사한 원장에서 파이프라인 1회 → 국면 검사
+    방식별 사후 판정. G4 'current' 실행에는 조건부 진단(_rcheck_diag)도 붙인다(task['diag'])."""
+    from .campaign import CampaignTemplate, ResearchEnv, load_campaign, run_campaign
+
+    t0 = time.time()
+    layout = Layout(**task["layout"])
+    tmp = Path(tempfile.mkdtemp(prefix="calibrc_"))
+    try:
+        base = tmp / "base"
+        base.mkdir()
+        if task["market"] == "standard":
+            make_root(base, layout, task["seed"], task["k"])
+            info = {"val_regime": "none", "dev_regime_share": None}
+        else:
+            sched = make_regime_root(base, layout, task["seed"], task["k"], task["kind"], task.get("val_regime"))
+            vs = pd.Timestamp(layout.val_start, tz="UTC")
+            dev_lab = sched[sched.index < vs]
+            info = {"val_regime": str(sched.iloc[-1]),
+                    "dev_regime_share": {r: float((dev_lab == r).mean()) for r in REGIMES},
+                    "dev_last_year_regime_share": {r: float((dev_lab.iloc[-365:] == r).mean()) for r in REGIMES}}
+        env = ResearchEnv.at(base)
+        tpl = CampaignTemplate.from_dict(template_for(task["grid"], f"calib_{task['grid']}"))
+        cr = run_campaign(tpl, env=env)
+        out = []
+        for vname in task["g4_variants"]:
+            root_v = _clone_root(base, tmp / vname)
+            env_v = ResearchEnv.at(root_v)
+            cr_v = load_campaign(cr.campaign_id, env=env_v)
+            with _G4RecentPatch(G4_RECENT_VARIANTS[vname]):
+                rec = _evaluate_record(env_v, cr_v, task, task["grid"])
+            gcfg = _gate_cfg(task)
+            rec["rcheck_modes"] = rcheck_mode_outcomes(rec, gcfg)
+            cur = rec["rcheck_modes"]["current"]
+            rec["rcheck_consistent"] = bool(cur["any_validated"] == rec["any_validated"]
+                                            and cur["star_validated"] == rec["star_validated"])
+            if task.get("diag") and vname == "current":
+                _rcheck_diag(env_v, cr_v, task, rec["rcheck_cands"])
+            rec.update({k: task[k] for k in ("kind", "strength", "k", "grid", "seed", "market")}, g4_variant=vname,
+                       **info, study="rcheck", runtime_total_sec=round(time.time() - t0, 1))
+            out.append(rec)
+        return out
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+@dataclass
+class RcheckStudyConfig:
+    mode: str
+    layout: Layout
+    strength: float
+    n_markets: dict                         # 국면 시장 {kind: 수} — regime_full_config 와 같은 seed 순서
+    n_extra_null: int                       # 추가 귀무 국면 시장 (seed extra_seed0 부터, Val 국면 seed%3)
+    n_standard_null: int                    # 표준 귀무 시장 (gen_market k=0, 국면 없음)
+    n_null: int
+    top_k: int = TOP_K
+    grid: str = "r12"
+    seed0: int = 11_000
+    extra_seed0: int = 11_200
+    standard_seed0: int = 9_000
+    jobs: int = 1
+    override_null_runs: bool = False
+    g4_variants: tuple[str, ...] = tuple(G4_RECENT_VARIANTS)
+    diag: bool = True
+    pilot_ks: tuple[float, ...] = (0.0, 0.01, 0.015, 0.02, 0.025, 0.03, 0.04)
+    pilot_seeds: int = 6
+    pilot_years: float = 5.8
+
+    def to_record(self) -> dict:
+        d = asdict(self)
+        d["layout"] = asdict(self.layout)
+        return d
+
+
+def rcheck_quick_config(jobs: int = 1) -> RcheckStudyConfig:
+    """테스트용 구조 점검(수치 결론용 아님): 짧은 구간, 국면 시장 2 + 표준 귀무 1, 귀무 100."""
+    return RcheckStudyConfig("rcheck-quick", QUICK_LAYOUT, strength=3.0,
+                             n_markets={"null": 1, "regime_filter": 1}, n_extra_null=0, n_standard_null=1,
+                             n_null=100, top_k=2, override_null_runs=True, jobs=jobs,
+                             pilot_ks=(0.0, 0.03, 0.06), pilot_seeds=1, pilot_years=1.0)
+
+
+def rcheck_full_config(jobs: int = 4) -> RcheckStudyConfig:
+    return RcheckStudyConfig("rcheck-full", FULL_LAYOUT, strength=2.0,
+                             n_markets={"null": 30, "regime_cond": 6, "regime_cond_f": 15, "regime_filter": 15},
+                             n_extra_null=30, n_standard_null=30, n_null=1000, jobs=jobs)
+
+
+def build_rcheck_tasks(cfg: RcheckStudyConfig, k_for: dict) -> list[dict]:
+    rcfg = RegimeStudyConfig("rc", cfg.layout, cfg.strength, cfg.n_markets, cfg.n_null, cfg.top_k, cfg.grid,
+                             seed0=cfg.seed0, override_null_runs=cfg.override_null_runs)
+    common = {"g4_variants": list(cfg.g4_variants), "diag": cfg.diag, "rcheck": True}
+    tasks = [{**t, **common, "market": "regime"} for t in build_regime_tasks(rcfg, k_for)]
+    base = {k: tasks[0][k] for k in ("layout", "n_null", "top_k", "override_null_runs", "grid", "regime")} if tasks \
+        else {"layout": asdict(cfg.layout), "n_null": cfg.n_null, "top_k": cfg.top_k,
+              "override_null_runs": cfg.override_null_runs, "grid": cfg.grid, "regime": True}
+    for i in range(cfg.n_extra_null):
+        s = cfg.extra_seed0 + i
+        tasks.append({**base, **common, "market": "regime", "kind": "null", "strength": 0.0, "k": 0.0, "seed": s,
+                      "star_filters": False, "val_regime": REGIMES[s % 3]})
+    for i in range(cfg.n_standard_null):
+        tasks.append({**base, **common, "market": "standard", "kind": "std_null", "strength": 0.0, "k": 0.0,
+                      "seed": cfg.standard_seed0 + i, "star_filters": False, "val_regime": None})
+    return tasks
+
+
+RCHECK_POWER_KINDS = FILTERED_KINDS                      # 검정력 판정 = 국면 필터 엣지 S*_f 시장
+RCHECK_NULL_KINDS = ("null", "std_null")
+
+
+def summarize_rcheck(runs: list[dict]) -> dict:
+    """(G4 변형 × 국면 검사 방식) 조합마다 오탐(귀무 국면 + 표준 귀무, 하락 Val 귀무)·검정력(S*_f, Sharpe 2)."""
+    rows = []
+    if not runs:
+        return {"rows": rows, "diag": {}}
+    g4s = list(dict.fromkeys(r["g4_variant"] for r in runs))
+    for g4 in g4s:
+        rr = [r for r in runs if r["g4_variant"] == g4]
+        for mode in RCHECK_MODES:
+            def frac(sel, key):
+                x = sum(bool(r["rcheck_modes"][mode][key]) for r in sel)
+                return x, len(sel), (x / len(sel) if sel else float("nan")), wilson(x, len(sel))
+            nul = [r for r in rr if r["kind"] in RCHECK_NULL_KINDS]
+            row = {"g4_variant": g4, "regime_mode": mode}
+            for name, sel, key in (
+                    ("fpr", nul, "any_validated"),
+                    ("fpr_regime_null", [r for r in rr if r["kind"] == "null"], "any_validated"),
+                    ("fpr_std_null", [r for r in rr if r["kind"] == "std_null"], "any_validated"),
+                    ("fpr_bear_val", [r for r in rr if r["kind"] == "null" and r.get("val_regime") == "bear"],
+                     "any_validated"),
+                    ("power", [r for r in rr if r["kind"] in RCHECK_POWER_KINDS], "star_validated"),
+                    ("power_bull_val", [r for r in rr if r["kind"] in RCHECK_POWER_KINDS
+                                        and r.get("val_regime") == "bull"], "star_validated"),
+                    ("power_regime_cond", [r for r in rr if r["kind"] == "regime_cond"], "star_validated"),
+                    ("power_regime_filter", [r for r in rr if r["kind"] == "regime_filter"], "star_validated"),
+                    ("power_regime_cond_f", [r for r in rr if r["kind"] == "regime_cond_f"], "star_validated")):
+                x, n, p, ci = frac(sel, key)
+                row.update({name: p, name + "_x": x, name + "_n": n, name + "_ci": ci})
+            row["star_dev_passed"] = (sum(bool(r["star_dev_passed"]) for r in rr if r["kind"] in RCHECK_POWER_KINDS)
+                                      / max(1, sum(r["kind"] in RCHECK_POWER_KINDS for r in rr)))
+            row["star_g6_passed"] = (sum(bool(r["star_g6_passed"]) for r in rr if r["kind"] in RCHECK_POWER_KINDS)
+                                     / max(1, sum(r["kind"] in RCHECK_POWER_KINDS for r in rr)))
+            rows.append(row)
+    return {"rows": rows, "diag": summarize_rcheck_diag(runs),
+            "inconsistent": [(r["seed"], r["g4_variant"]) for r in runs if not r.get("rcheck_consistent", True)]}
+
+
+def summarize_rcheck_diag(runs: list[dict]) -> dict:
+    """조건부 진단: 상위 후보(G4 current 실행) 중 (귀무 | 심은 S* 대표) × (G2 통과 여부) 별로
+    알파 통과율과 국면 검사 방식별 통과율, 그리고 'G2·알파 모두 통과했는데 국면 검사만이 막는' 비율."""
+    out = {}
+    cands = []
+    for r in runs:
+        if r["g4_variant"] != "current":
+            continue
+        for c in r.get("rcheck_cands") or []:
+            if "diag" not in c:
+                continue
+            grp = ("null" if r["kind"] in RCHECK_NULL_KINDS else
+                   "planted_rep" if c["is_rep"] and r["kind"] in RCHECK_POWER_KINDS else
+                   "planted_rep_unfiltered_edge" if c["is_rep"] else "planted_other")
+            cands.append({**c, "grp": grp, "kind": r["kind"]})
+    for grp in ("null", "planted_rep", "planted_rep_unfiltered_edge", "planted_other"):
+        for g2 in ("all", "g2_pass", "g2_alpha_pass"):
+            sel = [c for c in cands if c["grp"] == grp]
+            if g2 == "g2_pass":
+                sel = [c for c in sel if c["g2_passed"]]
+            elif g2 == "g2_alpha_pass":
+                sel = [c for c in sel if c["g2_passed"] and c["diag"]["alpha_passed"]]
+            n = len(sel)
+            if not n:
+                continue
+            row = {"n": n, "alpha_pass": sum(bool(c["diag"]["alpha_passed"]) for c in sel) / n,
+                   "filtered": sum(c["filtered"] for c in sel) / n}
+            for m in RCHECK_MODES:
+                x = sum(c["diag"]["regime_pass"][m] for c in sel)
+                row[f"regime_pass_{m}"] = x / n
+                row[f"regime_pass_{m}_ci"] = wilson(x, n)
+                # 국면 검사만이 막는 비율(알파·이상치·연도 제외는 통과, 국면 검사 실패)
+                y = sum((not c["diag"]["regime_pass"][m]) and bool(c["diag"]["alpha_passed"])
+                        and c["diag"]["outliers_passed"] is not False and c["diag"]["loyo_passed"] is not False
+                        for c in sel)
+                row[f"regime_only_block_{m}"] = y / n
+            out[f"{grp}|{g2}"] = row
+    return out
+
+
+def run_rcheck_study(cfg: RcheckStudyConfig, progress=print, edge: dict | None = None) -> dict:
+    t0 = time.time()
+    pool = ProcessPoolExecutor(max_workers=cfg.jobs, mp_context=get_context("spawn")) if cfg.jobs > 1 else None
+    try:
+        if edge is None:
+            rcfg = RegimeStudyConfig("rc", cfg.layout, cfg.strength, cfg.n_markets, cfg.n_null, cfg.top_k, cfg.grid,
+                                     pilot_ks=cfg.pilot_ks, pilot_seeds=cfg.pilot_seeds, pilot_years=cfg.pilot_years,
+                                     seed0=cfg.seed0)
+            progress(f"[rcheck] pilot edge map ({len(cfg.pilot_ks)} k × {cfg.pilot_seeds} seeds × {cfg.pilot_years}y)")
+            edge = pilot_regime_edge_map(rcfg, pool)
+        else:
+            edge = {**edge, "reused": True}
+        bad = {k: v for k, v in edge["k_for"].items() if not np.isfinite(v)}
+        if bad:                   # 짧은 파일럿(quick)에서 보간이 평평하면 외삽이 무한대 → 파일럿 최대 k 로 (구조 점검용)
+            edge = {**edge, "k_for": {**edge["k_for"], **{k: float(max(cfg.pilot_ks)) for k in bad}},
+                    "k_clipped": sorted(bad)}
+        progress(f"[rcheck] k for strength {cfg.strength}: {edge['k_for']}")
+        tasks = build_rcheck_tasks(cfg, edge["k_for"])
+        progress(f"[rcheck] {len(tasks)} markets × {len(cfg.g4_variants)} G4 variants × {len(RCHECK_MODES)} "
+                 "regime-check modes (post hoc)")
+        runs = []
+        it = pool.map(run_rcheck_market, tasks) if pool else map(run_rcheck_market, tasks)
+        for i, recs in enumerate(it, start=1):
+            runs += recs
+            r0 = recs[0]
+            progress(f"[rcheck] {i}/{len(tasks)} {r0['kind']} val={r0['val_regime']} seed={r0['seed']}: "
+                     + "; ".join(f"{r['g4_variant']}: star={r['star_outcome']} "
+                                 + ",".join(f"{m}={int(v['any_validated'])}/{int(v['star_validated'])}"
+                                            for m, v in r['rcheck_modes'].items()) for r in recs)
+                     + f" ({r0['runtime_total_sec']}s)")
+    finally:
+        if pool:
+            pool.shutdown()
+    from .campaign import run_params
+    try:
+        pv = run_params()
+    except Exception as e:  # noqa: BLE001
+        pv = {"error": str(e)}
+    return {"config": cfg.to_record(), "edge_map": edge, "runs": runs, "summary": summarize_rcheck(runs),
+            "modes": RCHECK_MODES, "g4_variants": G4_RECENT_VARIANTS,
+            "runtime_sec": round(time.time() - t0, 1), "created": pd.Timestamp.now("UTC").isoformat(),
+            "gate_config_version": G.load_gate_config().get("version"),
+            "params_version": pv.get("params_version"), "cost_versions": pv.get("cost_versions")}
+
+
+def rcheck_tables_markdown(result: dict) -> str:
+    rows = result["summary"]["rows"]
+    L = ["| G4 최근 조건 | 국면 검사 | 오탐 (귀무 전체) | 귀무 국면 | 표준 귀무 | 하락 Val 귀무 | 검정력 S*_f (Sharpe 2) | "
+         "└ 상승 Val | └ (ii') | └ (iii) | 무필터 S* (ii) |",
+         "|---|---|---|---|---|---|---|---|---|---|---|"]
+
+    def cell(r, k):
+        return f"{r[k + '_x']}/{r[k + '_n']} = {_pct(r[k])}{_ci(r[k + '_ci'])}" if r[k + "_n"] else "–"
+    for r in rows:
+        L.append(f"| {r['g4_variant']} | {r['regime_mode']} | {cell(r, 'fpr')} | {cell(r, 'fpr_regime_null')} | "
+                 f"{cell(r, 'fpr_std_null')} | {cell(r, 'fpr_bear_val')} | {cell(r, 'power')} | "
+                 f"{cell(r, 'power_bull_val')} | {cell(r, 'power_regime_cond_f')} | {cell(r, 'power_regime_filter')} | "
+                 f"{cell(r, 'power_regime_cond')} |")
+    d = result["summary"].get("diag") or {}
+    if d:
+        L += ["", "조건부 진단 (G4 current 실행의 상위 후보 전부, Dev 견고성 검사 — Dev·Val 관문과 무관):", "",
+              "| 후보 군 | 조건 | 후보 수 | 알파 통과 | " + " | ".join(f"국면 통과 {m}" for m in RCHECK_MODES)
+              + " | 국면 검사만 막음 (current) |",
+              "|---|---|---|---|" + "---|" * len(RCHECK_MODES) + "---|"]
+        for key, r in d.items():
+            grp, cond = key.split("|")
+            L.append(f"| {grp} | {cond} | {r['n']} | {_pct(r['alpha_pass'])} | "
+                     + " | ".join(f"{_pct(r[f'regime_pass_{m}'])}{_ci(r[f'regime_pass_{m}_ci'])}"
+                                  for m in RCHECK_MODES)
+                     + f" | {_pct(r['regime_only_block_current'])} |")
+    inc = result["summary"].get("inconsistent")
+    L += ["", f"사후 판정 일관성(국면 검사 current 사후 판정 = 파이프라인 라벨): 불일치 {len(inc or [])}건"]
+    return "\n".join(L)
+
+
 def run_sequence(task: dict) -> dict:
     """누적 원장: 한 시장·한 저장소(한 원장, 한 family)에서 task["sequence"] 캠페인을 차례로 실행.
     시도 수(N_family → G5 DSR 의 N)와 Val 사용(k → 누적 Holm 문턱)이 쌓인다."""
@@ -1416,6 +1840,9 @@ def main(argv=None) -> int:
     ap.add_argument("--regime-quick", action="store_true", help="--regime 의 테스트용 짧은 설정")
     ap.add_argument("--g6-stage", type=int, default=0, metavar="N",
                     help="귀무 국면 시장 N 개의 G6 단계 조건부 진단(Dev 관문 생략, 현재 vs 변형)")
+    ap.add_argument("--rcheck", action="store_true",
+                    help="롱 온리 기준 2종 보정: 견고성 국면 검사 방식 × G4 최근 12개월 변형 (국면·표준 귀무 시장)")
+    ap.add_argument("--rcheck-quick", action="store_true", help="--rcheck 의 테스트용 짧은 설정")
     ap.add_argument("--edge-from", default=None, help="이전 결과 json 의 edge_map 재사용(같은 설정일 때만)")
     ap.add_argument("--jobs", type=int, default=min(4, os.cpu_count() or 1))
     ap.add_argument("--out", default=None, help="markdown report path")
@@ -1427,6 +1854,15 @@ def main(argv=None) -> int:
             Path(a.json).parent.mkdir(parents=True, exist_ok=True)
             Path(a.json).write_text(json.dumps(res, indent=1, default=str), encoding="utf-8")
         print(g6_stage_markdown(res))
+        return 0
+    if a.rcheck or a.rcheck_quick:
+        ccfg = rcheck_quick_config(a.jobs) if a.rcheck_quick else rcheck_full_config(a.jobs)
+        edge = json.loads(Path(a.edge_from).read_text(encoding="utf-8"))["edge_map"] if a.edge_from else None
+        res = run_rcheck_study(ccfg, edge=edge)
+        if a.json:
+            Path(a.json).parent.mkdir(parents=True, exist_ok=True)
+            Path(a.json).write_text(json.dumps(res, indent=1, default=str), encoding="utf-8")
+        print(rcheck_tables_markdown(res))
         return 0
     if a.regime or a.regime_quick:
         rcfg = regime_quick_config(a.jobs) if a.regime_quick else regime_full_config(a.jobs)

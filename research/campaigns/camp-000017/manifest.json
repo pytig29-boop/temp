@@ -1,0 +1,138 @@
+{
+  "campaign_id": "camp-000017",
+  "hypothesis_id": "hyp-000017",
+  "template": "c3_vol_breakout_atrch_1h_hivol_atr",
+  "family": "vol_breakout",
+  "created": "2026-11-10T01:24:37+00:00",
+  "data": {
+    "exchange": "coinone",
+    "symbol": "BTC-KRW",
+    "timeframe": "1m",
+    "rows_1m": 2541600,
+    "filled_frac": 0.07562873780295877,
+    "aux": [],
+    "aux_rows_1m": {}
+  },
+  "timeframe": "1h",
+  "exits": {
+    "mode": "atr",
+    "atr_bars": 14,
+    "n_variants": 4
+  },
+  "period": {
+    "segment": "dev",
+    "start": "2021-01-01T00:00:00+00:00",
+    "end": "2025-11-01T00:00:00+00:00"
+  },
+  "data_snapshot": "snap-93b066dd27ee41f0a0ec",
+  "code_commit": "ddbb30370f4872a9b29678664c2d392aa758d707+dirty",
+  "n_specs": 8,
+  "n_runs": 16,
+  "costs": {
+    "primary": "coinone_conservative",
+    "grade": "upbit_conservative",
+    "stress": "coinone_stress",
+    "grade_stress": "upbit_stress"
+  },
+  "evaluated_costs": [
+    "coinone_conservative",
+    "upbit_conservative"
+  ],
+  "runtime_sec": 2.56,
+  "half_life_days": 365,
+  "power": {
+    "n_grid": 8,
+    "family": "vol_breakout",
+    "n_family_prior": 56,
+    "ratio": 0.1875,
+    "ratio_source": "history median of 6 campaigns",
+    "k_eff_est": 1.5,
+    "n_trials_dsr": 12.0,
+    "n_days": 1765,
+    "var_trial_sr": 0.00028795779107332255,
+    "var_source": "history median",
+    "min_dsr": 0.95,
+    "required_sharpe_ann": 1.28879142597731,
+    "required_sharpe_ann_single_trial": 0.7484985921568781,
+    "target_sharpe_ann": 2.0,
+    "max_trials_for_target": 9765.78798735097,
+    "max_grid_for_target": 52028.20259920517,
+    "markdown": "- 계획 격자 8 스펙, 계열 `vol_breakout` 기존 시도 56, 압축비 0.188 (history median of 6 campaigns) → 실질 시도 ≈ 12.0\n- Dev 1765일, V=0.000288 (history median), 왜도 0, 첨도 3, DSR ≥ 0.95\n- **G5 통과 최소 연 Sharpe ≈ 1.29** (시도 1회였다면 0.75)\n- 목표 연 Sharpe 2 로 감당 가능한 실질 시도 ≈ 9766 (격자 ≈ 52028 스펙)",
+    "warning": null,
+    "strict": true,
+    "ok": true
+  },
+  "screen": {
+    "from_screen": "camp-000015",
+    "requires_screen_pass": false,
+    "n_configs": 2,
+    "matches": [
+      {
+        "config": "atr_channel_breakout{'span': 24, 'mult': 3.0} & vol_regime{'window': 24, 'min_pct': 0.5}",
+        "screen_id": "camp-000015",
+        "run_id": "run-000149",
+        "p_signal": 0.00029842483461973193,
+        "n_events": 850,
+        "info_horizon": 480,
+        "exchange": "coinone",
+        "aux": []
+      },
+      {
+        "config": "atr_channel_breakout{'span': 24, 'mult': 3.0} & vol_regime{'window': 24, 'min_pct': 0.67}",
+        "screen_id": "camp-000015",
+        "run_id": "run-000150",
+        "p_signal": 0.0005938421202511914,
+        "n_events": 678,
+        "info_horizon": 480,
+        "exchange": "coinone",
+        "aux": []
+      }
+    ],
+    "rule": "every (entry params × filter params × timeframe × exchange) config passed a recorded screen"
+  },
+  "benchmark": {
+    "kind": "BTC buy & hold (same venue 1m close, no cost)",
+    "bh_total_return": 4.12084827693746,
+    "bh_sharpe": 0.914882564442411,
+    "bh_max_dd": 0.7414165725232089,
+    "bh_n_up_days": 877,
+    "bh_n_down_days": 883,
+    "bh_n_up_regime_days": 980,
+    "bh_n_down_regime_days": 755,
+    "bh_dd1_depth": 0.7414165725232089,
+    "bh_dd1_start": "2021-11-09",
+    "bh_dd1_end": "2022-12-28",
+    "bh_dd2_depth": 0.5627441981617689,
+    "bh_dd2_start": "2021-04-14",
+    "bh_dd2_end": "2021-07-20",
+    "bh_dd3_depth": 0.2903387607068444,
+    "bh_dd3_start": "2024-03-14",
+    "bh_dd3_end": "2024-09-07"
+  },
+  "params": {
+    "params_version": "bc8fb6b2bc0e",
+    "cost_versions": {
+      "coinone_base": 2,
+      "coinone_conservative": 2,
+      "coinone_stress": 2,
+      "upbit_base": 1,
+      "upbit_conservative": 1,
+      "upbit_stress": 1
+    },
+    "registry_version": 1,
+    "n_params": {
+      "1": 24,
+      "2": 73,
+      "3": 12
+    }
+  },
+  "params_version": "bc8fb6b2bc0e",
+  "cost_versions": {
+    "coinone_base": 2,
+    "coinone_conservative": 2,
+    "coinone_stress": 2,
+    "upbit_base": 1,
+    "upbit_conservative": 1,
+    "upbit_stress": 1
+  }
+}

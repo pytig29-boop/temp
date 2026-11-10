@@ -1,0 +1,66 @@
+name: c3_vol_breakout_atrch_1h_hivol_atr
+data:
+  exchange: coinone
+  symbol: BTC-KRW
+  timeframe: 1m
+  aux: []
+timeframe: 1h
+entry:
+  block: atr_channel_breakout
+  grid:
+    span:
+    - 24
+    mult:
+    - 3.0
+filters:
+- - block: vol_regime
+    grid:
+      window:
+      - 24
+      min_pct:
+      - 0.5
+      - 0.67
+exits:
+  mode: atr
+  sl_atr:
+  - 2.0
+  - 3.0
+  tp_atr:
+  - 1.5
+  - 3.0
+  max_hold_min:
+  - 480
+  atr_bars: 14
+from_screen: camp-000015
+power:
+  target_sharpe: 2.0
+costs:
+  primary: coinone_conservative
+  grade: upbit_conservative
+  stress: coinone_stress
+  grade_stress: upbit_stress
+budget: 8
+family: vol_breakout
+hypothesis:
+  text: 'Coinone BTC-KRW 1h: atr_channel_breakout(span 24, mult 3) taken only when 24h realised vol is in the upper half /
+    tercile of its trailing range (vol_regime(24, 0.5 / 0.67)), with ATR exits (SL 2/3 ATR x TP 1.5/3 ATR, max hold 480 min
+    = information horizon), earns positive coinone_conservative net returns that pass G0-G5 on Dev and the robustness suite
+    (incl. regime share <= 70%).'
+  rationale: 'Mechanism M3 (multi-hour time-series momentum; in high vol, breakouts trigger stop/short-liquidation cascades
+    and trend-following flow). Counterparty: stops and counter-trend sellers at breakout levels, late chasers we sell to at
+    exit; persists because liquidation flow is forced and Coinone is too thin for large arbitrageurs. Kills it: bear regimes
+    for a long-only spot book, Upbit-level costs (grade B), false breakouts in high vol. Evidence (all Dev; lockbox none,
+    Val none): screen camp-000015 (fact-000015) passed both configs: vol 0.5 n=850 p=3e-4 net +33.3 bp @480 (Upbit +19.3),
+    vol 0.67 n=678 p=6e-4 net +39.0 bp (Upbit +25.0), info horizon 480 peaked; exit suggestions TP 1.38-1.40 ATR, SL 1.80-1.86
+    ATR. Motivation from camp-000013 Dev robustness only (up-trend 30d days 74% of PnL; high-vol tercile stronger); the G6
+    outcome of camp-000013 is NOT used. Exits are held identical to camp-000013 (SL 2/3 x TP 1.5/3 ATR, hold 480) so that
+    the only change vs camp-000013 is the vol filter (isolates the filter; the set brackets the screen suggestions). Logged
+    side calculation camp-000016 (9 configs, Dev): excess at 480 by trailing-30d trend tercile: unfiltered down 33.9 bp z
+    2.83 / sideways 27.3 z 2.41 / up 27.5 z 2.44; vol0.5 25.3 z 1.71 / 41.2 z 3.04 / 31.8 z 2.24; vol0.67 13.3 z 0.79 / 40.1
+    z 2.63 / 44.4 z 2.66. The grid was fixed before this side calculation and not changed by it. Pre-stated expectation /
+    predicted failure modes: robustness regime share (up-trend) and G4 recent-12-month Sharpe (2025 weak in every momentum
+    config); the vol filter thins down-regime events, so REGIME_DEPENDENT remains the most likely failure; G5 margin is thin
+    (required Sharpe 1.29 vs camp-000013 Sharpe 1.46). [derived-from drv-000011 ← fact-000015; family vol_breakout]'
+  success_criteria: At least one spec passes G0-G6 and the Dev robustness suite (latency, outliers, leave-year-out, cost x1.5,
+    regime share <= 70%, alpha, cross-venue). Refuted for this filter if the best Dev Sharpe_w is not above camp-000013 representative
+    (1.02) or the regime check still fails.

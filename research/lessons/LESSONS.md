@@ -3,7 +3,7 @@
 > `btc_quant.research.lessons.render_markdown()` 생성물. **직접 편집 금지** (원본: `research/lessons/*.jsonl`).
 > 사실(Facts)은 파이프라인 결과에서 자동 추출되어 불변이다. 해석(Interpretations)은 AI 작성이며
 > 후속 캠페인으로 verified/refuted 되기 전까지 **unverified** 이다. Val/잠금은 결과 코드만.
-> 생성: 2026-11-09T23:34:23+00:00 · 사실 14 · 해석 8 · 사후분석 5 · 파생 10
+> 생성: 2026-11-10T01:26:33+00:00 · 사실 16 · 해석 10 · 사후분석 6 · 파생 11
 
 ## 실패 유형 (자동 분류)
 
@@ -27,7 +27,7 @@
 | family | 캠페인 | 누적 시도 | 결과 | 주 실패 유형 |
 |---|---|---|---|---|
 | `liq_meanrev` | 5 | 41 | passed 2, failed 3 | `PARAM_SPIKE`×1, `UNSTABLE`×1, `NO_SIGNAL`×1 |
-| `vol_breakout` | 6 | 45 | passed 3, failed 3 | `PARAM_SPIKE`×1, `VAL_FAIL`×1, `SELECTION_BIAS`×1 |
+| `vol_breakout` | 8 | 66 | passed 4, failed 4 | `VAL_FAIL`×2, `PARAM_SPIKE`×1, `SELECTION_BIAS`×1 |
 | `xvenue_upbit_lead` | 3 | 16 | failed 2, passed 1 | `COST_EATEN`×1, `LOW_SAMPLE`×1 |
 
 ## 교훈 (사실 → 해석)
@@ -271,9 +271,10 @@
 
 **해석 (AI, 검증 상태 표시)**
 
-- [UNVERIFIED] int-000006 (신뢰도 medium): 1h ATR-channel breakout (span 24, mult 3) is the first signal in this ledger whose information survives conversion to a strategy on Dev (G0-G5 pass) and is not cost-eaten at Coinone costs, but it is long-only time-series momentum whose Dev PnL is concentrated in up-trend 30d regimes and in 2021/2023/2024; 2022 is weak and 2025 negative. It behaves like trend participation with real but regime-conditional timing information, not regime-independent alpha. Under Upbit grade cost it is negative (grade B at best).
+- [REFUTED] int-000006 (신뢰도 medium): 1h ATR-channel breakout (span 24, mult 3) is the first signal in this ledger whose information survives conversion to a strategy on Dev (G0-G5 pass) and is not cost-eaten at Coinone costs, but it is long-only time-series momentum whose Dev PnL is concentrated in up-trend 30d regimes and in 2021/2023/2024; 2022 is weak and 2025 negative. It behaves like trend participation with real but regime-conditional timing information, not regime-independent alpha. Under Upbit grade cost it is negative (grade B at best).
   - 근거: fact-000013 candidates[0]: sharpe 1.457, sharpe_w 1.019, gross_sharpe_w 1.365, 610 trades, G2 p 0.011, G3 neighbour median 0.62, G4 rolling 0.79, G5 dsr 0.991 pbo 0.058; G6 outcome fail (code only); camp-000013 results.parquet yearly Sharpe (Dev, coinone_conservative): 2021 2.25, 2022 0.50, 2023 2.03, 2024 1.85, 2025 -0.25; upbit_conservative sharpe_w -0.26; ad-hoc Dev robustness_for_spec(c2b_vol_breakout_atrch_1h_atr_72bbc9dae5), no ledger trial: regime FAIL (up-trend days 0.74 of PnL, Sharpe 2.74; sideways 0.94, down 0.84); alpha pass (alpha_t 2.78, beta 0.10); leave-year-out min 1.22; top 1% trades 0.27 of PnL; latency 1 bar retention 0.95; cost x2 Sharpe 1.16; cross-venue Upbit ratio 0.94; per-year side calculation of screen config (camp-000009, Dev, no ledger): excess at 480 min positive in all 5 years, z>2 only 2023/2024
   - 검증 방법: Pre-registered 1h screen in family vol_breakout of atr_channel_breakout(24,3) with vol_regime(24, 0.67) vs none, plus a per-year/regime table: refuted (i.e. the edge is regime-independent) if excess at 480 min is > 0 with z > 2 in down- and sideways-30d-regime subsets separately on Dev. No Dev parameter may be chosen from the G6 outcome.
+  - refuted by camp-000015 (2026-11-10T01:26:23+00:00): Partial refutation by its own pre-registered criterion. The test named in int-000006 (1h screen of atr_channel_breakout(24,3) with vol_regime(24,0.67) vs none plus a per-regime table) was run: screen camp-000015 (fact-000015) and the logged per-regime side calculation camp-000016 (Dev). For the unfiltered config that int-000006 describes, the excess at 480 min is > 0 with z > 2 in down (33.9 bp, z 2.83) and sideways (27.3 bp, z 2.41) 30d regimes separately, so the claim that the timing information is regime-conditional is refuted. What still holds: strategy PnL stays concentrated in up-trend days (camp-000017 survivor 0.67), 2022/2025 are weak, Upbit cost is near zero or negative (grade B at best). For the vol_regime 0.67 config the criterion is not met (down z 0.79). See int-000009 for the drift explanation (unverified).
 
 ### fact-000014 · campaign `camp-000014` · family `vol_breakout`
 
@@ -295,6 +296,44 @@
   - 근거: fact-000014 candidates[0] (lookback 144, SL 3.5 / TP 2.5 ATR, hold 1440): sharpe_w 0.988, 339 trades, G5 dsr 0.922, pbo 0.525; camp-000014 results.parquet: lookback 48 sharpe_w -0.37/0.15/0.47/0.75 vs lookback 144 0.83-0.99; yearly 2022 -0.38, 2025 0.02 for the representative; upbit_conservative sharpe_w 0.02-0.40 (lookback 144); per-year side calculation of screen camp-000009 configs (Dev, no ledger): donchian 48 excess negative in 2022 and 2025, donchian 144 2025 excess 3.5 bp
   - 검증 방법: Same-family campaign that holds lookback 144 and adds a regime filter would be a new trial; refuted if lookback 144 without filter shows 2022 and 2025 Dev Sharpe > 0.5 under any of the 4 exit variants (it does not in camp-000014, so the claim stands until new data).
 
+### fact-000015 · signal_screen `camp-000015` · family `vol_breakout`
+
+**사실 (자동, 불변)**
+
+- 가설 hyp-000015: On Coinone BTC-KRW at 1h decisions, atr_channel_breakout(24,3) carries more information per event when 24h realised vol is in the upper half / tercile of its trailing 7-day range (vol_regime 0.5 / 0.67), and that information is present in down- and sideways-30d regimes, not only up-trends.
+- 결과: **passed** · 주 실패 유형: `None` · 분포: –
+- 깔때기(전체 None 스펙): G1 None · SR_w>0 None · G4 None | 상위 None:  · Dev 생존 None
+  - `atr_channel_breakout(span=24,mult=3.0) & vol_regime(window=24,min_pct=0.5)` events=850 p=0.000 best_h=480 → PASS
+  - `atr_channel_breakout(span=24,mult=3.0) & vol_regime(window=24,min_pct=0.67)` events=678 p=0.001 best_h=480 → PASS
+- 범위: coinone None 1m · dev 2021-01-01T00:00:00+00:00~2025-11-01T00:00:00+00:00 · 블록 ['atr_channel_breakout'] / None · 재검토 기한 2027-05-09
+- 재검토 조건: Dev data period changes; venue/cost model changes; decision interval changes (bar_minutes)
+
+**해석 (AI, 검증 상태 표시)**
+
+- [UNVERIFIED] int-000009 (신뢰도 medium): The event-level timing information of 1h atr_channel_breakout(24,3) at 480 min is not confined to up-trend 30d regimes: against a null matched within each regime subset, the unfiltered signal has similar excess in down, sideways and up terciles. The up-trend concentration of strategy PnL (camp-000013 0.74, camp-000017 0.67) therefore comes mostly from unadjusted drift (a long-only book keeps the regime return during the hold) and from more events in up regimes, not from timing information that only exists in bull markets. The high-vol filter does not add down-regime information; at vol_regime 0.67 the down-regime excess is weak.
+  - 근거: camp-000016 (log_exploration, 9 configs, Dev): excess at 480 min by trailing-30d BTC return tercile, null matched within regime: unfiltered down 33.9 bp z 2.83 (n 281) / sideways 27.3 z 2.41 (n 379) / up 27.5 z 2.44 (n 488); vol_regime 0.5: 25.3 z 1.71 / 41.2 z 3.04 / 31.8 z 2.24; vol_regime 0.67: 13.3 z 0.79 / 40.1 z 2.63 / 44.4 z 2.66; raw mean unfiltered down 29.4 vs up 40.7 bp; fact-000015: both vol-filtered configs passed (n 850 / 678, p 3e-4 / 6e-4, info horizon 480 peaked); camp-000019 (log_exploration, 1 spec): Dev robustness of camp-000017 survivor: up-trend PnL share 0.67, Sharpe down 0.98 / sideways 0.84 / up 2.64; research/knowledge/mechanisms.md#M3 (motivating evidence K-P0-4 is lockbox-exposed; not used for grid)
+  - 검증 방법: Same family: per-regime strategy PnL minus exposure-matched BTC B&H for the unfiltered 1h atr_channel(24,3) spec (camp-000013 grid) on Dev; refuted if the down- and sideways-regime excess vs matched B&H is <= 0 while the up-regime excess is > 0. Re-run the per-regime event study on any Dev extension; refuted if the down-regime excess z < 1 there.
+
+### fact-000016 · campaign `camp-000017` · family `vol_breakout`
+
+**사실 (자동, 불변)**
+
+- 가설 hyp-000017: Coinone BTC-KRW 1h: atr_channel_breakout(span 24, mult 3) taken only when 24h realised vol is in the upper half / tercile of its trailing range (vol_regime(24, 0.5 / 0.67)), with ATR exits (SL 2/3 ATR x TP 1.5/3 ATR, max hold 480 min = information horizon), earns positive coinone_conservative net returns that pass G0-G5 on Dev and the robustness suite (incl. regime share <= 70%).
+- 결과: **failed** · 주 실패 유형: `VAL_FAIL` · 분포: –
+- 파생: drv-000011 (계열 점검: ok)
+- 깔때기(전체 8 스펙): G1 8 · SR_w>0 8 · G4 6 | 상위 5: G0 1 · G1 1 · G2 1 · G3 1 · G4 1 · G5 1 · Dev 생존 1
+- 선택편향 입력: n_campaign_specs=8, k_eff_clusters=1, n_family_trials=64, n_global_trials=121, n_trials_dsr=8.000, pbo=0.073, cluster_threshold=0.500
+- Val(G6): 평가 1 · 통과 0 (결과 코드만) · 잠금: not_accessed
+  - #1 `c3_vol_breakout_atrch_1h_hivol_atr_3247d3023d` SR_w=1.145 trades=326 first_failed=None → `VAL_FAIL` ['VAL_FAIL'] · val=fail
+- 범위: coinone BTC-KRW 1m · dev 2021-01-01T00:00:00+00:00~2025-11-01T00:00:00+00:00 · 블록 atr_channel_breakout / [['vol_regime']] · 재검토 기한 2027-05-09
+- 재검토 조건: Dev data period or segment boundaries change (new data, lockbox rolled into Dev/Val); venue or cost model changes (e.g. Coinone 0% fee promotion ends, Upbit fee changes); timeframe / decision interval changes (5m ↔ 1m); a block used here is re-implemented (new block version) or an engine bug is fixed; review date 2027-05-09 passes
+
+**해석 (AI, 검증 상태 표시)**
+
+- [UNVERIFIED] int-000010 (신뢰도 medium): Adding vol_regime(24, 0.5/0.67) to 1h atr_channel_breakout(24,3) with unchanged ATR exits mainly thins trades (610 -> 326-411) and gives a small, statistically insignificant improvement on Dev: weighted Sharpe 1.02 -> 1.14, 2025 Sharpe -0.25 -> 0.48, Upbit-cost Sharpe_w -0.26 -> 0.37, up-trend PnL share 0.74 -> 0.67. The ablation says the filter is removable (delta 0.13, bootstrap s.e. 0.35). The filtered and unfiltered representatives both failed G6 (outcome code only), so the vol filter is not a new mechanism and does not change the verdict on this signal. The Dev robustness pass (regime share 0.67 vs limit 0.70) is marginal.
+  - 근거: fact-000016 candidates[0] (vol 0.67, SL 2 / TP 3 ATR, hold 480): sharpe 1.587, sharpe_w 1.145, gross_sharpe_w 1.353, 326 trades (60 recent), G2 p 0.023, G3 neighbour median 1.05, G4 rolling 0.81 recent 1.04, G5 dsr 0.999 pbo 0.073; G6 outcome fail (code only); camp-000017 ablation_dev: dropping vol_regime -> logic 72bbc9dae527d230 (= camp-000013 representative) sharpe_w 1.019, delta 0.126, se 0.348, removable (ablation campaign camp-000018); camp-000017 results.parquet (Dev, coinone_conservative): yearly Sharpe 2021..2025 2.51/0.97/2.28/1.24/0.48; all 8 specs sharpe_w > 0 (0.27..1.14), TP 3 specs 1.05..1.14, TP 1.5 specs 0.27..0.62; upbit_conservative sharpe_w 0.18..0.37 for TP 3, negative for TP 1.5; camp-000019 (log_exploration): robustness_for_spec all 7 checks pass; regime up share 0.670; alpha_t 3.21 beta 0.08; top 1% trades 0.19 of PnL; leave-year-out min 1.34; cross-venue ratio 0.81; camp-000013 / fact-000013 (Dev): unfiltered representative sharpe_w 1.019, 610 trades, yearly 2.25/0.50/2.03/1.85/-0.25, up share 0.74
+  - 검증 방법: No further Dev campaign on this signal is informative: Dev is exhausted for it (two Dev survivors, two G6 fails). Refuted if forward/paper observation (after a human decision) or a Dev extension shows the filtered spec Sharpe below the unfiltered one by more than the bootstrap s.e.
+
 ## 파생 가설 (계열 상속)
 
 | id | 부모 | family | override | 가설 |
@@ -309,6 +348,7 @@
 | drv-000008 | fact-000009 | `vol_breakout` | – | Coinone BTC-KRW 1h: atr_channel_breakout(span 24, mult 3) with ATR exits (SL 2/3 ATR x TP 1.5/3 ATR, max hold 480 min = information horizon) earns positive coinone_conservative net returns that pass G0-G5 on Dev and the robustness suite. |
 | drv-000009 | fact-000009 | `vol_breakout` | – | Coinone BTC-KRW 1h: donchian_breakout(lookback 48/144 h) with ATR exits (SL 2.5/3.5 ATR x TP 2.5/5 ATR, max hold 1440 min = information horizon) earns positive coinone_conservative net returns that pass G0-G5 on Dev and the robustness suite. |
 | drv-000010 | fact-000013 | `vol_breakout` | – | On Coinone BTC-KRW at 1h decisions, atr_channel_breakout(24,3) carries more information per event when 24h realised vol is in the upper half / tercile of its trailing 7-day range (vol_regime 0.5 / 0.67), and that information is present in down- and sideways-30d regimes, not only up-trends. |
+| drv-000011 | fact-000015 | `vol_breakout` | – | Coinone BTC-KRW 1h: atr_channel_breakout(span 24, mult 3) taken only when 24h realised vol is in the upper half / tercile of its trailing range (vol_regime(24, 0.5 / 0.67)), with ATR exits (SL 2/3 ATR x TP 1.5/3 ATR, max hold 480 min = information horizon), earns positive coinone_conservative net returns that pass G0-G5 on Dev and the robustness suite (incl. regime share <= 70%). |
 
 ## 과정 사후분석 (버그·데이터·절차)
 
@@ -373,6 +413,17 @@
   - re-run any Coinone 1m screen made before the fix
   - follow-ups: Coinone-specific wick cleaning (k≈0.01 with Upbit confirmation); no Coinone 1m volume/range/ATR features; exclude KST 02-07 and 2023-07..10 for Coinone execution studies
 - 참고: research/reports/data_audit_20261109.md
+
+### pm-000006 · [procedure] Derivation rationale overstated the ordering of grid choice and side calculation (2026-11-10, mitigated)
+
+- **무슨 일**: drv-000011 / hyp-000017 rationale says the camp-000017 grid was fixed before the per-regime side calculation camp-000016. The filters (both passing screen configs) were fixed by the cycle plan before it, but the exit set (copied from camp-000013: SL 2/3 x TP 1.5/3 ATR, hold 480) was written into the template after the side calculation had run.
+- **근본 원인**: The exit choice was decided in reasoning before the side calculation but only written down afterwards; the rationale sentence described intent, not the recorded order. The side calculation concerns entry/filter information by regime and does not bear on exits, and no grid element was changed after seeing it, but the ledger does not prove that.
+- **영향**: Low: the exit set is identical to the prior pre-registered campaign and both screen-passing filter configs were included; the 9 + 1 exploration trials are logged and counted in N_family.
+- **발견 경위**: researcher self-review while writing cycle3a report
+- **재발 방지**:
+  - Write the full strategy template (incl. exits) to disk before running any side calculation whose result could inform it
+  - State order of events in rationales only as recorded (file timestamps / ledger ids)
+- 참고: drv-000011, hyp-000017, camp-000016, camp-000017
 
 
 ## 무결성

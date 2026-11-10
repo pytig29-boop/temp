@@ -1,0 +1,3 @@
+label,family,entry,filters,n_events,p_signal,best_h,excess_bp,z,net_bp[coinone_conservative],net_bp[upbit_conservative],info_h,profile,significant,passed,fail_reason
+"atr_channel_breakout(span=24,mult=3.0) & vol_regime(window=24,min_pct=0.5)",vol_breakout,atr_channel_breakout,vol_regime,850,0.000298425,480,31.217,3.72035,33.3374,19.3005,480,peaked,True,True,
+"atr_channel_breakout(span=24,mult=3.0) & vol_regime(window=24,min_pct=0.67)",vol_breakout,atr_channel_breakout,vol_regime,678,0.000593842,480,34.7064,3.54281,39.0268,24.982,480,peaked,True,True,

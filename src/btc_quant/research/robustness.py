@@ -19,6 +19,11 @@
                   직전 30일 일간 수익률 표준편차 3분위 → low/mid/high vol. 분위 경계는 구간 전체의
                   (인과) 특성값으로 정한다(사후 귀속 진단용). 국면별 Sharpe·손익 비중·거래 비중.
                   어느 한 국면의 손익 비중 > REGIME_MAX_PNL_SHARE 면 실패(총손익 ≤ 0 이면 실패).
+                  판정 방식 `regime_mode` (class ②, 기본 'pnl_share' = 위 규칙 그대로):
+                  - 'dominant_alpha': 비중 > 상한이면 바로 실패 대신, 그 지배 국면 안에서 노출(보유 시간 비율)-맞춤
+                    매수보유 대비 초과수익(연율) ≥ regime_dominant_min_excess 면 통과 (총손익 ≤ 0 은 여전히 실패).
+                  - 'informational': 표시(flag)만 하고 판정에서 뺀다(passed=True, informational=True).
+                  지배 국면의 노출-맞춤 초과수익은 방식과 무관하게 정보로 늘 보고한다.
 6. alpha        : 일간 전략 수익을 BTC 일간 수익에 OLS 회귀 → 알파 t(Newey–West, ALPHA_NW_LAGS),
                   베타, 노출(보유 시간 비율)-맞춤 매수보유 비교. 알파 t ≥ ALPHA_MIN_TSTAT 이면 통과.
 7. cross_venue  : 같은 스펙을 다른 거래소 데이터(예: 대상 코인원 → 업비트)에서 **같은 비용 모델**로 실행
@@ -58,6 +63,9 @@ REGIME_MAX_PNL_SHARE = 0.70        # 한 국면 손익 비중 > 70% 면 국면 �
 ALPHA_MIN_TSTAT = 2.0              # 알파 t ≥ 2 (Newey–West)
 ALPHA_NW_LAGS = 5
 CROSS_VENUE_MIN_RATIO = 0.5        # Sharpe(다른 거래소)/Sharpe(대상) ≥ 0.5, 다른 거래소 Sharpe > 0
+REGIME_MODE = "pnl_share"          # 국면 검사 판정 방식: pnl_share(현재) | dominant_alpha | informational
+REGIME_DOMINANT_MIN_EXCESS = 0.0   # dominant_alpha: 지배 국면 안 노출-맞춤 B&H 대비 초과수익(연율) 하한
+REGIME_MODES = ("pnl_share", "dominant_alpha", "informational")
 
 THRESHOLDS = {
     "latency_min_retention": LATENCY_MIN_RETENTION, "latency_delays_min": list(LATENCY_DELAYS_MIN),
@@ -66,6 +74,7 @@ THRESHOLDS = {
     "regime_lookback_days": REGIME_LOOKBACK_DAYS, "regime_max_pnl_share": REGIME_MAX_PNL_SHARE,
     "alpha_min_tstat": ALPHA_MIN_TSTAT, "alpha_nw_lags": ALPHA_NW_LAGS,
     "cross_venue_min_ratio": CROSS_VENUE_MIN_RATIO,
+    "regime_mode": REGIME_MODE, "regime_dominant_min_excess": REGIME_DOMINANT_MIN_EXCESS,
 }
 DEFAULT_THRESHOLDS = THRESHOLDS
 
@@ -326,7 +335,22 @@ def regime_labels(m1: pd.DataFrame, days: pd.DatetimeIndex, lookback_days: int |
     return f
 
 
-def _regime_table(daily: pd.Series, labels: pd.Series, exit_days: pd.DatetimeIndex) -> dict:
+def _day_exposure(eng: _Engine, tr: fast.TradeArrays, days: pd.DatetimeIndex) -> np.ndarray:
+    """일자별 보유 시간 비율 (거래 보유 분을 진입일에 귀속, 1 상한). 국면 안 노출-맞춤 B&H 용 근사."""
+    out = np.zeros(len(days))
+    if not len(tr.entry_idx) or not len(days):
+        return out
+    ed = pd.DatetimeIndex(eng.p.index[tr.entry_idx]).floor("D")
+    if days.tz is not None and ed.tz is None:
+        ed = ed.tz_localize(days.tz)
+    elif days.tz is None and ed.tz is not None:
+        ed = ed.tz_convert(None)
+    s = pd.Series(np.asarray(tr.hold_min, float), index=ed).groupby(level=0).sum()
+    return np.minimum(s.reindex(days).fillna(0.0).to_numpy(float) / 1440.0, 1.0)
+
+
+def _regime_table(daily: pd.Series, labels: pd.Series, exit_days: pd.DatetimeIndex,
+                  btc_ret: np.ndarray | None = None, expo_day: np.ndarray | None = None) -> dict:
     lr = np.log1p(daily.to_numpy(float))
     total = float(lr.sum())
     n_tr = len(exit_days)
@@ -340,9 +364,44 @@ def _regime_table(daily: pd.Series, labels: pd.Series, exit_days: pd.DatetimeInd
                    "trade_share": float((tr_lab == g).sum() / n_tr) if n_tr else 0.0}
     lab = {k: v for k, v in rows.items() if k != "na"}
     max_share = max((v["pnl_share"] for v in lab.values()), default=float("nan"))
-    return {"total_pnl_log": total, "max_pnl_share": max_share,
-            "dominant": max(lab, key=lambda k: lab[k]["pnl_share"]) if lab and total > 0 else None,
-            "regimes": rows}
+    dom = max(lab, key=lambda k: lab[k]["pnl_share"]) if lab and total > 0 else None
+    out = {"total_pnl_log": total, "max_pnl_share": max_share, "dominant": dom, "regimes": rows}
+    if dom is not None and btc_ret is not None and expo_day is not None:
+        # 지배 국면 안에서: 전략 평균 일간 수익 − (그 국면 평균 보유 비율 × BTC 평균 일간 수익) (연율)
+        m = (labels == dom).to_numpy() & np.isfinite(btc_ret)
+        if m.sum() >= 2:
+            y, x, e = daily.to_numpy(float)[m], btc_ret[m], expo_day[m]
+            expo = float(e.mean())
+            out.update(dominant_exposure=expo, dominant_mean_annual=float(y.mean() * M.ANN),
+                       dominant_matched_bh_annual=float(expo * x.mean() * M.ANN),
+                       dominant_excess_vs_matched_bh_annual=float((y.mean() - expo * x.mean()) * M.ANN))
+    return out
+
+
+def regime_dim_flag(t: dict, th: dict | None = None) -> bool:
+    """국면 차원(trend|vol) 하나의 표시 여부 — th['regime_mode'] 에 따라.
+    pnl_share: 총손익 ≤ 0 또는 최대 손익 비중 > 상한. dominant_alpha: 총손익 ≤ 0, 또는 비중 > 상한이면서 지배 국면 안
+    노출-맞춤 B&H 대비 초과수익 < regime_dominant_min_excess (값이 없으면 표시). informational: pnl_share 와 같은 표시."""
+    th = th or DEFAULT_THRESHOLDS
+    mode = str(th.get("regime_mode", REGIME_MODE))
+    if mode not in REGIME_MODES:
+        raise ValueError(f"unknown regime_mode {mode!r}; expected one of {REGIME_MODES}")
+    total, share = t.get("total_pnl_log", float("nan")), t.get("max_pnl_share", float("nan"))
+    if not total > 0:
+        return True
+    concentrated = bool(share > float(th["regime_max_pnl_share"]))
+    if mode == "dominant_alpha" and concentrated:
+        ex = t.get("dominant_excess_vs_matched_bh_annual")
+        return not (ex is not None and ex >= float(th.get("regime_dominant_min_excess", REGIME_DOMINANT_MIN_EXCESS)))
+    return concentrated
+
+
+def regime_verdict(chk: dict, th: dict | None = None) -> bool:
+    """check_regime 출력(또는 그 trend/vol 표를 담은 dict)의 판정을 th 로 다시 계산 (보정 연구의 사후 평가용;
+    check_regime 자신도 이 함수를 쓴다)."""
+    th = th or DEFAULT_THRESHOLDS
+    flagged = any(regime_dim_flag(chk[d], th) for d in ("trend", "vol") if d in chk)
+    return True if str(th.get("regime_mode", REGIME_MODE)) == "informational" else not flagged
 
 
 def check_regime(eng: _Engine, base: _Run, th: dict | None = None) -> dict:
@@ -351,16 +410,20 @@ def check_regime(eng: _Engine, base: _Run, th: dict | None = None) -> dict:
     lab = regime_labels(eng.m1, days, int(th["regime_lookback_days"]))
     exit_days = pd.DatetimeIndex(eng.p.index[base.tr.exit_idx]).floor("D") if len(base.tr.exit_idx) \
         else pd.DatetimeIndex([], tz=days.tz)
+    btc = lab["btc_ret"].to_numpy(float)
+    expo = _day_exposure(eng, base.tr, days)
     out = {}
-    ok = True
     for dim in ("trend", "vol"):
-        t = _regime_table(base.daily, lab[dim], exit_days)
-        t["flag"] = bool(not (t["total_pnl_log"] > 0) or t["max_pnl_share"] > th["regime_max_pnl_share"])
-        ok &= not t["flag"]
+        t = _regime_table(base.daily, lab[dim], exit_days, btc, expo)
+        t["flag"] = regime_dim_flag(t, th)
         out[dim] = t
-    return {"passed": bool(ok), **out,
-            "note": f"terciles of causal trailing-{int(th['regime_lookback_days'])}d features over the segment; "
-                    "'na' = warm-up days"}
+    mode = str(th.get("regime_mode", REGIME_MODE))
+    res = {"passed": regime_verdict(out, th), **out, "mode": mode,
+           "note": f"terciles of causal trailing-{int(th['regime_lookback_days'])}d features over the segment; "
+                   "'na' = warm-up days"}
+    if mode == "informational":
+        res["informational"] = True
+    return res
 
 
 def _ols_nw(y: np.ndarray, x: np.ndarray, lags: int) -> tuple[np.ndarray, np.ndarray]:

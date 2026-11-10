@@ -1,0 +1,51 @@
+name: c3_vol_breakout_atrch_1h_hivol_screen
+data:
+  exchange: coinone
+  symbol: BTC-KRW
+  timeframe: 1m
+  aux: []
+bar_minutes: 60
+signals:
+- entry:
+    block: atr_channel_breakout
+    params:
+      span: 24
+      mult: 3.0
+  filters:
+  - - block: vol_regime
+      params:
+        window: 24
+        min_pct: 0.5
+  - - block: vol_regime
+      params:
+        window: 24
+        min_pct: 0.67
+study:
+  n_null: 1000
+  seed: 0
+  min_events: 300
+  stratify: hour_vol
+costs:
+  primary: coinone_conservative
+  grade: upbit_conservative
+correction:
+  method: bh
+  alpha: 0.1
+budget: 2
+family: vol_breakout
+hypothesis:
+  text: On Coinone BTC-KRW at 1h decisions, atr_channel_breakout(24,3) carries more
+    information per event when 24h realised vol is in the upper half / tercile of
+    its trailing 7-day range (vol_regime 0.5 / 0.67), and that information is present
+    in down- and sideways-30d regimes, not only up-trends.
+  rationale: 'int-000006: the 1h ATR-channel momentum passed G0-G5 on Dev but its
+    PnL is concentrated in up-trend 30d regimes (Dev robustness regime FAIL). Mechanism
+    M3: breakouts in high vol carry stop/liquidation-cascade flow (counterparty: stops
+    and liquidated shorts, late chasers). Dev robustness showed high-vol tercile Sharpe
+    2.2 vs low 1.0 (Dev only, lockbox none, Val none). The G6 outcome of camp-000013
+    is NOT used to choose anything here; filter values are block-grid values. 2 configs;
+    repeat-free (the unfiltered config is already in camp-000009). [derived-from drv-000010
+    ← fact-000013; family vol_breakout]'
+  success_criteria: 'Per config: BH q=0.10 over the family''s screen configs, n_events
+    >= 300, net mean > 0 at the best primary horizon; and (side calculation, pre-registered)
+    excess at 480 min > 0 in down and sideways 30d regimes separately.'
