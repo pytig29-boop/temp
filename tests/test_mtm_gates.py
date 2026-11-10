@@ -278,3 +278,65 @@ def test_tail_binding_for_ladder_specs_only(root):
     assert c["daily_returns"] == "mtm"
     assert c["checks"]["tail"]["worst_day"] == pytest.approx(a["checks"]["tail"]["worst_day"])
     assert c["checks"]["tail"]["mtm_worst_day"] == pytest.approx(a["checks"]["tail"]["mtm_worst_day"])
+
+
+# ------------------------------------------------------------------ 파산(자산 ≤ 0) 처리 — 두 엔진 일치
+def test_mtm_ruin_day_is_minus_one_then_zero_both_engines():
+    from btc_quant.backtest import fast as F
+    from btc_quant.backtest.sizing import _ruin_safe_returns
+    # 거래 2개: 첫 거래가 자산을 정확히 0 으로, 둘째가 그 뒤 — 예전에는 ZeroDivisionError
+    eg = np.array([1.0, 1.0]); w = np.array([1.0, 1.0]); r = np.array([-1.0, 0.5])
+    ef = np.array([100.0, 100.0]); ed = np.array([0, 2], np.int64); xd = np.array([1, 3], np.int64)
+    dc = np.array([100.0, 100.0, 100.0, 100.0, 100.0])
+    out = F._mtm_core(eg, w, r, ef, ed, xd, dc, 0.0, 0.0, 5)
+    np.testing.assert_allclose(out, [0.0, -1.0, 0.0, 0.0, 0.0])
+    # 음수 자산도 같은 규칙 (−100% 아래로 내려가지 않음)
+    out2 = F._mtm_core(eg, w, np.array([-1.7, 0.5]), ef, ed, xd, dc, 0.0, 0.0, 5)
+    np.testing.assert_allclose(out2, [0.0, -1.0, 0.0, 0.0, 0.0])
+    np.testing.assert_allclose(_ruin_safe_returns(np.array([1.0, 1.1, 0.0, -0.2, 0.3])), [0.0, 0.1, -1.0, 0.0, 0.0])
+    np.testing.assert_allclose(_ruin_safe_returns(np.array([1.0, -0.5])), [0.0, -1.0])
+    np.testing.assert_allclose(_ruin_safe_returns(np.array([1.2, 0.6])), [0.2, -0.5])
+
+
+def test_mtm_ruin_fast_matches_reference_on_ruinous_strategy():
+    m1 = synth_m1(np.random.default_rng(3), 30 * 1440)
+    m1["close"] = m1["close"] * np.exp(-np.linspace(0, 6, len(m1)))     # 급락 → 장기 보유 사다리 파산 유도
+    m1["open"], m1["high"], m1["low"] = m1["close"], m1["close"] * 1.0005, m1["close"] * 0.9995
+    spec = StrategySpec("r", BlockRef("random_entry", {"p": 0.05, "seed": 3}), ExitSpec(50.0, 50.0, 30))
+    s, e = m1.index[0], m1.index[-1] + pd.Timedelta(minutes=1)
+    heavy = CostModel("heavy", fee_rate=0.05, spread_bps=1000.0, slip_bps=500.0)
+    rr = run_fast(spec, m1, heavy, s, e, accounting="mtm")
+    ref = mtm_daily_returns(rr.trades, m1["close"], rr.daily_returns.index, heavy)
+    np.testing.assert_allclose(rr.daily_returns.to_numpy(), ref.to_numpy(), rtol=0, atol=1e-12)
+    d = rr.daily_returns.to_numpy()
+    assert (d >= -1.0 - 1e-12).all()
+    k = int(np.flatnonzero(d == -1.0)[0])                  # 고회전·고비용 → 부동소수 자산 0 (예전 ZeroDivisionError)
+    assert (d[k + 1:] == 0.0).all()
+
+
+# ------------------------------------------------------------------ 임시 저장소 설정 해석: 캠페인 = 파이프라인 (같은 루트)
+@pytest.mark.parametrize("variant", ["own_costs", "no_costs"])
+def test_campaign_and_pipeline_read_costs_from_same_root(tmp_path, variant):
+    root = _mtm_root(tmp_path / variant)
+    cp = root / "config" / "costs.yaml"
+    if variant == "own_costs":     # 임시 저장소 고유 비용(코드 저장소와 다름) → 둘 다 이것을 써야 한다
+        doc = yaml.safe_load(cp.read_text(encoding="utf-8"))
+        name = tpl_dict(name="x").get("costs", {}).get("primary") or "coinone_conservative"
+        ent = doc["models"][name]
+        rec = next(v for v in ent["versions"] if int(v["version"]) == int(ent["current"]))
+        rec["slip_bps"] = float(rec["slip_bps"]) + 1.0
+        cp.write_text(yaml.safe_dump(doc, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    else:                          # 비용 파일 없음 → 둘 다 코드 저장소 비용 (v1 프리셋 아님)
+        cp.unlink()
+    env = ResearchEnv.at(root)
+    cr = run_campaign(CampaignTemplate.from_dict(tpl_dict(name=f"croot-{variant}")), env=env)
+    from btc_quant.research.campaign import config_root, get_cost
+    cost_name = cr.template.costs["primary"]
+    expect_root = root if variant == "own_costs" else ROOT
+    assert get_cost(cost_name, config_root(env)) == get_cost(cost_name, expect_root)
+    p = Pipeline(cr, env, lessons=False, register=False, n_null=5)
+    assert p._cost(cost_name) == get_cost(cost_name, expect_root)
+    for lh, spec in list(cr.specs.items())[:2]:
+        res = p.dev_result(spec, cost_name)
+        np.testing.assert_allclose(cr.returns[lh].to_numpy(), res.daily_returns.to_numpy(), rtol=0, atol=1e-13)
+        assert cr.primary().loc[lh]["sharpe"] == pytest.approx(M.sharpe(res.daily_returns), rel=1e-9, abs=1e-12)

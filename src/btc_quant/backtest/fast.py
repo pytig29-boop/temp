@@ -1024,12 +1024,15 @@ def _mtm_core(eg, w, r, ef, ed, xd, day_close, side_cost, fee_rate, n_days):
             mark = (px * (1 - side_cost) * (1 - fee_rate)) / (ef[i] * (1 + fee_rate)) - 1
             if np.isfinite(mark):
                 unreal[d] += eg[i] * w[i] * mark
-    out = np.empty(n_days)
+    out = np.zeros(n_days)
     cum = 0.0
     prev = 1.0
     for d in range(n_days):
         cum += realized[d]
         eq = 1.0 + cum + unreal[d]
+        if eq <= 0.0:                          # 파산: 그날 −100%, 이후 수익 0 (`sizing.mtm_daily_returns` 와 같음)
+            out[d] = -1.0
+            break
         out[d] = eq / prev - 1.0
         prev = eq
     return out

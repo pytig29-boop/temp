@@ -169,6 +169,9 @@ def _cost_doc(root: str | Path | None = None) -> dict:
     """config/costs.yaml 문서 (파일 mtime 기준 캐시 — 보정·승인으로 새 버전이 생기면 다시 읽는다)."""
     from btc_quant.params.costs import costs_path
     p = costs_path(root)
+    if root is not None and not p.exists():
+        # 임시 연구 저장소에 costs.yaml 이 없으면 코드 저장소의 비용 레지스트리 (파이프라인과 같은 해석; v1 프리셋 아님)
+        p = costs_path(repo_root())
     try:
         mt = p.stat().st_mtime_ns
     except FileNotFoundError:

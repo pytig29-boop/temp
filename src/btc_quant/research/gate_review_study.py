@@ -461,44 +461,9 @@ def make_universe_root(tmp: Path, layout: C.Layout, task: dict) -> None:
         write_ohlcv(df, "coinone", sym, "1m", root=tmp / "data" / "raw")
 
 
-# ---- MTM 엔진 0-나눗셈 가드 (연구 프로세스 안에서만): 고회전 스펙이 비싼 비용 모델(등급용 upbit_stress 등)에서 자산이
-# 부동소수 0 까지 줄면 `fast._mtm_core` 가 ZeroDivisionError 를 낸다(1분·ATR 격자 캠페인이 통째로 죽음). 그 경우에만
-# 같은 식을 '직전 자산 0 이면 수익 0' 으로 다시 계산한다. 오류가 나지 않는 경우의 수치는 그대로다.
-def _mtm_core_safe(eg, w, r, ef, ed, xd, day_close, side_cost, fee_rate, n_days):
-    realized = np.zeros(n_days)
-    unreal = np.zeros(n_days)
-    for i in range(eg.shape[0]):
-        realized[xd[i]] += eg[i] * w[i] * r[i]
-        den = ef[i] * (1 + fee_rate)
-        if den <= 0:
-            continue
-        for d in range(ed[i], xd[i]):
-            mark = (day_close[d] * (1 - side_cost) * (1 - fee_rate)) / den - 1
-            if np.isfinite(mark):
-                unreal[d] += eg[i] * w[i] * mark
-    out = np.empty(n_days)
-    cum, prev = 0.0, 1.0
-    for d in range(n_days):
-        cum += realized[d]
-        eq = 1.0 + cum + unreal[d]
-        out[d] = (eq / prev - 1.0) if prev > 1e-12 else 0.0
-        prev = eq
-    return out
-
-
+# ---- (예전 MTM 0-나눗셈 가드는 `fast._mtm_core` 의 파산 규칙(그날 −100%, 이후 0)으로 대체됨 — 호환용 무해 함수)
 def install_mtm_guard() -> None:
-    from btc_quant.backtest import fast
-    if getattr(fast._mtm_core, "_gate_review_guard", False):
-        return
-    orig = fast._mtm_core
-
-    def guarded(*a):
-        try:
-            return orig(*a)
-        except ZeroDivisionError:
-            return _mtm_core_safe(*a)
-    guarded._gate_review_guard = True
-    fast._mtm_core = guarded
+    return None
 
 
 # ============================================================== 2단계: 오프라인 평가

@@ -211,8 +211,21 @@ def mtm_daily_returns(trades: pd.DataFrame, close: pd.Series, days: pd.DatetimeI
         mark = np.where(np.isfinite(mark), mark, 0.0)
         unreal[a:b] += eg[i] * w[i] * mark
     eq = 1.0 + real_cum + unreal
+    return pd.Series(_ruin_safe_returns(eq), index=days, name="ret_mtm")
+
+
+def _ruin_safe_returns(eq: np.ndarray) -> np.ndarray:
+    """자산 경로 → 일간 수익. 자산이 처음 0 이하가 되는 날 −100%, 그 뒤는 0 (파산 후 거래 없음).
+    `fast._mtm_core` 와 같은 규칙."""
+    eq = np.asarray(eq, np.float64)
+    out = np.zeros(len(eq))
+    bad = np.flatnonzero(eq <= 0.0)
+    k = int(bad[0]) if len(bad) else len(eq)
     prev = np.concatenate([[1.0], eq[:-1]])
-    return pd.Series(eq / prev - 1.0, index=days, name="ret_mtm")
+    out[:k] = eq[:k] / prev[:k] - 1.0
+    if k < len(eq):
+        out[k] = -1.0
+    return out
 
 
 def _marks(trades: pd.DataFrame, close: pd.Series, days: pd.DatetimeIndex, cost=None):

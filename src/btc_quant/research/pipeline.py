@@ -404,6 +404,7 @@ class Pipeline:
         # 넘겨받은 dict(예: lru 캐시된 G.load_gate_config() 결과)는 복사해서 공유 객체를 건드리지 않는다.
         self.cfg = (copy.deepcopy(gate_cfg) if gate_cfg is not None
                     else gate_config_for_campaign(cr.campaign_id, root=config_root(env)))
+        self._croot = config_root(env)                 # 비용·관문 설정 루트 (캠페인과 같은 해석)
         self.params = run_params(env)                  # params_version + cost_versions (실행 기록용)
         # 관문 일간 수익 회계 (PLAN D18): 캠페인 매니페스트에 고정된 값 (D18 이전 캠페인 = realized → 재계산 불변)
         self.accounting = manifest_accounting(getattr(cr, "manifest", None))
@@ -463,7 +464,7 @@ class Pipeline:
 
     def _cost(self, cost_name: str, sym: str | None = None):
         """슬리브 비용 모델: 자산별 `<name>@<SYM>` 이 있으면 그것 (PLAN D17; BTC-KRW·기본 유니버스 = `get_cost(name)`)."""
-        return get_sleeve_cost(cost_name, sym or self.syms[0])
+        return get_sleeve_cost(cost_name, sym or self.syms[0], self._croot)
 
     def dev_sleeves(self, spec: StrategySpec, cost_name: str) -> dict:
         """자산별 Dev 결과 {심볼: BacktestResult} (빠른 엔진, 캠페인과 같은 계산)."""
@@ -625,9 +626,9 @@ class Pipeline:
         per_trades = {sym: n_positions(r.trades) for sym, r in self.dev_sleeves(spec, cost_name).items()}
         sleeves = [{"symbol": sym, "m1": c.m1, "bars_index": c.bars.index, "entry": c.block(spec.entry),
                     "filter_ok": c.filter_ok(spec.filters), "bars": c.bars, "target_trades": per_trades[sym],
-                    "cost": get_sleeve_cost(cost_name, sym)}
+                    "cost": get_sleeve_cost(cost_name, sym, self._croot)}
                    for sym, c in self.caches.items()]
-        nd = null_distribution_universe(sleeves, ex.sl, ex.tp, ex.max_hold_min, get_cost(cost_name),
+        nd = null_distribution_universe(sleeves, ex.sl, ex.tp, ex.max_hold_min, get_cost(cost_name, self._croot),
                                         self.start, self.end, self.n_null, self.null_seed0, HALF_LIFE_DAYS,
                                         calibration=self.null_calibration, tf_min=spec.tf_min,
                                         atr_bars=ex.atr_bars if ex.is_atr else None,
@@ -806,11 +807,11 @@ class Pipeline:
         multi = isinstance(m1v, dict)
         if multi:          # 다자산: 자산별 빠른 엔진 → 포트폴리오 (같은 슬리브 회계)
             acct = self.accounting
-            vsl = {sym: fast.run_fast(spec, m1v[sym], get_sleeve_cost(cost_name, sym), vs, ve, ctx=ctx[sym],
+            vsl = {sym: fast.run_fast(spec, m1v[sym], get_sleeve_cost(cost_name, sym, self._croot), vs, ve, ctx=ctx[sym],
                                       accounting=acct)
                    for sym in m1v}
             res = U.portfolio_result(vsl)
-            st = U.portfolio_result({sym: fast.run_fast(spec, m1v[sym], get_sleeve_cost(stress_name, sym), vs, ve,
+            st = U.portfolio_result({sym: fast.run_fast(spec, m1v[sym], get_sleeve_cost(stress_name, sym, self._croot), vs, ve,
                                                         ctx=ctx[sym], accounting=acct) for sym in m1v})
         else:
             res = fast.run_fast(spec, m1v, self._cost(cost_name), vs, ve, ctx=ctx, accounting=self.accounting)
@@ -832,7 +833,7 @@ class Pipeline:
             d["universe"] = list(m1v)
             d["per_asset_val"] = U.per_asset_metrics(res.sleeves, HALF_LIFE_DAYS)
         if self.reference_check:
-            pairs = ([(res.sleeves[sym], run_reference(spec, m1v[sym], get_sleeve_cost(cost_name, sym), vs, ve,
+            pairs = ([(res.sleeves[sym], run_reference(spec, m1v[sym], get_sleeve_cost(cost_name, sym, self._croot), vs, ve,
                                                        ctx=ctx[sym])) for sym in m1v] if multi else
                      [(res, run_reference(spec, m1v, self._cost(cost_name), vs, ve, ctx=ctx))])
             match = all(_trades_match(a.trades, b.trades) for a, b in pairs)
@@ -918,8 +919,8 @@ class Pipeline:
             other = self._other_m1s() if "cross_venue" in checks else None
             out = robustness_suite_universe(
                 spec, {sym: c.m1 for sym, c in self.caches.items()}, self.start, self.end,
-                get_cost(self.costs["primary"]), other_m1s=other, other_venue=self.other_venue(),
-                costs={sym: get_sleeve_cost(self.costs["primary"], sym) for sym in self.syms},
+                get_cost(self.costs["primary"], self._croot), other_m1s=other, other_venue=self.other_venue(),
+                costs={sym: get_sleeve_cost(self.costs["primary"], sym, self._croot) for sym in self.syms},
                 ctxs={sym: c.ctx for sym, c in self.caches.items()}, checks=checks,
                 thresholds=self.cfg.get("robustness"), accounting=self.accounting)
             if uses_aux:
@@ -1128,7 +1129,7 @@ class Pipeline:
         import yaml
         from btc_quant.registry.strategies import key_of
         rl = c["risk_limits"]
-        prim = get_cost(self.costs["primary"])
+        prim = get_cost(self.costs["primary"], self._croot)
         doc = {
             "grade": c["grade"],
             "limits": {"daily_loss": float(rl["daily_loss_limit"]), "weekly_loss": float(rl["weekly_loss_limit"]),
