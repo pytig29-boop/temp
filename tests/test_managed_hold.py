@@ -205,3 +205,53 @@ def test_dca_overlay_and_irr():
     cmp = MH.dca_compare(flat, up, 100_000, "W")
     assert cmp["final_value_ratio"] < 1 and cmp["irr_diff"] < 0
     assert list(MH.contribution_days(days, "M")) == [days[0]]
+
+
+# ------------------------------------------------------------------ 관문 프로필 (Phase 5, 사용자 승인 2026-11-10)
+def test_gate_profile_template_and_pipeline_wiring(synth_root):
+    import copy
+
+    from btc_quant.evaluation import gates as G
+    from btc_quant.params import gate_config_for_campaign
+    from btc_quant.research.pipeline import Pipeline, public_pipeline, run_pipeline
+    with pytest.raises(CampaignError):
+        CampaignTemplate.from_dict(_mh_template(gate_profile="whatever"))
+    assert gate_config_for_campaign("camp-000031")["profiles"]["managed_hold"]["enabled"] is False   # 전향 적용
+    new = gate_config_for_campaign("camp-000032")["profiles"]["managed_hold"]
+    assert new["enabled"] is True and new["g5_min_dsr"] == 0.9
+    env = ResearchEnv.at(synth_root)
+    tpl = CampaignTemplate.from_dict(_mh_template(name="mhprof", gate_profile="managed_hold",
+                                                  entry={"block": "trend_ema_4h",
+                                                         "grid": {"span": [42, 90], "band_bp": [0.0, 100.0]}}))
+    assert tpl.to_record()["gate_profile"] == "managed_hold"
+    cr = run_campaign(tpl, env=env)
+    assert cr.manifest["gate_profile"] == "managed_hold"
+    cfg = copy.deepcopy(G.load_gate_config())
+    cfg["profiles"]["managed_hold"]["g2_null_runs"] = 50
+    off = copy.deepcopy(cfg)
+    off["profiles"]["managed_hold"]["enabled"] = False
+    with pytest.raises(ValueError):
+        Pipeline(cr, env, gate_cfg=off, register=False, lessons=False)
+    out = run_pipeline(cr, env=env, top_k=2, n_null=20, gate_cfg=cfg, register=False, reference_check=False,
+                       robustness=False, lessons=False)
+    for c in out["candidates"]:
+        for k in ("G1", "G2", "G3", "G4", "G5"):
+            assert c["gates"][k]["profile"] == "managed_hold", k
+        assert "net_active_sharpe" in c["gates"]["G2"] and "z" in c["gates"]["G5"]
+    # G6 경로를 직접: 능동 수익·크기 조절·결합 증거 (Val 예산 없이)
+    p = Pipeline(cr, env, gate_cfg=cfg, register=False, reference_check=False, robustness=False, lessons=False)
+    spec = cr.specs[out["candidates"][0]["logic_hash"]]
+    m1v, vs, ve = p.load_val()
+    g, *_ = p.g6(spec, m1v, vs, ve, cr.template.costs["primary"], cr.template.costs["stress"], record=False,
+                 budget=False)
+    assert g["profile"] == "managed_hold" and g["drawdown_mode"] == "size" and "val_active_sharpe" in g
+    assert g["passed"] == bool(g["val_active_sharpe"] > 0 and g["ok_position_scale"])
+    assert all(set(c["gates"].get("G6") or {}) <= {"passed", "outcome", "val_budget", "withheld"}
+               for c in public_pipeline(out)["candidates"])
+    # 견고성: 알파·국면 비중은 정보 전용
+    th = p._rob_thresholds()
+    assert th["alpha_min_tstat"] < -1e8 and th["regime_max_pnl_share"] > 1.0
+    # 기본 프로필 캠페인은 그대로
+    cr0 = run_campaign(CampaignTemplate.from_dict(_mh_template(name="mhdef")), env=env)
+    p0 = Pipeline(cr0, env, gate_cfg=cfg, register=False, lessons=False)
+    assert p0.mh_cfg is None and p0._rob_thresholds() == cfg["robustness"] and "gate_profile" not in cr0.manifest

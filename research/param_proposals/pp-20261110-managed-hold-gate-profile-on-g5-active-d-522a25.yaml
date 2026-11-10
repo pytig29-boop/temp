@@ -1,0 +1,22 @@
+# 파라미터 변경 제안 — 사람 승인 전에는 아무 효과 없음. 승인: python -m btc_quant.params approve <id>
+id: pp-20261110-managed-hold-gate-profile-on-g5-active-d-522a25
+created: '2026-11-10T22:44:02+00:00'
+created_by: agent (user decision in chat 2026-11-10)
+class: 2
+kind: criterion
+title: managed_hold gate profile on, G5 active DSR 0.90 (Phase 5)
+evidence: research/reports/managed_hold_profile_20261110.md
+rationale: 'Synthetic (160 markets): B&H-relative active-return profile with a circular-shift timing null; false
+  positives 0/80 at DSR 0.95 and 0 null Dev passes at 0.90; persistent-trend Dev passes 6->7 (L45), 7->9 (L90) at
+  0.90. Only campaigns declaring gate_profile: managed_hold use it; default gates unchanged.'
+changes:
+- key: gates.profiles.managed_hold.enabled
+  from: false
+  to: true
+  target: param:gates.profiles.managed_hold.enabled
+- key: gates.profiles.managed_hold.g5_min_dsr
+  from: 0.95
+  to: 0.9
+  target: param:gates.profiles.managed_hold.g5_min_dsr
+status: pending
+content_hash: 0db5c6b5bc863f73

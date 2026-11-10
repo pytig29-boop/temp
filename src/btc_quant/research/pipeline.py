@@ -108,6 +108,7 @@ from btc_quant.registry.ledger import ValBudgetExhaustedError
 from btc_quant.strategy.blocks import REGISTRY, Context, spec_uses_experimental
 from btc_quant.strategy.spec import BlockRef, SizingSpec, StrategySpec
 
+from . import managed_hold_gates as MG
 from . import universe as U
 from .campaign import (HALF_LIFE_DAYS, LIVE_AUX, CampaignResult, ResearchEnv, SignalCache,
                        aux_context, config_root, data_snapshot, get_cost, get_sleeve_cost, git_commit, load_aux_m1,
@@ -438,6 +439,15 @@ class Pipeline:
             raise ValueError(f"unknown selection method {self.selection_method!r}")
         self.selection_threshold = float(sel_cfg.get("cluster_threshold", self.cfg["G5"]["cluster_threshold"]))
         self.val_budget = bool(val_budget)
+        # 관문 프로필 (Phase 5): 매니페스트 gate_profile (없으면 default = 이전과 같다)
+        self.gate_profile = str((getattr(cr, "manifest", None) or {}).get("gate_profile") or "default")
+        self.mh_cfg = None
+        if self.gate_profile == "managed_hold":
+            prof = dict((self.cfg.get("profiles") or {}).get("managed_hold") or {})
+            if not prof.get("enabled"):
+                raise ValueError("campaign uses gate_profile managed_hold but the profile is not enabled for it")
+            prof.pop("enabled", None)
+            self.mh_cfg = prof
         self._labels: dict[float, np.ndarray] = {}
         tpl = cr.template
         self.costs = tpl.costs
@@ -843,6 +853,23 @@ class Pipeline:
         mc = montecarlo.worst_case_mdd95(U.portfolio_trade_returns(res), n_sims=self.cfg["G6"]["mc_sims"],
                                          troughs=self._mc_troughs(res, m1v))
         ok, d = G.check_g6(met, smet, mc, self.cfg, dev_metrics=dev_metrics)
+        mh_active = None
+        if self.mh_cfg is not None:        # managed_hold 프로필: B&H 대비 능동 수익으로 판정 (Phase 5)
+            closes = {s: df["close"] for s, df in m1v.items()} if multi else {self.syms[0]: m1v["close"]}
+            seg = self._mh_segment(res, self.val_benchmark(m1v, res.daily_returns.index, vs), closes)
+            mh_active = seg["active"]
+            vsr = MG.active_sharpe(mh_active)
+            sc = G.position_scale(abs(float(met["max_dd"])), mc, self.cfg["G6"])
+            ok_sc = sc >= float(self.cfg["G6"].get("min_position_scale", 0.25))
+            d = {"profile": "managed_hold", "rule": "managed_hold", "sharpe": float(met["sharpe"]),
+                 "val_active_sharpe": vsr, "ok_sharpe": vsr > 0, "mc_mdd95": abs(float(mc)),
+                 "max_dd": abs(float(met["max_dd"])), "drawdown_mode": "size", "stress_mode": "off",
+                 "position_scale": sc, "ok_position_scale": ok_sc,
+                 "mdd_ratio_vs_bh": (abs(seg["mdd"]) / abs(seg["bh_mdd"]) if seg["bh_mdd"] else None),
+                 "stress_sharpe": float(smet["sharpe"]), "stress_mdd": abs(float(smet.get("max_dd", float("nan")))),
+                 "path": None}
+            ok = bool(vsr > 0 and ok_sc)
+            d["path"] = "sharpe" if ok else None
         # Val B&H 비교 (사람 전용: pipeline.json / human 리포트. 에이전트 사본은 G6 를 결과 코드로 대체)
         d["benchmark_val"] = {k: met.get(k) for k in VAL_BENCHMARK_KEYS if k in met}
         d.update(cost=cost_name, stress_cost=stress_name, n_trades=met["n_trades"],
@@ -862,11 +889,19 @@ class Pipeline:
             ok = ok and match
         if budget:
             if "opening" in vbd:
-                bt = inference.bootstrap_mean_test(res.daily_returns.to_numpy(float), n_boot=int(vb_cfg["n_boot"]),
+                pser = mh_active if mh_active is not None else res.daily_returns
+                bt = inference.bootstrap_mean_test(pser.to_numpy(float), n_boot=int(vb_cfg["n_boot"]),
                                                    seed=vb_cfg.get("seed", 0))
                 dec = val_holm_decision(self.env.ledger, vbd["val_id"], vbd["k"], bt["p_value"], vb_cfg)
                 vbd.update(p_value=bt["p_value"], mean_block=bt["mean_block"], n_boot=bt["n_boot"], **dec)
-                ev = val_evidence(vb_cfg, dec, bt["p_value"], float(met["sharpe"]), dev_g5)
+                if mh_active is None:
+                    ev = val_evidence(vb_cfg, dec, bt["p_value"], float(met["sharpe"]), dev_g5)
+                else:                       # Dev 능동 DSR z (프로필 G5) + Val 능동 p 결합
+                    ce = (G.combined_val_evidence(float(dev_g5["z"]), bt["p_value"], d["val_active_sharpe"],
+                                                  float(self.mh_cfg["g6_combined_alpha"]))
+                          if dev_g5 and dev_g5.get("z") is not None else {"passed": False, "error": "no Dev z"})
+                    ev = {"evidence": "managed_hold_combined_active", "evidence_passed": bool(ce["passed"]),
+                          "combined": ce}
                 vbd.update(ev)
                 checks_ok = ok
                 # '쉬어서 피함' 경로(exposure_aware, 기본 OFF)는 평균 > 0 증거를 요구하지 않는다(G6 변형 설명).
@@ -936,7 +971,63 @@ class Pipeline:
             self._other_caches = out
         return self._other_caches
 
-    def robustness_check(self, spec: StrategySpec) -> dict:
+    def _rob_thresholds(self) -> dict | None:
+        """견고성 기준. managed_hold 프로필: 알파·국면 비중은 정보 전용(베타 노출이 목적 — 판정에서 뺌)."""
+        th = self.cfg.get("robustness")
+        if self.mh_cfg is None or th is None:
+            return th
+        th = dict(th)
+        th["alpha_min_tstat"] = -1e9
+        th["regime_max_pnl_share"] = 1.01
+        return th
+
+    # ---------------------------------------------------------- managed_hold 프로필 (Phase 5)
+    def _mh_segment(self, res, bh: pd.Series, closes: dict) -> dict:
+        days = res.daily_returns.index
+        bh = pd.Series(bh, dtype=float).reindex(days).fillna(0.0)
+        sleeves = getattr(res, "sleeves", None) or {self.syms[0]: res}
+        expo = {s: MG.daily_exposure(r.trades, days).to_numpy(float) for s, r in sleeves.items()}
+        aret = {}
+        for s in sleeves:
+            dc = pd.Series(closes[s]).resample("1D").last()
+            aret[s] = (dc / dc.shift(1) - 1).reindex(days).fillna(0.0).to_numpy(float)
+        return {"active": (res.daily_returns - bh).astype(float), "expo": expo, "asset_ret": aret,
+                "bh": bh.to_numpy(float), "n_switches": int(sum(len(r.trades) for r in sleeves.values())),
+                "mdd": float(M.max_drawdown(res.daily_returns)[0]), "bh_mdd": float(M.max_drawdown(bh)[0])}
+
+    def _grid_neighbors(self, lh: str) -> list[str]:
+        """같은 캠페인 격자에서 진입·필터·청산 값 중 정확히 하나만 다른 스펙 (신호 청산은 진입에 묶여 제외)."""
+        def leaves(d, pre=""):
+            out = {}
+            for k, v in (d or {}).items():
+                path = f"{pre}{k}"
+                if path.startswith("exit.signal_exit") or k in ("id", "version"):
+                    continue
+                if isinstance(v, dict):
+                    out.update(leaves(v, path + "."))
+                else:
+                    out[path] = json.dumps(v, sort_keys=True, default=str)
+            return out
+        vec = {h: leaves(sp.to_dict()) for h, sp in self.cr.specs.items()}
+        me = vec[lh]
+        return [h for h, v in vec.items() if h != lh and set(v) == set(me)
+                and sum(v[k] != me[k] for k in me) == 1]
+
+    def mh_dev_gates(self, spec: StrategySpec, res, lh: str, stats: dict) -> dict:
+        """managed_hold 프로필 Dev 관문 G1~G5 (`managed_hold_gates.evaluate`, B&H 대비 능동 수익)."""
+        days = res.daily_returns.index
+        bh = self.dev_benchmark(days)
+        seg = self._mh_segment(res, bh, {s: c.m1["close"] for s, c in self.caches.items()})
+        R = self.cr.returns
+        bh_all = self.dev_benchmark(R.index) if R.index.equals(days) else U.buy_hold_universe(
+            {s: c.m1["close"] for s, c in self.caches.items()}, R.index)
+        act = R.sub(pd.Series(bh_all, index=R.index).fillna(0.0), axis=0)
+        srs = {h: MG.active_sharpe(act[h]) for h in act.columns}
+        sr_obs = [float(act[h].mean() / act[h].std()) if act[h].std() > 0 else 0.0 for h in act.columns]
+        ev = MG.evaluate(seg, None, srs, self._grid_neighbors(lh), lh, float(np.var(sr_obs)),
+                         int(max(stats.get("n_trials_dsr") or 1, 1)), prof=self.mh_cfg, seed=self.null_seed0)
+        return ev["gates"]
+
         """Dev 데이터·primary 비용으로 견고성 묶음. 업비트 aux 스펙은 거래소 재현 skipped."""
         from .robustness import CHECKS, robustness_suite, robustness_suite_universe
         if self.multi:
@@ -948,7 +1039,7 @@ class Pipeline:
                 get_cost(self.costs["primary"], self._croot), other_m1s=other, other_venue=self.other_venue(),
                 costs={sym: get_sleeve_cost(self.costs["primary"], sym, self._croot) for sym in self.syms},
                 ctxs={sym: c.ctx for sym, c in self.caches.items()}, checks=checks,
-                thresholds=self.cfg.get("robustness"), accounting=self.accounting)
+                thresholds=self._rob_thresholds(), accounting=self.accounting)
             if uses_aux:
                 out["checks"]["cross_venue"] = {
                     "passed": None, "other_venue": self.other_venue(),
@@ -965,7 +1056,7 @@ class Pipeline:
         other = self._other_m1() if "cross_venue" in checks else None
         out = robustness_suite(spec, c.m1, self.start, self.end, self._cost(self.costs["primary"]),
                                other_m1=other, other_venue=self.other_venue(), ctx=c.ctx, checks=checks,
-                               thresholds=self.cfg.get("robustness"), accounting=self.accounting)
+                               thresholds=self._rob_thresholds(), accounting=self.accounting)
         if uses_aux:
             out["checks"]["cross_venue"] = {
                 "passed": None, "other_venue": self.other_venue(),
@@ -1025,6 +1116,10 @@ class Pipeline:
             ok4, d4 = G.check_g4(row, self.cfg)
             gts["G4"] = _gate(ok4, **d4)
             gts["G5"] = self.g5(lh, stats)
+            if self.mh_cfg is not None:     # managed_hold 프로필: G1~G5 를 B&H 대비 능동 수익 규칙으로 (Phase 5)
+                for k, v in self.mh_dev_gates(spec, res, lh, stats).items():
+                    v = dict(v)
+                    gts[k] = _gate(bool(v.pop("passed")), **v, profile="managed_hold")
             c["dev_passed"] = all(gts[g]["passed"] for g in ("G0", "G1", "G2", "G3", "G4", "G5"))
             c["first_failed"] = next((g for g in ("G0", "G1", "G2", "G3", "G4", "G5") if not gts[g]["passed"]), None)
             self.log(f"  #{rank} {spec.id}: SR_w={row['sharpe_w']:.2f} "

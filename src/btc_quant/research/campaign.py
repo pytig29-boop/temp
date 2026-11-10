@@ -330,6 +330,7 @@ class CampaignTemplate:
     sizing: dict = field(default_factory=dict)      # 사이징 격자 {entry_fraction: [...]} (빈 dict = 전액)
     ladder: dict = field(default_factory=dict)      # 사다리 격자 (정규화된 dict; 빈 dict = 단일 진입)
     signal_exit: dict = field(default_factory=dict)  # {block, params(고정), match_entry} (빈 dict = 신호 청산 없음)
+    gate_profile: str = "default"   # 관문 프로필 (Phase 5): default | managed_hold (gates.yaml profiles.*.enabled 필요)
 
     @property
     def tf_min(self) -> int:
@@ -359,7 +360,7 @@ class CampaignTemplate:
             raise CampaignError("template must be a mapping")
         allowed = {"name", "hypothesis", "data", "entry", "filters", "exits", "costs", "budget",
                    "family", "segment", "timeframe", "from_screen", "requires_screen_pass", "power", "universe",
-                   "execution", "sizing", "ladder", "signal_exit"}
+                   "execution", "sizing", "ladder", "signal_exit", "gate_profile"}
         extra = set(d) - allowed
         if extra:
             raise CampaignError(f"unknown template keys {sorted(extra)}")
@@ -447,6 +448,9 @@ class CampaignTemplate:
         rsp = d.get("requires_screen_pass", False)
         if not isinstance(rsp, bool):
             raise CampaignError("requires_screen_pass must be true/false")
+        gate_profile = d.get("gate_profile", "default")
+        if gate_profile not in GATE_PROFILES:
+            raise CampaignError(f"gate_profile must be one of {GATE_PROFILES}")
         power = d.get("power") or {}
         if not isinstance(power, dict) or set(power) - {"target_sharpe"}:
             raise CampaignError("power must be a mapping with optional target_sharpe")
@@ -471,7 +475,7 @@ class CampaignTemplate:
                   decision_tf=tf, exit_mode=mode, atr_bars=int(atr_bars),
                   from_screen=from_screen.strip() if from_screen else None, requires_screen_pass=rsp,
                   power=power, universe=universe, execution=execution, sizing=sizing, ladder=ladder,
-                  signal_exit=signal_exit)
+                  signal_exit=signal_exit, gate_profile=gate_profile)
         tpl.validate_specs(registry)
         return tpl
 
@@ -633,6 +637,8 @@ class CampaignTemplate:
             "filters": [[{"block": f.block, "grid": f.grid} for f in fs] for fs in self.filter_sets],
             "exits": self.exits_record(), "costs": self.costs, "budget": self.budget,
         }
+        if self.gate_profile != "default":
+            rec["gate_profile"] = self.gate_profile
         if self.screen_gated:
             rec["screen_gate"] = {"from_screen": self.from_screen, "requires_screen_pass": self.requires_screen_pass}
         if not U.is_default(self.universe):
@@ -1143,6 +1149,21 @@ def exit_columns(tpl: CampaignTemplate, sl, tp, hold) -> dict:
     return out
 
 
+GATE_PROFILES = ("default", "managed_hold")
+
+
+def check_gate_profile(tpl: "CampaignTemplate", env: "ResearchEnv") -> None:
+    """기본이 아닌 관문 프로필은 gates.yaml profiles.<name>.enabled (사람 승인) 일 때만 새 캠페인에 쓸 수 있다."""
+    if tpl.gate_profile == "default":
+        return
+    from btc_quant.params._io import read_yaml
+    cfg = read_yaml(config_root(env) / "config" / "gates.yaml")
+    prof = ((cfg.get("profiles") or {}).get(tpl.gate_profile) or {})
+    if not prof.get("enabled"):
+        raise CampaignError(f"gate_profile {tpl.gate_profile!r} is not enabled in config/gates.yaml "
+                            "(class ② approval needed)")
+
+
 def run_campaign(template: CampaignTemplate | str | Path, root: str | Path | None = None,
                  env: ResearchEnv | None = None,
                  progress: Callable[[str], None] | None = None, strict_power: bool = False) -> CampaignResult:
@@ -1150,6 +1171,7 @@ def run_campaign(template: CampaignTemplate | str | Path, root: str | Path | Non
     env = env or ResearchEnv.at(root)
     log = progress or (lambda s: None)
     n_specs = tpl.check_budget()                       # 예산 초과면 원장에 쓰기 전에 거부
+    check_gate_profile(tpl, env)                       # 승인되지 않은 관문 프로필 → 원장 쓰기 전 거부
     specs_all = tpl.enumerate()
     if len({s.logic_hash() for s in specs_all}) != len(specs_all):
         raise CampaignError("grid produces duplicate specs")
@@ -1266,6 +1288,8 @@ def run_campaign(template: CampaignTemplate | str | Path, root: str | Path | Non
         "params": pver, "params_version": pver.get("params_version"), "cost_versions": pver.get("cost_versions"),
         "daily_returns": acct,
     }
+    if tpl.gate_profile != "default":       # 관문 프로필 (없는 매니페스트 = default, 이전과 같다)
+        manifest["gate_profile"] = tpl.gate_profile
     if tpl.signal_exit:                     # 신호 청산 (없는 템플릿은 매니페스트가 이전과 같다)
         manifest["signal_exit"] = tpl.to_record()["signal_exit"]
     if tpl.execution:                       # 지정가 집행 격자 (시장가 템플릿은 매니페스트가 이전과 같다)

@@ -1,0 +1,20 @@
+{
+  "id": "pp-20261110-managed-hold-gate-profile-on-g5-active-d-522a25",
+  "approved_by": "user (explicit chat approval 2026-11-10)",
+  "ts": "2026-11-10T22:44:03+00:00",
+  "choice": null,
+  "note": "사용자가 채팅에서 승인(managed_hold 프로필, G5 0.90 선택지); 비대화형 확인 사용",
+  "content_hash": "0db5c6b5bc863f73",
+  "applied": [
+    {
+      "key": "gates.profiles.managed_hold.enabled",
+      "version": 2,
+      "applies_from_campaign": 32
+    },
+    {
+      "key": "gates.profiles.managed_hold.g5_min_dsr",
+      "version": 2,
+      "applies_from_campaign": 32
+    }
+  ]
+}

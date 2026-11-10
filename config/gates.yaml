@@ -82,6 +82,24 @@ exposure_aware:
     flat_max_mdd_vs_bh: 0.5    # Val MDD ≤ 이 배수 × 같은 기간 B&H MDD
     flat_require_bh_down: true # 같은 기간 B&H 총수익 < 0 일 때만 (상승장을 놓친 것은 '피함'이 아님)
     flat_min_trades: 10        # Val 거래 < 이 수면 'insufficient_evidence' (통과 아님)
+# 관문 프로필 (Phase 5). 템플릿 `gate_profile: managed_hold` 인 캠페인만 이 규칙으로 판정(기본 프로필 불변).
+# 모든 증거 = 동일 비중 B&H 대비 능동 일간 수익. 근거 research/reports/managed_hold_profile_20261110.md (합성만).
+profiles:
+  managed_hold:
+    enabled: true              # 켜기 = class ② 승인, 다음 캠페인부터
+    min_switches: 30           # G1 풀링 전환(진입) 수
+    min_dev_days: 365          # G1 Dev 일수
+    g2_null_runs: 500          # G2 타이밍 귀무(노출 상태열 원형 이동) 반복 수
+    g2_top_fraction: 0.05      # G2 귀무 상위 비율
+    g2_min_shift_days: 30      # G2 최소 이동 일수
+    g3_neighbor_ratio: 0.25    # G3 인접 능동 Sharpe 중앙값 / 선택
+    g4_window_days: 182        # G4 롤링 창
+    g4_step_days: 30
+    g4_min_frac: 0.5           # G4 능동 수익 ≥ 0 창 비율
+    g5_min_dsr: 0.9            # G5 능동 수익 DSR
+    g6_combined_alpha: 0.05    # G6 Dev 능동 DSR z + Val 능동 p 결합
+    g8_min_weeks: 8            # G8 페이퍼 기간 (구현 예정)
+    g8_min_state_match: 0.95   # G8 백테스트 노출 상태 일치율 (구현 예정)
 # 후보 선택 (PLAN §10b-4): 캠페인 수익 행렬의 상관 군집별 최고(primary 가중 Sharpe) 1개 → 그 중 상위 K.
 selection:
   method: cluster_best         # cluster_best | top_sharpe(구 방식)

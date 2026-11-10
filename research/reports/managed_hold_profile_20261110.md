@@ -1,4 +1,6 @@
-# managed_hold 전용 관문 프로필 — 설계 + 합성 보정 (Phase 5, **사용자 승인 대기**)
+# managed_hold 전용 관문 프로필 — 설계 + 합성 보정 (Phase 5)
+
+> **사용자 승인 (채팅 2026-11-10): 프로필 켜기 + G5 0.90 선택지.** `pp-20261110-managed-hold-gate-profile-on-g5-active-d-522a25`, applies_from_campaign 32. 파이프라인 연결 완료(`gate_profile: managed_hold`).
 
 작성 2026-11-10 · 분류 ② 증거 기준(새 프로필) · **근거는 합성 시장뿐이다** (실제 데이터 미사용 — 선별·캠페인 미실행, 원장 시도 0, Val 사용 0)
 · 코드 `src/btc_quant/research/managed_hold_gates.py`(판정), `managed_hold_study.py`(합성 보정). **기본 관문은 바뀌지 않았다.**

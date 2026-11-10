@@ -192,6 +192,12 @@ snap = params_snapshot()      # {"params_version": "79bc502df565", "cost_version
     근거 `research/reports/params_costs_xrp_stress_20261110.md`. 업비트 XRP 스트레스 불변(이미 더 엄격).
   - 6개월 뒤(2027-05) 관문 재검토(Q5): 통과 수·T1 페이퍼 결과로 오탐 수준 재평가.
 
+- **2026-11-10 (사용자 결정, 채팅 — PLAN D25)**: G7 판정 옵션 `gates.G7.evidence`(기본 holm)·`combined_alpha` 추가, 제안
+  `pp-20261110-g7-lockbox-evidence-no-contradiction-loc-5653eb` **기각**(현재 방식 유지). managed_hold 프로필 키
+  `gates.profiles.managed_hold.*` 14개 추가(class ②) 후 승인 `pp-20261110-managed-hold-gate-profile-on-g5-active-d-522a25`:
+  enabled false → **true**, g5_min_dsr 0.95 → **0.90**, applies_from_campaign 32. class ③ `risk_prefs.tier_capital`
+  {T2: 0.10, T3: [0.30, 1.0]} (D23 사용자 결정 기록).
+
 ## 6. 노출 인식 관문 변형 (`gates.exposure_aware.*`, class ②, **기본 OFF** — PLAN D14 초안)
 
 롱 온리 전략이 하락장에서 **맞게 쉬는 것**을 관문이 벌하지 않게 하는 선택 규칙이다. 12개 항목 모두 class ②(owner human)이고

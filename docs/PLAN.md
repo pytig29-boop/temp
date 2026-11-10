@@ -34,6 +34,7 @@
 | D22 | R1-plus | **사용자 명시 승인 (Q1), class ②**. G3 이웃 비 0.5 → **0.25**, 견고성 알파 t 2.0 → **1.5**. 합성: R1+plus+크기 조절(0.25) 오탐 1/232 (0.4%), 어려운 귀무 1/74, Sharpe 2 검출 42%, 실제 파이프라인 일치 51/51 후보 (research/reports/gate_review_calibration_addendum_20261110.md). 다음 캠페인부터 | 11-10 |
 | D23 | 단계별 승격 | **사용자 결정 (Q4)**. T0 연구 → T1 페이퍼(지금의 validated) → T2 소액 실전(총자본 10% × position_scale, 사람 승인) → T3 증액(누적 전진 증거 + 사람 승인). 구현 = Phase 4 (실거래 주문 실행기는 별도 승인 과제) | 11-10 |
 | D24 | XRP 스트레스 비용 | **사용자 명시 승인 (Q7), class ① 엄격화**. `coinone_stress@XRP-KRW` 왕복 14 → **23.8bp** (v2, 실시간 호가 약 6시간 표본의 p99 × 1.5 상한; 스프레드 6.7 유지). 업비트 XRP 스트레스는 이미 더 엄격 → 불변. BTC 비용 하향은 72시간 표본까지 보류. 근거 research/reports/params_costs_xrp_stress_20261110.md | 11-10 |
+| D25 | managed_hold 관문 프로필 · G7 | **사용자 결정 (채팅 2026-11-10)**. (1) G7 은 **현재 방식(누적 Holm) 유지** — '모순 없음' 제안 기각 (research/reports/g7_design_20261110.md, 합성: Sharpe 2 최종 검출 40% vs 72%, 끝단 오탐 ≈ 0.04% vs 0.2%). (2) **managed_hold 전용 관문 프로필 승인**, G5 능동 DSR **0.90** 선택지: 템플릿 `gate_profile: managed_hold` 인 캠페인만 B&H 대비 능동 일간 수익으로 판정(G1 전환 ≥ 30·Dev ≥ 365일, G2 노출 상태열 원형 이동 타이밍 귀무 상위 5% + 순 능동 Sharpe > 0, G3 인접 비 0.25, G4 6개월 창 능동 ≥ 0 비율 ≥ 0.5, G5 능동 DSR ≥ 0.90, G6 Dev 능동 z + Val 능동 p 결합 ≤ 0.05·Val 능동 Sharpe > 0·크기 조절, 견고성 알파·국면 비중 정보 전용). 합성 오탐 0/80. 기본 프로필 불변. 다음 캠페인(camp-000032)부터. 근거 research/reports/managed_hold_profile_20261110.md | 11-10 |
 | D8 | 비용 등급 | 모든 후보를 코인원 0%와 업비트 비용 양쪽에서 평가. **A등급**: 업비트 비용에서도 관문 통과(이벤트 종료에 강함) / **B등급**: 0%에서만 통과(이벤트 종료 시 자동 정지). 성과가 비슷하면 A 우선 | 11-09 |
 
 ### Phase 0 결과 (1년 데이터 기준)
@@ -202,7 +203,7 @@ Draft → Candidate → Validated → Challenger(페이퍼) → Promotion Review
 |---|---|---|---|
 | T0 연구 | draft/candidate | 0 | 관문 코드 |
 | T1 페이퍼 | validated 이후(Dev 관문 + 견고성 + G6) | 0 (페이퍼만) | 관문 코드 |
-| T2 소액 실전 | T1 + 상태 review/active(G8 페이퍼 ≥ 3주·30거래·체결 품질) + 잠금 구간 판정(G7, 재설계 결정 대기) | **10%** (`risk_prefs.tier_capital.T2`) | **사람** `btc-quant-admin promote-tier <id> <v> T2` |
+| T2 소액 실전 | T1 + 상태 review/active(G8 페이퍼 ≥ 3주·30거래·체결 품질) + 잠금 구간 G7(누적 Holm, D25 에서 유지 결정) | **10%** (`risk_prefs.tier_capital.T2`) | **사람** `btc-quant-admin promote-tier <id> <v> T2` |
 | T3 증액 | T2 + 누적 전진 증거(사전 등록 순차 검정) | **30% → 100%** 중 선택 (`tier_capital.T3`) | **사람** `promote-tier … T3 --fraction F` |
 
 - 기록: `strategies/tiers.yaml`(현재 단계·비중, 사람 전용 경로) + 원장 transitions(`event: tier`, `tier:T1 → tier:T2`).

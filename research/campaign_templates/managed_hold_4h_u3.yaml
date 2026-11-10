@@ -1,5 +1,5 @@
-# PREP ONLY — user decision "B" (chat 2026-11-10): risk-managed holding (managed_hold). NOT RUN.
-# Do not run until the pending gate review has answered docs/MANAGED_HOLD.md §5 and the screen
+# user decision "B" (chat 2026-11-10): risk-managed holding (managed_hold). Gate profile approved 2026-11-10
+# (research/reports/managed_hold_profile_20261110.md). Run only after the screen
 # (screens/managed_hold_4h_u3_screen.yaml) has passed for the spans used here (requires_screen_pass).
 #
 # Structure ("default long / exit on filter", docs/MANAGED_HOLD.md §2):
@@ -21,6 +21,7 @@ data:
   aux: []
 timeframe: 4h
 family: managed_hold
+gate_profile: managed_hold   # Phase 5 profile (user-approved 2026-11-10): B&H-relative active-return gates
 entry:
   block: trend_ema_4h
   grid:

@@ -793,7 +793,7 @@ params:
   source: yaml:config/gates.yaml#G7.evidence
   value: holm
   rationale: '잠금 판정 방식: holm(현재) | no_contradiction(잠금 Sharpe > 0) | combined(Dev+Val+잠금 결합 증거). 개봉 기록·상한 동일'
-  evidence: '옵션 추가(기본 = 기존 동작) · 합성 보정 research/reports/g7_design_20261110.md'
+  evidence: 옵션 추가(기본 = 기존 동작) · 합성 보정 research/reports/g7_design_20261110.md
   version: 1
   last_updated: '2026-11-10'
   owner: human
@@ -802,8 +802,166 @@ params:
   class: 2
   source: yaml:config/gates.yaml#G7.combined_alpha
   value: 0.05
-  rationale: 'G7.evidence=combined 전용 결합 p 문턱'
-  evidence: '옵션 추가(기본 = 기존 동작) · 합성 보정 research/reports/g7_design_20261110.md'
+  rationale: G7.evidence=combined 전용 결합 p 문턱
+  evidence: 옵션 추가(기본 = 기존 동작) · 합성 보정 research/reports/g7_design_20261110.md
+  version: 1
+  last_updated: '2026-11-10'
+  owner: human
+  history: []
+- key: gates.profiles.managed_hold.enabled
+  class: 2
+  source: yaml:config/gates.yaml#profiles.managed_hold.enabled
+  value: true
+  rationale: managed_hold 관문 프로필 — enabled (managed_hold_gates.PROFILE_DEFAULT 설명 참고)
+  evidence: research/reports/managed_hold_profile_20261110.md
+  version: 2
+  last_updated: '2026-11-10'
+  owner: human
+  history:
+  - version: 2
+    previous: false
+    value: true
+    date: '2026-11-10'
+    at: '2026-11-10T22:44:02+00:00'
+    by: human:user (explicit chat approval 2026-11-10)
+    proposal_id: pp-20261110-managed-hold-gate-profile-on-g5-active-d-522a25
+    reason: managed_hold gate profile on, G5 active DSR 0.90 (Phase 5)
+    applies_from_campaign: 32
+- key: gates.profiles.managed_hold.min_switches
+  class: 2
+  source: yaml:config/gates.yaml#profiles.managed_hold.min_switches
+  value: 30
+  rationale: managed_hold 관문 프로필 — min_switches (managed_hold_gates.PROFILE_DEFAULT 설명 참고)
+  evidence: Phase 5 프로필 추가(기본 OFF) · 합성 보정 research/reports/managed_hold_profile_20261110.md
+  version: 1
+  last_updated: '2026-11-10'
+  owner: human
+  history: []
+- key: gates.profiles.managed_hold.min_dev_days
+  class: 2
+  source: yaml:config/gates.yaml#profiles.managed_hold.min_dev_days
+  value: 365
+  rationale: managed_hold 관문 프로필 — min_dev_days (managed_hold_gates.PROFILE_DEFAULT 설명 참고)
+  evidence: Phase 5 프로필 추가(기본 OFF) · 합성 보정 research/reports/managed_hold_profile_20261110.md
+  version: 1
+  last_updated: '2026-11-10'
+  owner: human
+  history: []
+- key: gates.profiles.managed_hold.g2_null_runs
+  class: 2
+  source: yaml:config/gates.yaml#profiles.managed_hold.g2_null_runs
+  value: 500
+  rationale: managed_hold 관문 프로필 — g2_null_runs (managed_hold_gates.PROFILE_DEFAULT 설명 참고)
+  evidence: Phase 5 프로필 추가(기본 OFF) · 합성 보정 research/reports/managed_hold_profile_20261110.md
+  version: 1
+  last_updated: '2026-11-10'
+  owner: human
+  history: []
+- key: gates.profiles.managed_hold.g2_top_fraction
+  class: 2
+  source: yaml:config/gates.yaml#profiles.managed_hold.g2_top_fraction
+  value: 0.05
+  rationale: managed_hold 관문 프로필 — g2_top_fraction (managed_hold_gates.PROFILE_DEFAULT 설명 참고)
+  evidence: Phase 5 프로필 추가(기본 OFF) · 합성 보정 research/reports/managed_hold_profile_20261110.md
+  version: 1
+  last_updated: '2026-11-10'
+  owner: human
+  history: []
+- key: gates.profiles.managed_hold.g2_min_shift_days
+  class: 2
+  source: yaml:config/gates.yaml#profiles.managed_hold.g2_min_shift_days
+  value: 30
+  rationale: managed_hold 관문 프로필 — g2_min_shift_days (managed_hold_gates.PROFILE_DEFAULT 설명 참고)
+  evidence: Phase 5 프로필 추가(기본 OFF) · 합성 보정 research/reports/managed_hold_profile_20261110.md
+  version: 1
+  last_updated: '2026-11-10'
+  owner: human
+  history: []
+- key: gates.profiles.managed_hold.g3_neighbor_ratio
+  class: 2
+  source: yaml:config/gates.yaml#profiles.managed_hold.g3_neighbor_ratio
+  value: 0.25
+  rationale: managed_hold 관문 프로필 — g3_neighbor_ratio (managed_hold_gates.PROFILE_DEFAULT 설명 참고)
+  evidence: Phase 5 프로필 추가(기본 OFF) · 합성 보정 research/reports/managed_hold_profile_20261110.md
+  version: 1
+  last_updated: '2026-11-10'
+  owner: human
+  history: []
+- key: gates.profiles.managed_hold.g4_window_days
+  class: 2
+  source: yaml:config/gates.yaml#profiles.managed_hold.g4_window_days
+  value: 182
+  rationale: managed_hold 관문 프로필 — g4_window_days (managed_hold_gates.PROFILE_DEFAULT 설명 참고)
+  evidence: Phase 5 프로필 추가(기본 OFF) · 합성 보정 research/reports/managed_hold_profile_20261110.md
+  version: 1
+  last_updated: '2026-11-10'
+  owner: human
+  history: []
+- key: gates.profiles.managed_hold.g4_step_days
+  class: 2
+  source: yaml:config/gates.yaml#profiles.managed_hold.g4_step_days
+  value: 30
+  rationale: managed_hold 관문 프로필 — g4_step_days (managed_hold_gates.PROFILE_DEFAULT 설명 참고)
+  evidence: Phase 5 프로필 추가(기본 OFF) · 합성 보정 research/reports/managed_hold_profile_20261110.md
+  version: 1
+  last_updated: '2026-11-10'
+  owner: human
+  history: []
+- key: gates.profiles.managed_hold.g4_min_frac
+  class: 2
+  source: yaml:config/gates.yaml#profiles.managed_hold.g4_min_frac
+  value: 0.5
+  rationale: managed_hold 관문 프로필 — g4_min_frac (managed_hold_gates.PROFILE_DEFAULT 설명 참고)
+  evidence: Phase 5 프로필 추가(기본 OFF) · 합성 보정 research/reports/managed_hold_profile_20261110.md
+  version: 1
+  last_updated: '2026-11-10'
+  owner: human
+  history: []
+- key: gates.profiles.managed_hold.g5_min_dsr
+  class: 2
+  source: yaml:config/gates.yaml#profiles.managed_hold.g5_min_dsr
+  value: 0.9
+  rationale: managed_hold 관문 프로필 — g5_min_dsr (managed_hold_gates.PROFILE_DEFAULT 설명 참고)
+  evidence: research/reports/managed_hold_profile_20261110.md
+  version: 2
+  last_updated: '2026-11-10'
+  owner: human
+  history:
+  - version: 2
+    previous: 0.95
+    value: 0.9
+    date: '2026-11-10'
+    at: '2026-11-10T22:44:02+00:00'
+    by: human:user (explicit chat approval 2026-11-10)
+    proposal_id: pp-20261110-managed-hold-gate-profile-on-g5-active-d-522a25
+    reason: managed_hold gate profile on, G5 active DSR 0.90 (Phase 5)
+    applies_from_campaign: 32
+- key: gates.profiles.managed_hold.g6_combined_alpha
+  class: 2
+  source: yaml:config/gates.yaml#profiles.managed_hold.g6_combined_alpha
+  value: 0.05
+  rationale: managed_hold 관문 프로필 — g6_combined_alpha (managed_hold_gates.PROFILE_DEFAULT 설명 참고)
+  evidence: Phase 5 프로필 추가(기본 OFF) · 합성 보정 research/reports/managed_hold_profile_20261110.md
+  version: 1
+  last_updated: '2026-11-10'
+  owner: human
+  history: []
+- key: gates.profiles.managed_hold.g8_min_weeks
+  class: 2
+  source: yaml:config/gates.yaml#profiles.managed_hold.g8_min_weeks
+  value: 8
+  rationale: managed_hold 관문 프로필 — g8_min_weeks (managed_hold_gates.PROFILE_DEFAULT 설명 참고)
+  evidence: Phase 5 프로필 추가(기본 OFF) · 합성 보정 research/reports/managed_hold_profile_20261110.md
+  version: 1
+  last_updated: '2026-11-10'
+  owner: human
+  history: []
+- key: gates.profiles.managed_hold.g8_min_state_match
+  class: 2
+  source: yaml:config/gates.yaml#profiles.managed_hold.g8_min_state_match
+  value: 0.95
+  rationale: managed_hold 관문 프로필 — g8_min_state_match (managed_hold_gates.PROFILE_DEFAULT 설명 참고)
+  evidence: Phase 5 프로필 추가(기본 OFF) · 합성 보정 research/reports/managed_hold_profile_20261110.md
   version: 1
   last_updated: '2026-11-10'
   owner: human
@@ -1552,7 +1710,8 @@ params:
     T3:
     - 0.3
     - 1.0
-  rationale: 단계별 승격(PLAN D23) 실제 자본 비중 — T2 소액 실전 = 총자본의 10%, T3 증액 = 30% → 100% 중 사람이 고름. 실제 명목 상한 = 총자본 × 이 비중 × position_scale
+  rationale: 단계별 승격(PLAN D23) 실제 자본 비중 — T2 소액 실전 = 총자본의 10%, T3 증액 = 30% → 100% 중 사람이 고름. 실제 명목 상한 = 총자본 × 이 비중
+    × position_scale
   evidence: 사용자 결정 (채팅 2026-11-10, 관문 재검토 Q4 '추천대로') — research/reports/gate_review_20261110.md §6.2
   version: 1
   last_updated: '2026-11-10'
