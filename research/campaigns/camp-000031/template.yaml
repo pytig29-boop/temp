@@ -1,0 +1,72 @@
+name: c4_vol_breakout_roc_1h_u3_half
+universe:
+- BTC-KRW
+- XRP-KRW
+- ETH-KRW
+data:
+  exchange: coinone
+  timeframe: 1m
+  aux: []
+timeframe: 1h
+entry:
+  block: roc_threshold
+  grid:
+    lookback:
+    - 12
+    thr_bp:
+    - 100
+filters:
+- []
+exits:
+  mode: atr
+  sl_atr:
+  - 2.0
+  tp_atr:
+  - 1.0
+  - 2.0
+  max_hold_min:
+  - 480
+  - 960
+  atr_bars: 14
+sizing:
+  entry_fraction:
+  - 0.5
+from_screen: camp-000027
+power:
+  target_sharpe: 1.4
+costs:
+  primary: coinone_conservative
+  grade: upbit_conservative
+  stress: coinone_stress
+  grade_stress: upbit_stress
+budget: 4
+family: vol_breakout
+hypothesis:
+  text: 'Coinone 3-asset universe [BTC-KRW, XRP-KRW, ETH-KRW] (D15, pooled, equal
+    sleeves), 1h: roc_threshold(12,100) with half-size entries (entry_fraction 0.5)
+    and ATR exits (SL 2 ATR x TP 1/2 ATR, max hold 480/960 min) earns positive per-asset
+    coinone_conservative net MTM returns that pass G0-G5 on Dev and the robustness
+    suite.'
+  rationale: 'Mechanism M3 (1h time-series momentum; stop cascades, short liquidations,
+    late trend followers). Counterparty: counter-trend limit sellers, stopped-out
+    shorts, late chasers at exit. Kills: bear regimes (2022), per-asset cost (D17),
+    drift confound (int-000009/int-000011), regime concentration. Structural change
+    vs the paused BTC-only line: the fixed 3-asset universe (D15) - same parameters,
+    ~3x positions, pooled equal-sleeve evaluation. Caveat stated before the run: the
+    BTC sleeve re-uses a rule family whose BTC-only versions carry taxonomy VAL_FAIL
+    (fact-000013/fact-000016); a skeptic must weigh that the BTC sleeve is not new
+    evidence. Partial sizing entry_fraction 0.5 (user request, D16): size does not
+    change the edge gates (G2/G5) and halves drawdowns. Exits fixed by the pre-screen
+    plan (scratchpad PLAN_prescreen.txt): sl_atr = screen MAE-p75 suggestion rounded
+    to 0.5, tp_atr = {MFE-median suggestion rounded to 0.5, 2x}, max hold {info horizon
+    480, 960}. MTM gate returns (D18). Evidence (Dev only; lockbox none, Val none):
+    screen camp-000027 (drv-000019): pooled n 17392 (BTC 5033, XRP 6209, ETH 6150),
+    p 0.0027, excess 11.8 bp z 3.12 @480 (peaked), net +11.4 bp (Upbit -1.3); MFE
+    median 1.10 ATR, |MAE| p75 1.93 ATR (1h ATR 0.95 %). Plausible Sharpe z/sqrt(4.83
+    y) = 1.42; required ~1.28; target 1.40. Highest event rate of the cycle (user
+    preference for more trades). Predicted failures: G2 (drift in the null), Upbit
+    grade (B at best), regime share, PBO. [derived-from drv-000023 ← fact-000024;
+    family vol_breakout]'
+  success_criteria: At least one spec passes G0-G5, ablation, G6 (outcome code) and
+    the Dev robustness suite. Refuted as a tradeable edge if no spec passes G2 or
+    the best Dev Sharpe_w (MTM) < 1.0.

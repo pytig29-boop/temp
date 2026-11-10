@@ -1,0 +1,94 @@
+name: c4_liq_meanrev_ladder_5m_u3
+universe:
+- BTC-KRW
+- XRP-KRW
+- ETH-KRW
+data:
+  exchange: coinone
+  timeframe: 1m
+  aux: []
+timeframe: 5m
+entry:
+  block: bollinger_z_revert
+  grid:
+    window:
+    - 96
+    z:
+    - 2.5
+filters:
+- []
+exits:
+  mode: atr
+  sl_atr:
+  - 1.5
+  tp_atr:
+  - 2.5
+  max_hold_min:
+  - 120
+  atr_bars: 14
+execution:
+  take_profit: limit
+ladder:
+  tranches:
+  - 3
+  - 4
+  step_atr:
+  - 0.5
+  - 1.0
+  order: limit
+  exit:
+  - per_tranche
+  - average
+  max_exposure: 1.0
+from_screen: camp-000025
+power:
+  target_sharpe: 1.35
+costs:
+  primary: coinone_conservative
+  grade: upbit_conservative
+  stress: coinone_stress
+  grade_stress: upbit_stress
+budget: 8
+family: liq_meanrev
+hypothesis:
+  text: 'Coinone 3-asset universe [BTC-KRW, XRP-KRW, ETH-KRW] (D15, pooled, equal
+    sleeves), 5m: after bollinger_z_revert(96,2.5) a maker scale-in ladder (first
+    tranche market, 3-4 equal tranches with limit rungs every 0.5/1.0 ATR below, maker
+    take-profit 2.5 ATR per tranche or on average cost, aggregate stop 1.5 ATR below
+    the last rung, max hold 120 min) earns positive per-asset coinone_conservative
+    net MTM returns that pass G0-G5 on Dev, beat the ladder-matched random-entry null
+    and pass the binding tail check.'
+  rationale: 'Mechanism M4 liquidity provision (mechanisms.md): forced/panic selling
+    pushes thin Coinone books (esp. XRP/ETH) below fair value and part of it reverts;
+    a resting buyer that adds on further dips is paid for immediacy. Counterparty:
+    liquidated longs / panic sellers hitting thin bids. Kills: falling knives (2022
+    bear), information-driven drops, adverse selection of maker rungs (fill_model_20261110:
+    -2.5..-4.7 bp at 5 min at dip signal times, n=20, BTC Forward; lockbox none, Val
+    none), per-asset spread (D17), Upbit cost (grade B). Design (user request, D16:
+    ''buy a part on a dip, buy more on a further dip, sell on small rises''), fixed
+    in scratchpad PLAN_prescreen.txt BEFORE the screens ran: first tranche = market
+    at the screened decision; equal tranches max_exposure/N (N in {3,4}), rungs every
+    step_atr in {0.5,1.0} x decision-bar ATR14 below the first fill as maker limit
+    orders (conservative 1-tick trade-through fill rule), maker take-profit limits;
+    exit mode gridded {per_tranche (sell each tranche on a small rise), average (sell
+    all at average cost + TP)}; mandatory aggregate stop sl_atr 1.5 ATR below the
+    LAST rung (max loss fixed at ladder start); max_exposure 1.0 per sleeve. A limit
+    first entry was dropped because entry 2 + exits 3 + ladder 2 + exit-mode grid
+    1 + offset 1 = 9 > MAX_PARAMS 8 (the user-requested per_tranche-vs-average comparison
+    was kept). TP = screen MFE-median ATR suggestion rounded to 0.25, max hold = information
+    horizon. Gates use MTM daily returns (D18); the tail check is binding for ladders
+    (D19). Evidence (Dev only; lockbox none, Val none): screen camp-000025 (drv-000017):
+    pooled n 8942 (BTC 2999, XRP 3025, ETH 2918), p 0.004, excess 6.3 bp z 3.00 @120
+    (info horizon 120, peaked), net of taker round trip only +0.7 bp (Upbit -12.0);
+    MFE median 2.48 ATR, |MAE| p75 4.71 ATR (5m ATR median 0.234 %). Plausible Sharpe:
+    z/sqrt(4.83 y) = 1.37 on excess - a ceiling that needs maker execution to recover
+    most of the taker cost; with taker cost it is ~0.15. Power: required 1.20 at N_dsr
+    ~7 (target 1.35 = this ceiling). Predicted failure modes (stated before the run):
+    G2 vs the ladder-matched null (the ladder structure, not the entry, may carry
+    the PnL), net cost (XRP/ETH spreads), tail check 2022 / CVaR, G4 recent 12 months.
+    [derived-from drv-000020 ← fact-000022; family liq_meanrev]'
+  success_criteria: At least one spec passes G0-G5, ablation, G6 (outcome code) and
+    the Dev robustness suite incl. the binding tail check. Refuted as a tradeable
+    edge if no spec passes G2 vs the ladder-matched null or the best Dev Sharpe_w
+    (MTM) < 1.0. Report per exit mode, per tranche count, per asset, fill rates, trades/day
+    and 2022 results.

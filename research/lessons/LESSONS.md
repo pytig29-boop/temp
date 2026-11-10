@@ -3,7 +3,7 @@
 > `btc_quant.research.lessons.render_markdown()` 생성물. **직접 편집 금지** (원본: `research/lessons/*.jsonl`).
 > 사실(Facts)은 파이프라인 결과에서 자동 추출되어 불변이다. 해석(Interpretations)은 AI 작성이며
 > 후속 캠페인으로 verified/refuted 되기 전까지 **unverified** 이다. Val/잠금은 결과 코드만.
-> 생성: 2026-11-10T01:38:23+00:00 · 사실 21 · 해석 13 · 사후분석 6 · 파생 16
+> 생성: 2026-11-10T07:12:02+00:00 · 사실 28 · 해석 16 · 사후분석 7 · 파생 23
 
 ## 실패 유형 (자동 분류)
 
@@ -26,8 +26,8 @@
 
 | family | 캠페인 | 누적 시도 | 결과 | 주 실패 유형 |
 |---|---|---|---|---|
-| `liq_meanrev` | 7 | 45 | passed 2, failed 5 | `NO_SIGNAL`×3, `PARAM_SPIKE`×1, `UNSTABLE`×1 |
-| `vol_breakout` | 11 | 83 | passed 5, failed 6 | `VAL_FAIL`×2, `NO_SIGNAL`×2, `PARAM_SPIKE`×1, `SELECTION_BIAS`×1 |
+| `liq_meanrev` | 11 | 66 | passed 4, failed 7 | `NO_SIGNAL`×3, `COST_EATEN`×2, `PARAM_SPIKE`×1, `UNSTABLE`×1 |
+| `vol_breakout` | 14 | 96 | passed 6, failed 8 | `PARAM_SPIKE`×2, `VAL_FAIL`×2, `NO_SIGNAL`×2, `SELECTION_BIAS`×1, `COST_EATEN`×1 |
 | `xvenue_upbit_lead` | 3 | 16 | failed 2, passed 1 | `COST_EATEN`×1, `LOW_SAMPLE`×1 |
 
 ## 교훈 (사실 → 해석)
@@ -419,6 +419,120 @@
   - 근거: fact-000021 candidates[0].gates_dev.G2 p_value 0.112, sharpe_w 0.906, null median 0.386, null p95 1.091; fact-000017 (screen camp-000020): roc(3,100)&vz(48,1) excess 28.8 bp z 2.07 @1440; roc(12,100)&vz(48,1) 24.3 bp z 1.96; unfiltered roc(3,100) 8.3 bp z 0.68, roc(12,100) 16.9 bp @1440; research/reports/campaign_camp-000024.md B&H reference: exposure_days 0.483, up-regime capture 0.45, down-regime capture -2.45 (Dev); research/knowledge/pitfalls.md#P-D1 (lockbox none, Val none)
   - 검증 방법: Signal screen (family vol_breakout) of roc_threshold(3,100) x {none, volume_z(48,1.0)} on Upbit 1h data (uncontaminated volume): refuted if the volume_z config shows excess z >= 3 at 1440 min AND exceeds the unfiltered excess by >= 2 HAC SE; otherwise the volume-confirmation line stays closed.
 
+### fact-000022 · signal_screen `camp-000025` · family `liq_meanrev`
+
+**사실 (자동, 불변)**
+
+- 가설 hyp-000024: On the fixed Coinone universe [BTC-KRW, XRP-KRW, ETH-KRW] (D15, pooled) at 5m decisions, sharp downside dislocations - close >= 2.5 sd below the 96-bar mean (bollinger_z_revert(96,2.5)) or an equal-weight reversion composite score >= 2.0 (composite_z reversion: -r_6, -boll_48, +log1p vol) - are followed by 30-120 min returns above a per-asset matched (KST hour x vol) null, net of per-asset coinone_conservative cost (D17).
+- 결과: **passed** · 주 실패 유형: `None` · 분포: `COST_EATEN`×1
+- 깔때기(전체 None 스펙): G1 None · SR_w>0 None · G4 None | 상위 None:  · Dev 생존 None
+  - `bollinger_z_revert(window=96,z=2.5)` events=8942 p=0.004 best_h=120 → PASS
+  - `composite_z(preset=reversion,threshold=2.0)` events=7080 p=0.011 best_h=60 → `COST_EATEN`
+- 범위: coinone None 1m · dev 2021-01-01T00:00:00+00:00~2025-11-01T00:00:00+00:00 · 블록 ['bollinger_z_revert', 'composite_z'] / None · 재검토 기한 2027-05-09
+- 재검토 조건: Dev data period changes; venue/cost model changes; decision interval changes (bar_minutes)
+
+### fact-000023 · signal_screen `camp-000026` · family `liq_meanrev`
+
+**사실 (자동, 불변)**
+
+- 가설 hyp-000025: On the fixed Coinone universe [BTC-KRW, XRP-KRW, ETH-KRW] (D15, pooled) at 15m decisions, sharp downside dislocations - close >= 2.5 sd below the 24-bar (6 h) mean (bollinger_z_revert(24,2.5)) or an equal-weight reversion composite score >= 1.5 / >= 2.0 (composite_z reversion) - are followed by 1-4 h returns above a per-asset matched (KST hour x vol) null, net of per-asset coinone_conservative cost (D17).
+- 결과: **passed** · 주 실패 유형: `None` · 분포: `COST_EATEN`×2
+- 깔때기(전체 None 스펙): G1 None · SR_w>0 None · G4 None | 상위 None:  · Dev 생존 None
+  - `bollinger_z_revert(window=24,z=2.5)` events=6278 p=0.002 best_h=60 → `COST_EATEN`
+  - `composite_z(preset=reversion,threshold=1.5)` events=8467 p=0.003 best_h=60 → `COST_EATEN`
+  - `composite_z(preset=reversion,threshold=2.0)` events=3883 p=0.002 best_h=60 → PASS
+- 범위: coinone None 1m · dev 2021-01-01T00:00:00+00:00~2025-11-01T00:00:00+00:00 · 블록 ['bollinger_z_revert', 'composite_z'] / None · 재검토 기한 2027-05-09
+- 재검토 조건: Dev data period changes; venue/cost model changes; decision interval changes (bar_minutes)
+
+### fact-000024 · signal_screen `camp-000027` · family `vol_breakout`
+
+**사실 (자동, 불변)**
+
+- 가설 hyp-000026: On the fixed Coinone universe [BTC-KRW, XRP-KRW, ETH-KRW] (D15, pooled) at 1h decisions, upside momentum entries - atr_channel_breakout(24,3), roc_threshold(12,100) and the equal-weight composite scores composite_z momentum >= 1.0 / >= 1.5 and volume_momentum >= 1.5 - are followed by 4-24 h returns above a per-asset matched (KST hour x vol) null, net of per-asset coinone_conservative cost (D17).
+- 결과: **passed** · 주 실패 유형: `None` · 분포: `NO_SIGNAL`×1
+- 깔때기(전체 None 스펙): G1 None · SR_w>0 None · G4 None | 상위 None:  · Dev 생존 None
+  - `atr_channel_breakout(span=24,mult=3.0)` events=3225 p=0.003 best_h=480 → PASS
+  - `roc_threshold(lookback=12,thr_bp=100)` events=17392 p=0.003 best_h=480 → PASS
+  - `composite_z(preset=momentum,threshold=1.0)` events=9569 p=0.009 best_h=480 → PASS
+  - `composite_z(preset=momentum,threshold=1.5)` events=3933 p=0.048 best_h=480 → PASS
+  - `composite_z(preset=volume_momentum,threshold=1.5)` events=2859 p=0.325 best_h=480 → `NO_SIGNAL`
+- 범위: coinone None 1m · dev 2021-01-01T00:00:00+00:00~2025-11-01T00:00:00+00:00 · 블록 ['atr_channel_breakout', 'composite_z', 'roc_threshold'] / None · 재검토 기한 2027-05-09
+- 재검토 조건: Dev data period changes; venue/cost model changes; decision interval changes (bar_minutes)
+
+### fact-000025 · campaign `camp-000028` · family `liq_meanrev`
+
+**사실 (자동, 불변)**
+
+- 가설 hyp-000027: Coinone 3-asset universe [BTC-KRW, XRP-KRW, ETH-KRW] (D15, pooled, equal sleeves), 15m: after the equal-weight reversion composite composite_z(reversion) >= 2.0 a maker scale-in ladder (first tranche market, 3-4 equal tranches with limit rungs every 0.5/1.0 ATR below, maker take-profit 1.25 ATR per tranche or on average cost, aggregate stop 1.5 ATR below the last rung, max hold 60 min) earns positive per-asset coinone_conservative net MTM returns that pass G0-G5 on Dev, beat the ladder-matched random-entry null and pass the binding tail check.
+- 결과: **failed** · 주 실패 유형: `COST_EATEN` · 분포: `COST_EATEN`×1
+- 파생: drv-000021 (계열 점검: ok)
+- 깔때기(전체 8 스펙): G1 8 · SR_w>0 0 · G4 0 | 상위 5: G0 1 · G1 1 · G2 0 · G3 0 · G4 0 · G5 0 · Dev 생존 0
+- 선택편향 입력: n_campaign_specs=8, k_eff_clusters=1, n_family_trials=58, n_global_trials=162, n_trials_dsr=7.250, pbo=0.488, cluster_threshold=0.500
+- Val(G6): 평가 0 · 통과 0 (결과 코드만) · 잠금: not_accessed
+  - #1 `c4_liq_meanrev_ladder_15m_u3_7207679868` SR_w=-0.127 trades=9910 first_failed=G2 → `COST_EATEN` ['COST_EATEN', 'UNSTABLE', 'SELECTION_BIAS'] · val=not_run
+- 범위: coinone BTC-KRW 1m · dev 2021-01-01T00:00:00+00:00~2025-11-01T00:00:00+00:00 · 블록 composite_z / [[]] · 재검토 기한 2027-05-09
+- 재검토 조건: Dev data period or segment boundaries change (new data, lockbox rolled into Dev/Val); venue or cost model changes (e.g. Coinone 0% fee promotion ends, Upbit fee changes); timeframe / decision interval changes (5m ↔ 1m); a block used here is re-implemented (new block version) or an engine bug is fixed; review date 2027-05-09 passes
+
+**해석 (AI, 검증 상태 표시)**
+
+- [UNVERIFIED] int-000014 (신뢰도 medium): The dip-buy trigger carries real timing information but the maker scale-in ladder built on it is cost-eaten on the 3-coin Coinone universe. At 15m (composite_z reversion 2.0) and 5m (bollinger 96/2.5), every ladder spec beats the ladder-matched random-entry null by a wide margin (G2 percentile 1.0; null median Sharpe_w -2.29 at 15m, -2.90 at 5m). But gross Sharpe_w is at most 0.61 (15m) / 0.88 (5m), and net Sharpe_w at per-asset coinone_conservative is negative for all 16 specs (best -0.13). Maker rungs and maker take-profits do not close the gap: the first tranche, stops and time exits still pay taker cost, and filled rungs are falling-knife inventory. The losses sit in 2022-2023 and in the ETH sleeve. Without a trigger, the same ladder structure (the random null) loses heavily, so 'buy a part on a dip, more on a further dip, sell on small rises' is negative expectancy at these costs; only the dip trigger keeps it near zero.
+  - 근거: fact-000025 candidates[0]: sharpe_w -0.127, G2 null sharpe_w_median -2.293 p95 -1.451, gross neighbor median 0.376; fact-000026 candidates[0]: sharpe_w -0.656, G2 null median -2.900 p95 -1.995, gross neighbor median 0.629; camp-000028/029 results (Dev): gross_sharpe_w 0.15-0.61 / -0.03-0.88, Upbit-cost sharpe_w -2.2..-6.7; per-asset ETH sharpe_w -0.84..-2.28; research/reports/fill_model_20261110.md (Forward, lockbox none, Val none): maker markout at dip signals -2.5..-4.7 bp at 5 min, n=20
+  - 검증 방법: When liq_meanrev is released (cost change such as a Coinone maker rebate or lower XRP/ETH spread, or a new Dev period): pre-register the same trigger with a single entry at the first-tranche size (entry_fraction 1/N) and the same exits next to the ladder. The ladder-adds-value claim is refuted again if the ladder's gross Sharpe_w does not exceed the single entry's by >= 0.3. The cost-eaten claim is refuted if any ladder spec reaches net Sharpe_w > 0 with G2 passing.
+
+### fact-000026 · campaign `camp-000029` · family `liq_meanrev`
+
+**사실 (자동, 불변)**
+
+- 가설 hyp-000028: Coinone 3-asset universe [BTC-KRW, XRP-KRW, ETH-KRW] (D15, pooled, equal sleeves), 5m: after bollinger_z_revert(96,2.5) a maker scale-in ladder (first tranche market, 3-4 equal tranches with limit rungs every 0.5/1.0 ATR below, maker take-profit 2.5 ATR per tranche or on average cost, aggregate stop 1.5 ATR below the last rung, max hold 120 min) earns positive per-asset coinone_conservative net MTM returns that pass G0-G5 on Dev, beat the ladder-matched random-entry null and pass the binding tail check.
+- 결과: **failed** · 주 실패 유형: `COST_EATEN` · 분포: `COST_EATEN`×1
+- 파생: drv-000020 (계열 점검: ok)
+- 깔때기(전체 8 스펙): G1 8 · SR_w>0 0 · G4 0 | 상위 5: G0 1 · G1 1 · G2 0 · G3 0 · G4 0 · G5 0 · Dev 생존 0
+- 선택편향 입력: n_campaign_specs=8, k_eff_clusters=1, n_family_trials=66, n_global_trials=170, n_trials_dsr=8.250, pbo=0.000, cluster_threshold=0.500
+- Val(G6): 평가 0 · 통과 0 (결과 코드만) · 잠금: not_accessed
+  - #1 `c4_liq_meanrev_ladder_5m_u3_1fd10db577` SR_w=-0.656 trades=23118 first_failed=G2 → `COST_EATEN` ['COST_EATEN', 'UNSTABLE', 'SELECTION_BIAS'] · val=not_run
+- 범위: coinone BTC-KRW 1m · dev 2021-01-01T00:00:00+00:00~2025-11-01T00:00:00+00:00 · 블록 bollinger_z_revert / [[]] · 재검토 기한 2027-05-09
+- 재검토 조건: Dev data period or segment boundaries change (new data, lockbox rolled into Dev/Val); venue or cost model changes (e.g. Coinone 0% fee promotion ends, Upbit fee changes); timeframe / decision interval changes (5m ↔ 1m); a block used here is re-implemented (new block version) or an engine bug is fixed; review date 2027-05-09 passes
+
+**해석 (AI, 검증 상태 표시)**
+
+- [UNVERIFIED] int-000015 (신뢰도 medium): Tighter ladders are worse. At 5m, rungs every 0.5 ATR fill 67-72 % of the time against 50-58 % at 1.0 ATR, and those specs have net Sharpe_w -1.57..-1.88, 2022 returns -43..-51 % and worst MTM day -9.5..-11.8 %. The 1.0 ATR specs have Sharpe_w -0.66..-1.44 and 2022 returns -26..-41 %. Every 5m ladder would also fail the binding D19 tail check on 2022 (< -20 %), and the 0.5-ATR 4-tranche specs on worst day (> 10 %). Inventory accumulates in trending declines faster than the reversion pays it back, so more and closer rungs mean more falling-knife exposure, not more liquidity premium.
+  - 근거: camp-000029 results (Dev, coinone_conservative): rung fill ratio (n_trades-n_positions)/(n_positions*(N-1)) 0.50-0.72; bear_total_return -0.26..-0.51; worst_day -0.059..-0.118; camp-000028 results (Dev): 15m 2022 returns -0.07..-0.17, worst_day -0.033..-0.061; config/gates.yaml robustness tail thresholds (D19)
+  - 검증 방법: If liq_meanrev is released: a 2-value step grid {1.0, 1.5} ATR with the same trigger. Refuted if the wider step does not raise net Sharpe_w and lower the 2022 loss relative to 1.0 ATR.
+
+### fact-000027 · campaign `camp-000030` · family `vol_breakout`
+
+**사실 (자동, 불변)**
+
+- 가설 hyp-000029: Coinone 3-asset universe [BTC-KRW, XRP-KRW, ETH-KRW] (D15, pooled, equal sleeves), 1h: atr_channel_breakout(24,3) with half-size entries (entry_fraction 0.5) and ATR exits (SL 2 ATR x TP 1.5/3 ATR, max hold 480/960 min) earns positive per-asset coinone_conservative net MTM returns that pass G0-G5 on Dev and the robustness suite.
+- 결과: **failed** · 주 실패 유형: `PARAM_SPIKE` · 분포: `PARAM_SPIKE`×1
+- 파생: drv-000022 (계열 점검: ok)
+- 깔때기(전체 4 스펙): G1 4 · SR_w>0 2 · G4 2 | 상위 5: G0 1 · G1 1 · G2 1 · G3 0 · G4 1 · G5 0 · Dev 생존 0
+- 선택편향 입력: n_campaign_specs=4, k_eff_clusters=1, n_family_trials=92, n_global_trials=174, n_trials_dsr=23.000, pbo=0.001, cluster_threshold=0.500
+- Val(G6): 평가 0 · 통과 0 (결과 코드만) · 잠금: not_accessed
+  - #1 `c4_vol_breakout_atrch_1h_u3_half_4fc37395fd` SR_w=0.983 trades=1773 first_failed=G3 → `PARAM_SPIKE` ['PARAM_SPIKE', 'SELECTION_BIAS'] · val=not_run
+- 범위: coinone BTC-KRW 1m · dev 2021-01-01T00:00:00+00:00~2025-11-01T00:00:00+00:00 · 블록 atr_channel_breakout / [[]] · 재검토 기한 2027-05-09
+- 재검토 조건: Dev data period or segment boundaries change (new data, lockbox rolled into Dev/Val); venue or cost model changes (e.g. Coinone 0% fee promotion ends, Upbit fee changes); timeframe / decision interval changes (5m ↔ 1m); a block used here is re-implemented (new block version) or an engine bug is fixed; review date 2027-05-09 passes
+
+**해석 (AI, 검증 상태 표시)**
+
+- [UNVERIFIED] int-000016 (신뢰도 low): Moving 1h atr_channel_breakout(24,3) to the pooled 3-coin universe at half size passes G2 for the first time against a trade-count-matched null (Sharpe_w 0.98, null median -0.58, p 0.003; 1.0 position/day; MTM MDD 8.8 %; 2022 -1 %). But the result rests on the TP 3 ATR exit: the TP 1.5 neighbours are negative (-0.45/-0.63, G3 fail). DSR is 0.28 at N_dsr 23. The Upbit-grade Sharpe_w is about 0 (-0.08/+0.12), and the XRP sleeve adds nothing (Sharpe_w 0.20). This is weak, exit-sensitive momentum with a right-skewed payoff (daily skew 3.98), not a validated edge. The BTC sleeve is the same rule whose BTC-only versions carry VAL_FAIL.
+  - 근거: fact-000027 candidates[0]: sharpe_w 0.983, G2 p 0.003 percentile 0.998, G3 neighbor_median 0.176, G5 dsr 0.276 n_trials 23 pbo 0.001; camp-000030 results (Dev): upbit_conservative sharpe_w -0.084 / 0.124 for TP 3 ATR specs; per-asset sharpe_w BTC 0.95, XRP 0.20, ETH 1.14; fact-000013, fact-000016 (taxonomy VAL_FAIL, outcome codes only)
+  - 검증 방법: No further grid in this line. Falsify on unseen data only: when Dev is extended (lockbox rolled into Dev) or via a human-approved Forward watchlist entry, evaluate the exact spec c4_vol_breakout_atrch_1h_u3_half_4fc37395fd unchanged. Refuted if the new-period Sharpe_w (MTM, coinone_conservative) <= 0 over >= 300 positions.
+
+### fact-000028 · campaign `camp-000031` · family `vol_breakout`
+
+**사실 (자동, 불변)**
+
+- 가설 hyp-000030: Coinone 3-asset universe [BTC-KRW, XRP-KRW, ETH-KRW] (D15, pooled, equal sleeves), 1h: roc_threshold(12,100) with half-size entries (entry_fraction 0.5) and ATR exits (SL 2 ATR x TP 1/2 ATR, max hold 480/960 min) earns positive per-asset coinone_conservative net MTM returns that pass G0-G5 on Dev and the robustness suite.
+- 결과: **failed** · 주 실패 유형: `COST_EATEN` · 분포: `COST_EATEN`×1
+- 파생: drv-000023 (계열 점검: ok)
+- 깔때기(전체 4 스펙): G1 4 · SR_w>0 0 · G4 0 | 상위 5: G0 1 · G1 1 · G2 0 · G3 0 · G4 0 · G5 0 · Dev 생존 0
+- 선택편향 입력: n_campaign_specs=4, k_eff_clusters=1, n_family_trials=96, n_global_trials=178, n_trials_dsr=24.000, pbo=0.001, cluster_threshold=0.500
+- Val(G6): 평가 0 · 통과 0 (결과 코드만) · 잠금: not_accessed
+  - #1 `c4_vol_breakout_roc_1h_u3_half_91a6706e89` SR_w=-0.483 trades=5702 first_failed=G2 → `COST_EATEN` ['COST_EATEN', 'UNSTABLE', 'SELECTION_BIAS'] · val=not_run
+- 범위: coinone BTC-KRW 1m · dev 2021-01-01T00:00:00+00:00~2025-11-01T00:00:00+00:00 · 블록 roc_threshold / [[]] · 재검토 기한 2027-05-09
+- 재검토 조건: Dev data period or segment boundaries change (new data, lockbox rolled into Dev/Val); venue or cost model changes (e.g. Coinone 0% fee promotion ends, Upbit fee changes); timeframe / decision interval changes (5m ↔ 1m); a block used here is re-implemented (new block version) or an engine bug is fixed; review date 2027-05-09 passes
+
 ## 파생 가설 (계열 상속)
 
 | id | 부모 | family | override | 가설 |
@@ -439,6 +553,13 @@
 | drv-000014 | fact-000011 | `liq_meanrev` | – | On Coinone BTC-KRW at 15m decisions, closes >= 2.5 sd below the 24-bar (6 h) mean on abnormally high volume (volume_z(96) >= 1 / >= 2 vs the trailing day) - the price+volume proxy for liquidation cascades in mechanisms.md M4 - are followed by 30-120 min returns above a matched (KST hour x vol) null, net of coinone_conservative cost, with larger excess than the unfiltered bollinger_z_revert(24, 2.5) of screen camp-000011. |
 | drv-000015 | fact-000012 | `liq_meanrev` | – | On Coinone BTC-KRW at 1h decisions, closes >= 2.5 sd below the 24 h mean on abnormally high volume (volume_z(48) >= 1 / >= 2 vs the trailing 2 days) are followed by 4-24 h returns above a matched (KST hour x vol) null, net of coinone_conservative cost, unlike the price-only 1h reversion that was NO_SIGNAL (camp-000012). |
 | drv-000016 | fact-000017 | `vol_breakout` | – | Coinone BTC-KRW 1h: a >= 100 bp rise over 3 h or 12 h (roc_threshold) on abnormally high decision-bar volume (volume_z(48) >= 1), with ATR exits (SL 3 ATR x TP 2 / 4 ATR, max hold 1440 min = information horizon or 2880 min low-turnover variant), earns positive coinone_conservative net returns that pass G0-G5 on Dev and the robustness suite (incl. regime share <= 70%). |
+| drv-000017 | fact-000004 | `liq_meanrev` | – | On the fixed Coinone universe [BTC-KRW, XRP-KRW, ETH-KRW] (D15, pooled) at 5m decisions, sharp downside dislocations - close >= 2.5 sd below the 96-bar mean (bollinger_z_revert(96,2.5)) or an equal-weight reversion composite score >= 2.0 (composite_z reversion: -r_6, -boll_48, +log1p vol) - are followed by 30-120 min returns above a per-asset matched (KST hour x vol) null, net of per-asset coinone_conservative cost (D17). |
+| drv-000018 | fact-000011 | `liq_meanrev` | – | On the fixed Coinone universe [BTC-KRW, XRP-KRW, ETH-KRW] (D15, pooled) at 15m decisions, sharp downside dislocations - close >= 2.5 sd below the 24-bar (6 h) mean (bollinger_z_revert(24,2.5)) or an equal-weight reversion composite score >= 1.5 / >= 2.0 (composite_z reversion) - are followed by 1-4 h returns above a per-asset matched (KST hour x vol) null, net of per-asset coinone_conservative cost (D17). |
+| drv-000019 | fact-000009 | `vol_breakout` | – | On the fixed Coinone universe [BTC-KRW, XRP-KRW, ETH-KRW] (D15, pooled) at 1h decisions, upside momentum entries - atr_channel_breakout(24,3), roc_threshold(12,100) and the equal-weight composite scores composite_z momentum >= 1.0 / >= 1.5 and volume_momentum >= 1.5 - are followed by 4-24 h returns above a per-asset matched (KST hour x vol) null, net of per-asset coinone_conservative cost (D17). |
+| drv-000020 | fact-000022 | `liq_meanrev` | – | Coinone 3-asset universe [BTC-KRW, XRP-KRW, ETH-KRW] (D15, pooled, equal sleeves), 5m: after bollinger_z_revert(96,2.5) a maker scale-in ladder (first tranche market, 3-4 equal tranches with limit rungs every 0.5/1.0 ATR below, maker take-profit 2.5 ATR per tranche or on average cost, aggregate stop 1.5 ATR below the last rung, max hold 120 min) earns positive per-asset coinone_conservative net MTM returns that pass G0-G5 on Dev, beat the ladder-matched random-entry null and pass the binding tail check. |
+| drv-000021 | fact-000023 | `liq_meanrev` | – | Coinone 3-asset universe [BTC-KRW, XRP-KRW, ETH-KRW] (D15, pooled, equal sleeves), 15m: after the equal-weight reversion composite composite_z(reversion) >= 2.0 a maker scale-in ladder (first tranche market, 3-4 equal tranches with limit rungs every 0.5/1.0 ATR below, maker take-profit 1.25 ATR per tranche or on average cost, aggregate stop 1.5 ATR below the last rung, max hold 60 min) earns positive per-asset coinone_conservative net MTM returns that pass G0-G5 on Dev, beat the ladder-matched random-entry null and pass the binding tail check. |
+| drv-000022 | fact-000024 | `vol_breakout` | – | Coinone 3-asset universe [BTC-KRW, XRP-KRW, ETH-KRW] (D15, pooled, equal sleeves), 1h: atr_channel_breakout(24,3) with half-size entries (entry_fraction 0.5) and ATR exits (SL 2 ATR x TP 1.5/3 ATR, max hold 480/960 min) earns positive per-asset coinone_conservative net MTM returns that pass G0-G5 on Dev and the robustness suite. |
+| drv-000023 | fact-000024 | `vol_breakout` | – | Coinone 3-asset universe [BTC-KRW, XRP-KRW, ETH-KRW] (D15, pooled, equal sleeves), 1h: roc_threshold(12,100) with half-size entries (entry_fraction 0.5) and ATR exits (SL 2 ATR x TP 1/2 ATR, max hold 480/960 min) earns positive per-asset coinone_conservative net MTM returns that pass G0-G5 on Dev and the robustness suite. |
 
 ## 과정 사후분석 (버그·데이터·절차)
 
@@ -514,6 +635,17 @@
   - Write the full strategy template (incl. exits) to disk before running any side calculation whose result could inform it
   - State order of events in rationales only as recorded (file timestamps / ledger ids)
 - 참고: drv-000011, hyp-000017, camp-000016, camp-000017
+
+### pm-000007 · [design] Power check understates N_dsr for small single-cluster grids (4-spec campaigns) (2026-11-10, mitigated)
+
+- **무슨 일**: For camp-000030/031 (4 specs each, 1 correlation cluster) power_check estimated N_dsr 11.5 (required Sharpe ~1.28) using the history compression 0.125, but the pipeline used N_dsr = N_family*K/N = 92*1/4 = 23 (and 24), raising the DSR bar. Smaller grids get a larger K/N and so a larger N_dsr, which is the opposite of what the power tool reports.
+- **근본 원인**: power.estimate_effective_trials applies a fixed historical compression ratio; G5 uses the realised K/N of the campaign, which is 1/n_specs when every spec falls into one cluster.
+- **영향**: Low: neither campaign was near the DSR bar (DSR 0.28 / 0.002); the reported required Sharpe was optimistic by about 0.1-0.15.
+- **발견 경위**: researcher while reading the G5 inputs of camp-000030
+- **재발 방지**:
+  - Researchers: for grids with < 8 specs assume K/N = 1/n_specs when computing the required Sharpe by hand
+  - Human: consider making power.estimate_effective_trials use max(history ratio, 1/n_grid) (code change, human-only)
+- 참고: camp-000030, camp-000031, src/btc_quant/research/power.py
 
 
 ## 무결성

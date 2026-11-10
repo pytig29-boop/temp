@@ -1,0 +1,78 @@
+name: c4_liq_meanrev_dip_5m_u3_screen
+family: liq_meanrev
+universe:
+- BTC-KRW
+- XRP-KRW
+- ETH-KRW
+data:
+  exchange: coinone
+  timeframe: 1m
+  aux: []
+bar_minutes: 5
+signals:
+- entry:
+    block: bollinger_z_revert
+    params:
+      window: 96
+      z: 2.5
+  filters:
+  - []
+- entry:
+    block: composite_z
+    params:
+      preset: reversion
+      threshold: 2.0
+  filters:
+  - []
+study:
+  n_null: 1000
+  seed: 0
+  min_events: 300
+  stratify: hour_vol
+costs:
+  primary: coinone_conservative
+  grade: upbit_conservative
+correction:
+  method: bh
+  alpha: 0.1
+budget: 2
+hypothesis:
+  text: 'On the fixed Coinone universe [BTC-KRW, XRP-KRW, ETH-KRW] (D15, pooled) at
+    5m decisions, sharp downside dislocations - close >= 2.5 sd below the 96-bar mean
+    (bollinger_z_revert(96,2.5)) or an equal-weight reversion composite score >= 2.0
+    (composite_z reversion: -r_6, -boll_48, +log1p vol) - are followed by 30-120 min
+    returns above a per-asset matched (KST hour x vol) null, net of per-asset coinone_conservative
+    cost (D17).'
+  rationale: 'Mechanism M4 (mechanisms.md, liquidity provision after forced/panic
+    selling): short-horizon price-insensitive selling (liquidations, stop cascades,
+    panic retail) pushes thin Coinone books below fair value and part of the move
+    reverts once the pressure stops; a resting buyer is paid for supplying immediacy.
+    Counterparty: forced-liquidated leveraged longs and panic sellers hitting thin
+    Coinone bids, especially in the alt books (XRP/ETH) where Coinone depth is a fraction
+    of Upbit''s (data_audit_multi_20261110: Coinone/Upbit KRW volume XRP 3-10 %, ETH
+    3-18 %). Why it persists: Coinone alt books are too small for large market makers;
+    the 0 % fee is recent. What kills it: information-driven drops that do not revert
+    and second waves (falling knives; Dev 2022 bear), per-asset spread cost (D17:
+    Coinone RT XRP 8/10/14, ETH 5/8/14 bp; XRP spread is one 1-KRW tick), adverse
+    selection of maker fills at dip-buy signal times (fill_model_20261110: -2.5..-4.7
+    bp markout at 5 min, n=20, BTC, Forward data; lockbox none, Val none), Upbit-level
+    cost (grade B). What is new vs prior BTC-only liq_meanrev work: the fixed 3-asset
+    universe (D15, pooled, equal sleeves) roughly triples independent-ish events with
+    zero extra parameters, per-asset cost models (D17) and the purpose of the screen:
+    it gates a pre-planned maker scale-in ladder campaign (D16, user request ''buy
+    a part on a dip, buy more on a further dip, sell on small rises''), so the entry
+    trigger must first show information on the pooled universe. Evidence (Dev only;
+    lockbox none, Val none): fact-000004 (BTC 5m: bollinger_z_revert(96,2.5) passed,
+    p 0.001, info horizon 60), fact-000005/fact-000008 (BTC 5m strategies weak, Sharpe_w
+    0.5-0.9; int-000005 regime-concentrated), int-000013 (Coinone volume lowers reversion
+    excess - the composite''s volume term may hurt). Nothing was computed on data
+    before registration; all values are block-grid / prior screened values. [derived-from
+    drv-000017 ← fact-000004; family liq_meanrev]'
+  success_criteria: 'Per config: BH q=0.10 over the family''s screen configs (incl.
+    prior liq_meanrev screens), pooled n_events >= 300, per-asset coinone_conservative
+    net mean > 0 at the best primary horizon. Pre-registered contrast for the composite
+    (cycle-4 B): the equal-weight reversion composite adds value only if a composite
+    config passes AND its matched-null excess at its best primary horizon exceeds
+    that of the bollinger sibling in the same screen. A ladder strategy campaign (cycle-4
+    A) is run only on a passing config; per-asset rows are reported, never used to
+    select assets.'

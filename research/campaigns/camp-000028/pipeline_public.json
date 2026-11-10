@@ -1,0 +1,657 @@
+{
+  "campaign_id": "camp-000028",
+  "hypothesis_id": "hyp-000027",
+  "top_k": 5,
+  "universe": [
+    "BTC-KRW",
+    "XRP-KRW",
+    "ETH-KRW"
+  ],
+  "selection": {
+    "method": "cluster_best",
+    "cluster_threshold": 0.5,
+    "n_specs": 8,
+    "n_clusters": 1,
+    "cluster_sizes": [
+      8
+    ],
+    "selected": [
+      {
+        "logic_hash": "7207679868297f0f",
+        "cluster": 1,
+        "cluster_size": 8,
+        "sharpe_w": -0.12656158379618843
+      }
+    ]
+  },
+  "timeframe": "15m",
+  "exits": {
+    "mode": "atr",
+    "atr_bars": 14
+  },
+  "aux": [],
+  "power": {
+    "n_grid": 8,
+    "family": "liq_meanrev",
+    "n_family_prior": 50,
+    "ratio": 0.125,
+    "ratio_source": "history median of 8 campaigns",
+    "k_eff_est": 1.0,
+    "n_trials_dsr": 7.25,
+    "n_days": 1765,
+    "var_trial_sr": 0.0002825554649306722,
+    "var_source": "history median",
+    "min_dsr": 0.95,
+    "required_sharpe_ann": 1.2004762625136065,
+    "required_sharpe_ann_single_trial": 0.7484985921568781,
+    "target_sharpe_ann": 1.45,
+    "max_trials_for_target": 39.24413313311903,
+    "max_grid_for_target": 263.9530650649522,
+    "markdown": "- 계획 격자 8 스펙, 계열 `liq_meanrev` 기존 시도 50, 압축비 0.125 (history median of 8 campaigns) → 실질 시도 ≈ 7.2\n- Dev 1765일, V=0.000283 (history median), 왜도 0, 첨도 3, DSR ≥ 0.95\n- **G5 통과 최소 연 Sharpe ≈ 1.20** (시도 1회였다면 0.75)\n- 목표 연 Sharpe 1.45 로 감당 가능한 실질 시도 ≈ 39 (격자 ≈ 264 스펙)",
+    "warning": null,
+    "strict": true,
+    "ok": true
+  },
+  "screen": {
+    "from_screen": "camp-000026",
+    "requires_screen_pass": false,
+    "n_configs": 1,
+    "matches": [
+      {
+        "config": "composite_z{'preset': 'reversion', 'threshold': 2.0}",
+        "screen_id": "camp-000026",
+        "run_id": "run-000213",
+        "p_signal": 0.0019089805426416291,
+        "n_events": 3883,
+        "info_horizon": 60,
+        "exchange": "coinone",
+        "aux": []
+      }
+    ],
+    "rule": "every (entry params × filter params × timeframe × exchange × universe) config passed a recorded screen"
+  },
+  "n_null": 1000,
+  "funnel_all": {
+    "n_specs": 8,
+    "g1_pass": 8,
+    "sharpe_w_positive": 0,
+    "g4_pass": 0,
+    "g1_g4_positive": 0,
+    "gross_sharpe_w_positive": 8
+  },
+  "campaign_stats": {
+    "n_campaign_specs": 8,
+    "k_eff_clusters": 1,
+    "entropy_trials": 1.8797372465030977,
+    "n_family_trials": 58,
+    "n_global_trials": 162,
+    "n_trials_dsr": 7.25,
+    "var_trial_sr": 0.0001364314698409236,
+    "var_source": "all campaign columns (single cluster fallback)",
+    "cluster_threshold": 0.5,
+    "pbo": 0.488034188034188,
+    "n_combinations": 12870,
+    "logit_median": 0.22314355131420993
+  },
+  "gate_config_version": 1,
+  "candidates": [
+    {
+      "rank": 1,
+      "logic_hash": "7207679868297f0f",
+      "spec_id": "c4_liq_meanrev_ladder_15m_u3_7207679868",
+      "spec": {
+        "id": "c4_liq_meanrev_ladder_15m_u3_7207679868",
+        "entry": {
+          "block": "composite_z",
+          "params": {
+            "preset": "reversion",
+            "threshold": 2.0
+          }
+        },
+        "exit": {
+          "max_hold_min": 60,
+          "signal_exit": null,
+          "stop_loss_atr": 1.5,
+          "take_profit_atr": 1.25
+        },
+        "filters": [],
+        "version": 1,
+        "timeframe": "15m",
+        "universe": [
+          "BTC-KRW",
+          "XRP-KRW",
+          "ETH-KRW"
+        ],
+        "execution": {
+          "take_profit": "limit"
+        },
+        "ladder": {
+          "tranches": 4,
+          "step_atr": 0.5,
+          "order": "limit",
+          "exit": "average"
+        }
+      },
+      "cluster": 1,
+      "cluster_size": 8,
+      "metrics": {
+        "spec_id": "c4_liq_meanrev_ladder_15m_u3_7207679868",
+        "filter_set": 0,
+        "filters": "-",
+        "entry.preset": "reversion",
+        "entry.threshold": 2.0,
+        "sl_atr": 1.5,
+        "tp_atr": 1.25,
+        "max_hold_min": 60,
+        "atr_bars": 14,
+        "ladder.tranches": 4,
+        "ladder.step_atr": 0.5,
+        "ladder.exit": "average",
+        "cost": "coinone_conservative",
+        "n_days": 1765,
+        "sharpe": -0.1456459795596688,
+        "sharpe_w": -0.12656158379618843,
+        "mean_w": -3.068477474096365e-05,
+        "std_w": 0.004631988481094325,
+        "n_eff": 981.8967427034494,
+        "mean_daily": -3.723799976350514e-05,
+        "std_daily": 0.004884659286210747,
+        "skew": -3.573322479691056,
+        "kurtosis": 47.32588356345063,
+        "total_return": -0.08334988402900978,
+        "cagr": -0.017836598681348903,
+        "max_dd": 0.36120271705883444,
+        "max_dd_days": 1658,
+        "n_trades": 9910,
+        "n_positions": 4011,
+        "expectancy": -7.580829215058693e-05,
+        "win_rate": 0.5638748738647831,
+        "profit_factor": 0.9802223776030904,
+        "avg_hold_min": 31.14793138244198,
+        "trades_per_day": 5.614730878186969,
+        "recent_sharpe": 0.2642361150848079,
+        "recent_n_positions": 872,
+        "recent_n_trades": 2178,
+        "rolling_frac_positive": 0.32075471698113206,
+        "rolling_n_windows": 53,
+        "worst_day": -0.060691141052852116,
+        "worst_week": -0.05359113411873162,
+        "cvar5_daily": -0.013981458941698855,
+        "max_inventory": 1.0,
+        "max_inventory_minutes": 49,
+        "max_inventory_episodes": 62,
+        "bear_total_return": -0.1322035383509158,
+        "bear_sharpe": -1.7668891478710411,
+        "bear_max_dd": 0.13319043679927345,
+        "bear_n_days": 365,
+        "exposure_time": 0.0101207900535096,
+        "days_in_market": 1047,
+        "exposure_days": 0.5932011331444759,
+        "downside_dev": 0.0775317870764123,
+        "rolling_n_neutral": 0,
+        "rolling_n_active": 53,
+        "rolling_frac_positive_active": 0.32075471698113206,
+        "rolling_neutral_exposure": 0.1,
+        "bh_total_return": 11.453458533296132,
+        "bh_sharpe": 1.1483918657371714,
+        "bh_max_dd": 0.7300752572392226,
+        "excess_return_vs_bh": -11.536808417325142,
+        "sharpe_minus_bh": -1.2940378452968402,
+        "bh_matched_total_return": 0.03545864102189222,
+        "excess_return_vs_matched_bh": -0.118808525050902,
+        "up_capture": 0.008433646005571453,
+        "down_capture": 0.013941967268097134,
+        "bh_n_up_days": 938,
+        "bh_n_down_days": 827,
+        "up_regime_return": -0.1201607160071485,
+        "down_regime_return": -0.025803348819118166,
+        "up_regime_capture": -0.036565014439940376,
+        "down_regime_capture": 0.10145090238479709,
+        "bh_n_up_regime_days": 978,
+        "bh_n_down_regime_days": 757,
+        "bh_dd1_depth": 0.7300752572392226,
+        "bh_dd1_start": "2021-11-09",
+        "bh_dd1_end": "2022-06-18",
+        "bh_dd1_strategy_return": -0.06826528964819212,
+        "bh_dd2_depth": 0.5722037489457583,
+        "bh_dd2_start": "2021-05-09",
+        "bh_dd2_end": "2021-07-20",
+        "bh_dd2_strategy_return": -0.018045731829595013,
+        "bh_dd3_depth": 0.4249143469285672,
+        "bh_dd3_start": "2025-01-18",
+        "bh_dd3_end": "2025-04-08",
+        "bh_dd3_strategy_return": 0.012733358569591458,
+        "worst_bh_dd_strategy_return": -0.06826528964819212,
+        "sharpe_year_2021": 1.389018600058055,
+        "sharpe_year_2022": -1.7668891478710411,
+        "sharpe_year_2023": -1.5704738887375373,
+        "sharpe_year_2024": -0.7901640012909424,
+        "sharpe_year_2025": 0.7039610949778129,
+        "gross_sharpe_w": 0.5826958381557733,
+        "gross_expectancy": 0.00028850563766685594,
+        "asset.BTC-KRW.n_trades": 3681,
+        "asset.BTC-KRW.sharpe_w": -0.20440946756551348,
+        "asset.BTC-KRW.total_return": -0.05293728582311741,
+        "asset.XRP-KRW.n_trades": 2936,
+        "asset.XRP-KRW.sharpe_w": 0.5427270568206007,
+        "asset.XRP-KRW.total_return": 0.18950927520897465,
+        "asset.ETH-KRW.n_trades": 3293,
+        "asset.ETH-KRW.sharpe_w": -0.8414201776512918,
+        "asset.ETH-KRW.total_return": -0.35296263760165425
+      },
+      "gates": {
+        "G0": {
+          "passed": true,
+          "validate": "ok",
+          "n_filters": 0,
+          "n_params": 7,
+          "not_live_ready": [],
+          "requires_aux": [],
+          "disallowed_aux": [],
+          "timeframe": "15m",
+          "exit_mode": "atr",
+          "uses_experimental": [
+            "composite_z"
+          ],
+          "causality_cuts": 9,
+          "causality_violations": [],
+          "universe": [
+            "BTC-KRW",
+            "XRP-KRW",
+            "ETH-KRW"
+          ]
+        },
+        "G1": {
+          "passed": true,
+          "n_trades": 4011,
+          "recent_n_trades": 872,
+          "ok_trades": true,
+          "ok_recent": true,
+          "n_tranche_rows": 9910,
+          "unit": "positions (ladders)"
+        },
+        "G2": {
+          "passed": false,
+          "sharpe_w": -0.12656158379618843,
+          "percentile": 1.0,
+          "p_value": 0.000999000999000999,
+          "n_null": 1000,
+          "ok_positive": false,
+          "ok_null": true,
+          "null_runs_expected": 1000,
+          "p": {
+            "BTC-KRW": 0.009293604951428789,
+            "XRP-KRW": 0.008414201285396612,
+            "ETH-KRW": 0.009711260898193137
+          },
+          "p_signal_rate": {
+            "BTC-KRW": 0.0170445466328143,
+            "XRP-KRW": 0.014150943396226415,
+            "ETH-KRW": 0.01563989178757688
+          },
+          "calibration": "trade_count",
+          "calibration_probe_trades": {
+            "BTC-KRW": 1439.5,
+            "XRP-KRW": 1228.0,
+            "ETH-KRW": 1343.0
+          },
+          "n_entry_bars": {
+            "BTC-KRW": 2880,
+            "XRP-KRW": 2391,
+            "ETH-KRW": 2642
+          },
+          "n_filter_bars": {
+            "BTC-KRW": 168969,
+            "XRP-KRW": 168964,
+            "ETH-KRW": 168927
+          },
+          "n_seeds": 1000,
+          "seed0": 0,
+          "tf_min": 15,
+          "atr_bars": 14,
+          "n_trades_median": 4021.0,
+          "sharpe_w_p95": -1.45107004055047,
+          "sharpe_w_median": -2.293006479735733,
+          "universe": [
+            "BTC-KRW",
+            "XRP-KRW",
+            "ETH-KRW"
+          ],
+          "null_rule": "per-asset random entry (same filters/exits, per-asset p calibrated to that asset's trade count), same seed on every sleeve, portfolio = mean of sleeve daily returns",
+          "candidate_n_trades": 9910,
+          "candidate_n_trades_by_asset": {
+            "BTC-KRW": 1435,
+            "XRP-KRW": 1233,
+            "ETH-KRW": 1343
+          },
+          "ok_null_runs": true,
+          "cost": "coinone_conservative"
+        },
+        "G3": {
+          "passed": false,
+          "selected": -0.12656158379618843,
+          "neighbor_median": -0.457507543339031,
+          "required": -0.06328079189809421,
+          "n_neighbors": 3,
+          "neighbor_median_gross": 0.3756818999984563,
+          "neighbors": [
+            {
+              "change": "ladder.tranches=3",
+              "logic_hash": "297838ca1b2e143e",
+              "sharpe_w": -0.5115790749703215,
+              "gross_sharpe_w": 0.3756818999984563
+            },
+            {
+              "change": "ladder.step_atr=1.0",
+              "logic_hash": "02dabffc525024b3",
+              "sharpe_w": -0.40659063491504144,
+              "gross_sharpe_w": 0.4308319578001787
+            },
+            {
+              "change": "ladder.exit=per_tranche",
+              "logic_hash": "239e68d2b9b8b3c1",
+              "sharpe_w": -0.457507543339031,
+              "gross_sharpe_w": 0.2666754477243916
+            }
+          ],
+          "missing": []
+        },
+        "G4": {
+          "passed": false,
+          "rolling_frac_positive": 0.32075471698113206,
+          "rolling_n_windows": 53,
+          "recent_sharpe": 0.2642361150848079,
+          "ok_rolling": false,
+          "ok_recent": true,
+          "exposure_aware": {
+            "enabled": false,
+            "neutral_max_exposure": 0.1,
+            "min_active_windows": 20,
+            "min_dev_exposure": 0.2,
+            "applicable": true,
+            "rolling_n_active": 53,
+            "rolling_n_neutral": 0,
+            "rolling_frac_positive_active": 0.32075471698113206,
+            "exposure_days": 0.5932011331444759,
+            "ok_active_windows": true,
+            "ok_dev_exposure": true,
+            "ok_rolling_active": false,
+            "ok_rolling": false,
+            "via": null,
+            "passed": false
+          }
+        },
+        "G5": {
+          "passed": false,
+          "dsr": 0.15300635414274977,
+          "pbo": 0.488034188034188,
+          "ok_dsr": false,
+          "ok_pbo": false,
+          "sr": -0.007623458993061593,
+          "sr0": 0.016422613737254163,
+          "skew": -3.573322479691056,
+          "kurtosis": 47.32588356345063,
+          "n_obs": 1765,
+          "n_trials": 7.25,
+          "var_trial_sr": 0.0001364314698409236
+        }
+      },
+      "uses_experimental": [
+        "composite_z"
+      ],
+      "yearly": [
+        {
+          "year": 2021,
+          "n_days": 365,
+          "total_return": 0.18643609249591697,
+          "sharpe": 1.389018600058055,
+          "max_dd": 0.11635845257189803,
+          "n_trades": 2080
+        },
+        {
+          "year": 2022,
+          "n_days": 365,
+          "total_return": -0.1322035383509158,
+          "sharpe": -1.7668891478710411,
+          "max_dd": 0.13319043679927345,
+          "n_trades": 2086
+        },
+        {
+          "year": 2023,
+          "n_days": 365,
+          "total_return": -0.07833566028525374,
+          "sharpe": -1.5704738887375373,
+          "max_dd": 0.11066222467298059,
+          "n_trades": 1799
+        },
+        {
+          "year": 2024,
+          "n_days": 366,
+          "total_return": -0.0803311199195812,
+          "sharpe": -0.7901640012909424,
+          "max_dd": 0.13562739284412972,
+          "n_trades": 2145
+        },
+        {
+          "year": 2025,
+          "n_days": 304,
+          "total_return": 0.05035739496114755,
+          "sharpe": 0.7039610949778129,
+          "max_dd": 0.07882515954346136,
+          "n_trades": 1800
+        }
+      ],
+      "universe": [
+        "BTC-KRW",
+        "XRP-KRW",
+        "ETH-KRW"
+      ],
+      "per_asset": {
+        "BTC-KRW": {
+          "n_trades": 3681,
+          "n_positions": 1435,
+          "recent_n_trades": 805,
+          "sharpe": -0.06530234005497527,
+          "sharpe_w": -0.20440946756551348,
+          "total_return": -0.05293728582311741,
+          "max_dd": 0.30210308426787624,
+          "expectancy": -3.4042559338228075e-05,
+          "win_rate": 0.5664221678891606,
+          "trades_per_day": 2.085552407932011
+        },
+        "XRP-KRW": {
+          "n_trades": 2936,
+          "n_positions": 1233,
+          "recent_n_trades": 698,
+          "sharpe": 0.3113319696296043,
+          "sharpe_w": 0.5427270568206007,
+          "total_return": 0.18950927520897465,
+          "max_dd": 0.4261707426391099,
+          "expectancy": 0.00031861736979389477,
+          "win_rate": 0.5807220708446866,
+          "trades_per_day": 1.663456090651558
+        },
+        "ETH-KRW": {
+          "n_trades": 3293,
+          "n_positions": 1343,
+          "recent_n_trades": 675,
+          "sharpe": -0.6706857682846731,
+          "sharpe_w": -0.8414201776512918,
+          "total_return": -0.35296263760165425,
+          "max_dd": 0.45873939651046625,
+          "expectancy": -0.0004741603741278998,
+          "win_rate": 0.5460066808381415,
+          "trades_per_day": 1.8657223796033995
+        }
+      },
+      "per_asset_yearly": {
+        "BTC-KRW": [
+          {
+            "year": 2021,
+            "n_days": 365,
+            "total_return": 0.1940098418108953,
+            "sharpe": 1.213943142484141,
+            "max_dd": 0.1359263830102322,
+            "n_trades": 721
+          },
+          {
+            "year": 2022,
+            "n_days": 365,
+            "total_return": -0.10277987106819719,
+            "sharpe": -1.3761980714211408,
+            "max_dd": 0.13050764874471077,
+            "n_trades": 751
+          },
+          {
+            "year": 2023,
+            "n_days": 365,
+            "total_return": -0.06364037129911249,
+            "sharpe": -1.019213439958763,
+            "max_dd": 0.10671064519759255,
+            "n_trades": 715
+          },
+          {
+            "year": 2024,
+            "n_days": 366,
+            "total_return": -0.08909979065204787,
+            "sharpe": -0.8594863160187363,
+            "max_dd": 0.14426749942999917,
+            "n_trades": 838
+          },
+          {
+            "year": 2025,
+            "n_days": 304,
+            "total_return": 0.03647383059745635,
+            "sharpe": 0.943349728527361,
+            "max_dd": 0.04591178274353469,
+            "n_trades": 656
+          }
+        ],
+        "XRP-KRW": [
+          {
+            "year": 2021,
+            "n_days": 365,
+            "total_return": 0.23824461399582142,
+            "sharpe": 1.0544691461576468,
+            "max_dd": 0.22733035001182988,
+            "n_trades": 623
+          },
+          {
+            "year": 2022,
+            "n_days": 365,
+            "total_return": -0.13366747227129205,
+            "sharpe": -1.1670329526652345,
+            "max_dd": 0.19706697604772805,
+            "n_trades": 608
+          },
+          {
+            "year": 2023,
+            "n_days": 365,
+            "total_return": -0.04626973193786221,
+            "sharpe": -0.6215762671029778,
+            "max_dd": 0.09707858757236498,
+            "n_trades": 529
+          },
+          {
+            "year": 2024,
+            "n_days": 366,
+            "total_return": 0.02231269495586874,
+            "sharpe": 0.23043610488258284,
+            "max_dd": 0.0984158111835054,
+            "n_trades": 582
+          },
+          {
+            "year": 2025,
+            "n_days": 304,
+            "total_return": 0.1372801120617757,
+            "sharpe": 0.9678531046449945,
+            "max_dd": 0.17330130330359395,
+            "n_trades": 594
+          }
+        ],
+        "ETH-KRW": [
+          {
+            "year": 2021,
+            "n_days": 365,
+            "total_return": 0.100169561244005,
+            "sharpe": 0.6682771714121222,
+            "max_dd": 0.13503000878395344,
+            "n_trades": 736
+          },
+          {
+            "year": 2022,
+            "n_days": 365,
+            "total_return": -0.1654857784174495,
+            "sharpe": -1.4950567171866023,
+            "max_dd": 0.17355512905888948,
+            "n_trades": 727
+          },
+          {
+            "year": 2023,
+            "n_days": 365,
+            "total_return": -0.1254291971496604,
+            "sharpe": -2.225795277107891,
+            "max_dd": 0.14786461231039016,
+            "n_trades": 555
+          },
+          {
+            "year": 2024,
+            "n_days": 366,
+            "total_return": -0.17241101941972026,
+            "sharpe": -1.3025174427412003,
+            "max_dd": 0.22577404558072778,
+            "n_trades": 725
+          },
+          {
+            "year": 2025,
+            "n_days": 304,
+            "total_return": -0.026297425958281218,
+            "sharpe": -0.22858423450481682,
+            "max_dd": 0.0673666448556216,
+            "n_trades": 550
+          }
+        ]
+      },
+      "dev_passed": false,
+      "first_failed": "G2",
+      "ablation": null,
+      "grade": null,
+      "status": "failed G2 (ledger only)"
+    }
+  ],
+  "daily_returns": "mtm",
+  "params_version": "074b618a3279",
+  "cost_versions": {
+    "coinone_base": 2,
+    "coinone_base@ETH-KRW": 1,
+    "coinone_base@XRP-KRW": 1,
+    "coinone_conservative": 2,
+    "coinone_conservative@ETH-KRW": 1,
+    "coinone_conservative@XRP-KRW": 1,
+    "coinone_stress": 2,
+    "coinone_stress@ETH-KRW": 1,
+    "coinone_stress@XRP-KRW": 1,
+    "upbit_base": 1,
+    "upbit_base@ETH-KRW": 1,
+    "upbit_base@XRP-KRW": 1,
+    "upbit_conservative": 1,
+    "upbit_conservative@ETH-KRW": 1,
+    "upbit_conservative@XRP-KRW": 1,
+    "upbit_stress": 1,
+    "upbit_stress@ETH-KRW": 1,
+    "upbit_stress@XRP-KRW": 1
+  },
+  "code_commit": "e6cc86bb960b9e9900074963077957ff1b4df0bf+dirty",
+  "n_dev_survivors": 0,
+  "n_validated": 0,
+  "n_robustness_fail": 0,
+  "n_registry_validated": 0,
+  "uses_experimental": [
+    "composite_z"
+  ],
+  "verdict": "no candidate passed",
+  "runtime_sec": 28.88,
+  "lockbox": "not accessed (G7 requires human approval: admin_cli approve-lockbox)",
+  "lessons_fact": "fact-000025",
+  "redacted": "agent-safe copy of pipeline.json: Val (G6) / lockbox as outcome codes only; full file is human-only"
+}

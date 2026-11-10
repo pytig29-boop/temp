@@ -1,0 +1,4 @@
+label,family,entry,filters,n_events,p_signal,best_h,excess_bp,z,net_bp[coinone_conservative],net_bp[upbit_conservative],info_h,profile,n_events[BTC-KRW],n_events[XRP-KRW],n_events[ETH-KRW],significant,passed,fail_reason
+"bollinger_z_revert(window=24,z=2.5)",liq_meanrev,bollinger_z_revert,-,6278,0.00166342,60,6.22269,3.26132,-0.588304,-13.3034,30,peaked,2058,2115,2105,True,False,net mean ≤ 0 under coinone_conservative
+"composite_z(preset=reversion,threshold=1.5)",liq_meanrev,composite_z,-,8467,0.00327673,60,5.53731,3.06393,-0.942832,-13.6664,60,peaked,2877,2705,2885,True,False,net mean ≤ 0 under coinone_conservative
+"composite_z(preset=reversion,threshold=2.0)",liq_meanrev,composite_z,-,3883,0.00190898,60,9.28802,3.22208,2.88478,-9.87609,60,peaked,1396,1186,1301,True,True,

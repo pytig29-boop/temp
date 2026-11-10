@@ -1,0 +1,6 @@
+label,family,entry,filters,n_events,p_signal,best_h,excess_bp,z,net_bp[coinone_conservative],net_bp[upbit_conservative],info_h,profile,n_events[BTC-KRW],n_events[XRP-KRW],n_events[ETH-KRW],significant,passed,fail_reason
+"atr_channel_breakout(span=24,mult=3.0)",vol_breakout,atr_channel_breakout,-,3225,0.00335925,480,21.8283,3.05648,23.4745,10.7287,480,peaked,1165,862,1198,True,True,
+"roc_threshold(lookback=12,thr_bp=100)",vol_breakout,roc_threshold,-,17392,0.00267414,480,11.7845,3.12422,11.3822,-1.27594,480,peaked,5033,6209,6150,True,True,
+"composite_z(preset=momentum,threshold=1.0)",vol_breakout,composite_z,-,9569,0.00893624,480,13.107,2.75011,11.9701,-0.785197,480,peaked,3278,3124,3167,True,True,
+"composite_z(preset=momentum,threshold=1.5)",vol_breakout,composite_z,-,3933,0.0483612,480,17.2423,2.14141,17.2996,4.52694,480,peaked,1361,1290,1282,True,True,
+"composite_z(preset=volume_momentum,threshold=1.5)",vol_breakout,composite_z,-,2859,0.324661,480,11.1521,1.23605,14.5142,1.71492,480,peaked,1008,971,880,False,False,not significant after correction

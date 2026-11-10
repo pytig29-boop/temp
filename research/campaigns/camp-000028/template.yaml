@@ -1,0 +1,97 @@
+name: c4_liq_meanrev_ladder_15m_u3
+universe:
+- BTC-KRW
+- XRP-KRW
+- ETH-KRW
+data:
+  exchange: coinone
+  timeframe: 1m
+  aux: []
+timeframe: 15m
+entry:
+  block: composite_z
+  grid:
+    preset:
+    - reversion
+    threshold:
+    - 2.0
+filters:
+- []
+exits:
+  mode: atr
+  sl_atr:
+  - 1.5
+  tp_atr:
+  - 1.25
+  max_hold_min:
+  - 60
+  atr_bars: 14
+execution:
+  take_profit: limit
+ladder:
+  tranches:
+  - 3
+  - 4
+  step_atr:
+  - 0.5
+  - 1.0
+  order: limit
+  exit:
+  - per_tranche
+  - average
+  max_exposure: 1.0
+from_screen: camp-000026
+power:
+  target_sharpe: 1.45
+costs:
+  primary: coinone_conservative
+  grade: upbit_conservative
+  stress: coinone_stress
+  grade_stress: upbit_stress
+budget: 8
+family: liq_meanrev
+hypothesis:
+  text: 'Coinone 3-asset universe [BTC-KRW, XRP-KRW, ETH-KRW] (D15, pooled, equal
+    sleeves), 15m: after the equal-weight reversion composite composite_z(reversion)
+    >= 2.0 a maker scale-in ladder (first tranche market, 3-4 equal tranches with
+    limit rungs every 0.5/1.0 ATR below, maker take-profit 1.25 ATR per tranche or
+    on average cost, aggregate stop 1.5 ATR below the last rung, max hold 60 min)
+    earns positive per-asset coinone_conservative net MTM returns that pass G0-G5
+    on Dev, beat the ladder-matched random-entry null and pass the binding tail check.'
+  rationale: 'Mechanism M4 liquidity provision (mechanisms.md): forced/panic selling
+    pushes thin Coinone books (esp. XRP/ETH) below fair value and part of it reverts;
+    a resting buyer that adds on further dips is paid for immediacy. Counterparty:
+    liquidated longs / panic sellers hitting thin bids. Kills: falling knives (2022
+    bear), information-driven drops, adverse selection of maker rungs (fill_model_20261110:
+    -2.5..-4.7 bp at 5 min at dip signal times, n=20, BTC Forward; lockbox none, Val
+    none), per-asset spread (D17), Upbit cost (grade B). Design (user request, D16:
+    ''buy a part on a dip, buy more on a further dip, sell on small rises''), fixed
+    in scratchpad PLAN_prescreen.txt BEFORE the screens ran: first tranche = market
+    at the screened decision; equal tranches max_exposure/N (N in {3,4}), rungs every
+    step_atr in {0.5,1.0} x decision-bar ATR14 below the first fill as maker limit
+    orders (conservative 1-tick trade-through fill rule), maker take-profit limits;
+    exit mode gridded {per_tranche (sell each tranche on a small rise), average (sell
+    all at average cost + TP)}; mandatory aggregate stop sl_atr 1.5 ATR below the
+    LAST rung (max loss fixed at ladder start); max_exposure 1.0 per sleeve. A limit
+    first entry was dropped because entry 2 + exits 3 + ladder 2 + exit-mode grid
+    1 + offset 1 = 9 > MAX_PARAMS 8 (the user-requested per_tranche-vs-average comparison
+    was kept). TP = screen MFE-median ATR suggestion rounded to 0.25, max hold = information
+    horizon. Gates use MTM daily returns (D18); the tail check is binding for ladders
+    (D19). Composite (cycle-4 B at 15m): equal-weight -r_6, -boll_48, +log1p vol,
+    no fitted weights; experimental block (human review needed before any lockbox
+    request). Evidence (Dev only; lockbox none, Val none): screen camp-000026 (drv-000018):
+    composite_z(reversion,2.0) pooled n 3883 (BTC 1396, XRP 1186, ETH 1301), p 0.0019,
+    excess 9.3 bp z 3.22 @60 (info horizon 60, peaked), net +2.9 bp (Upbit -9.9);
+    pre-registered contrast met (excess 9.3 > bollinger(24,2.5) sibling 6.2 bp, which
+    failed on net cost; the difference is within ~1 SE). Per-asset p: BTC 0.075, XRP
+    0.0006, ETH 0.17 (report only). MFE median 1.16 ATR, |MAE| p75 2.15 ATR (15m ATR
+    median 0.48 %). Plausible Sharpe z/sqrt(4.83 y) = 1.47 on excess (ceiling); power
+    required 1.20, target 1.45. Predicted failure modes: G2 vs ladder null, concentration
+    in XRP, tail 2022, the 60 min hold leaves deep rungs little time (per_tranche
+    and average may differ little). [derived-from drv-000021 ← fact-000023; family
+    liq_meanrev]'
+  success_criteria: At least one spec passes G0-G5, ablation, G6 (outcome code) and
+    the Dev robustness suite incl. the binding tail check. Refuted as a tradeable
+    edge if no spec passes G2 vs the ladder-matched null or the best Dev Sharpe_w
+    (MTM) < 1.0. Report per exit mode, per tranche count, per asset, fill rates, trades/day
+    and 2022 results.
