@@ -947,6 +947,126 @@ params:
   last_updated: '2026-11-09'
   owner: human
   history: []
+- key: gates.exposure_aware.enabled
+  class: 2
+  source: yaml:config/gates.yaml#exposure_aware.enabled
+  value: false
+  rationale: '노출 인식 G4/G6 변형 주 스위치(기본 OFF). 켜기는 class ② 기준 변경: 합성 국면 보정 근거만, 사람 승인, 다음 캠페인부터'
+  evidence: PLAN D14 초안(승인 대기) · docs/PARAMS.md §8 · 합성 보정 research/reports/calibration_regime_20261110.md
+  version: 1
+  last_updated: '2026-11-10'
+  owner: human
+  history: []
+- key: gates.exposure_aware.min_dev_exposure
+  class: 2
+  source: yaml:config/gates.yaml#exposure_aware.min_dev_exposure
+  value: 0.2
+  rationale: '남용 방지: 변형은 Dev 에서 실제로 시장에 있던 날 비율 ≥ 20% 인 전략에만 (거의 거래 안 하는 전략이 ''쉼''으로 관문을 피하지 못하게)'
+  evidence: PLAN D14 초안(승인 대기) · docs/PARAMS.md §8 · 합성 보정 research/reports/calibration_regime_20261110.md
+  version: 1
+  last_updated: '2026-11-10'
+  owner: human
+  history: []
+- key: gates.exposure_aware.G4.enabled
+  class: 2
+  source: yaml:config/gates.yaml#exposure_aware.G4.enabled
+  value: true
+  rationale: 주 스위치가 켜졌을 때 G4 변형 사용 여부(부분 적용용)
+  evidence: PLAN D14 초안(승인 대기) · docs/PARAMS.md §8 · 합성 보정 research/reports/calibration_regime_20261110.md
+  version: 1
+  last_updated: '2026-11-10'
+  owner: human
+  history: []
+- key: gates.exposure_aware.G4.neutral_max_exposure
+  class: 2
+  source: yaml:config/gates.yaml#exposure_aware.G4.neutral_max_exposure
+  value: 0.1
+  rationale: 6개월 롤링 창의 시장 참여일 < 10% = 쉬는 창(중립) → 양수 비율 분모에서 제외. 거래가 없는 창의 Sharpe 0 을 실패로 세지 않기 위함
+  evidence: PLAN D14 초안(승인 대기) · docs/PARAMS.md §8 · 합성 보정 research/reports/calibration_regime_20261110.md
+  version: 1
+  last_updated: '2026-11-10'
+  owner: human
+  history: []
+- key: gates.exposure_aware.G4.min_active_windows
+  class: 2
+  source: yaml:config/gates.yaml#exposure_aware.G4.min_active_windows
+  value: 20
+  rationale: 비중립 창 최소 수(Dev 4.8년 ≈ 53창) — 판단 근거 창이 너무 적으면 변형 불가
+  evidence: PLAN D14 초안(승인 대기) · docs/PARAMS.md §8 · 합성 보정 research/reports/calibration_regime_20261110.md
+  version: 1
+  last_updated: '2026-11-10'
+  owner: human
+  history: []
+- key: gates.exposure_aware.G6.enabled
+  class: 2
+  source: yaml:config/gates.yaml#exposure_aware.G6.enabled
+  value: true
+  rationale: 주 스위치가 켜졌을 때 G6 '쉬어서 피함' 경로 사용 여부
+  evidence: PLAN D14 초안(승인 대기) · docs/PARAMS.md §8 · 합성 보정 research/reports/calibration_regime_20261110.md
+  version: 1
+  last_updated: '2026-11-10'
+  owner: human
+  history: []
+- key: gates.exposure_aware.G6.flat_max_exposure
+  class: 2
+  source: yaml:config/gates.yaml#exposure_aware.G6.flat_max_exposure
+  value: 0.25
+  rationale: Val 시장 참여일 ≤ 25% = 대체로 쉼 (이 경우에만 Sharpe>0 대신 '손실 없음' 조건)
+  evidence: PLAN D14 초안(승인 대기) · docs/PARAMS.md §8 · 합성 보정 research/reports/calibration_regime_20261110.md
+  version: 1
+  last_updated: '2026-11-10'
+  owner: human
+  history: []
+- key: gates.exposure_aware.G6.flat_min_return
+  class: 2
+  source: yaml:config/gates.yaml#exposure_aware.G6.flat_min_return
+  value: -0.02
+  rationale: '쉼 경로: Val 총수익(primary 비용) ≥ −2% (작은 허용치)'
+  evidence: PLAN D14 초안(승인 대기) · docs/PARAMS.md §8 · 합성 보정 research/reports/calibration_regime_20261110.md
+  version: 1
+  last_updated: '2026-11-10'
+  owner: human
+  history: []
+- key: gates.exposure_aware.G6.flat_min_stress_return
+  class: 2
+  source: yaml:config/gates.yaml#exposure_aware.G6.flat_min_stress_return
+  value: -0.04
+  rationale: '쉼 경로: Val 총수익(stress 비용) ≥ −4% (stress Sharpe>0 대신)'
+  evidence: PLAN D14 초안(승인 대기) · docs/PARAMS.md §8 · 합성 보정 research/reports/calibration_regime_20261110.md
+  version: 1
+  last_updated: '2026-11-10'
+  owner: human
+  history: []
+- key: gates.exposure_aware.G6.flat_max_mdd_vs_bh
+  class: 2
+  source: yaml:config/gates.yaml#exposure_aware.G6.flat_max_mdd_vs_bh
+  value: 0.5
+  rationale: '쉼 경로: Val MDD ≤ 0.5 × 같은 기간 BTC 매수보유 MDD'
+  evidence: PLAN D14 초안(승인 대기) · docs/PARAMS.md §8 · 합성 보정 research/reports/calibration_regime_20261110.md
+  version: 1
+  last_updated: '2026-11-10'
+  owner: human
+  history: []
+- key: gates.exposure_aware.G6.flat_require_bh_down
+  class: 2
+  source: yaml:config/gates.yaml#exposure_aware.G6.flat_require_bh_down
+  value: true
+  rationale: 쉼 경로는 같은 기간 B&H 총수익 < 0 일 때만 (상승장을 놓친 것은 '피함'이 아님)
+  evidence: PLAN D14 초안(승인 대기) · docs/PARAMS.md §8 · 합성 보정 research/reports/calibration_regime_20261110.md
+  version: 1
+  last_updated: '2026-11-10'
+  owner: human
+  history: []
+- key: gates.exposure_aware.G6.flat_min_trades
+  class: 2
+  source: yaml:config/gates.yaml#exposure_aware.G6.flat_min_trades
+  value: 10
+  rationale: '쉼 경로: Val 거래 < 10 이면 insufficient_evidence (통과 아님)'
+  evidence: PLAN D14 초안(승인 대기) · docs/PARAMS.md §8 · 합성 보정 research/reports/calibration_regime_20261110.md
+  version: 1
+  last_updated: '2026-11-10'
+  owner: human
+  history: []
 - key: gates.risk.daily_loss_floor
   class: 3
   source: yaml:config/gates.yaml#risk.daily_loss_floor

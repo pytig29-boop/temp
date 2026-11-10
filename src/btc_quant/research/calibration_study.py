@@ -128,7 +128,7 @@ CUM_SEQUENCE = ("c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8", "c9", "g12")
 
 
 def grid_def(grid: str) -> dict:
-    for d in (GRIDS, GRIDS_1M, CUM_GRIDS):
+    for d in (GRIDS, GRIDS_1M, CUM_GRIDS, GRIDS_REGIME):
         if grid in d:
             return d[grid]
     raise KeyError(grid)
@@ -321,6 +321,147 @@ def gen_market(start: str, end: str, seed: int, k_edge: float = 0.0,
                          "quote_volume": vol * c}, index=idx)
 
 
+# ============================================================== 국면 전환 시장 (PLAN D14 초안 — 노출 인식 관문 보정)
+# 롱 온리 전략의 국면 의존을 재현한다: 상승·하락·횡보 국면이 몇 달씩 이어지고(실제 BTC 처럼), 국면마다
+# (1) 시장 자체의 드리프트(B&H 수익)가 다르고 (2) 심은 돌파 엣지의 세기가 다르다.
+#   null          : 엣지 없음 (국면 드리프트만). 5분·60분 보유 전략에 국면 드리프트는 비용보다 훨씬 작다
+#                   (연 ±0.9 로그 드리프트 = 60분에 약 ±1bp, 왕복 비용 4bp) → 귀무.
+#   심은 엣지는 평균 중립으로 넣는다(돌파 밖 분에 반대 드리프트, `_gen_regime`): B&H 의 국면 드리프트 ≈ REGIME_DRIFT.
+#   (표준 시장 `_gen` 은 보정 없음 — 상승 국면과 돌파 드리프트가 겹치면 B&H 가 비현실적으로 폭주하므로 국면 시장만 보정)
+#   regime_cond   : (ii) 엣지가 상승 국면에서만 양(+), 횡보 절반, 하락 0 (평탄). S* = 무필터 돌파.
+#   regime_cond_f : (ii) 와 같은 시장, 심은 스펙만 S*_f (하락 국면 엣지 0 — 새는 거래는 비용만 잃음).
+#   regime_filter : (iii) 엣지가 상승 +, 횡보 절반, 하락 음(−) — 국면 필터가 이용할 수 있는 구조.
+#                   S*_f = 같은 돌파 + trend_regime_1h(장기 EMA) 필터 → 하락 국면에서 대체로 쉼
+#                   (60일 EMA. 국면 드리프트가 변동성보다 작아 필터는 새고 늦다: 시험 시장에서 하락 국면 시장 참여일
+#                   ≈ 10~30%, 상승 국면 ≈ 70~85% — 실제 추세 필터처럼 불완전).
+# Val(6개월)의 국면은 시장 seed 로 정한다: val_regime 을 주면 그 국면, 아니면 (seed % 3) 순환 →
+# 시장 3개 중 1개는 하락 Val (bear Val 에서의 오탐을 따로 잴 수 있게).
+REGIMES = ("bull", "bear", "side")
+REGIME_DRIFT = {"bull": 0.9, "bear": -0.9, "side": 0.0}            # 연 로그 드리프트 (B&H, 엣지 드리프트 별도)
+REGIME_DAYS = {"bull": (180, 540), "bear": (120, 360), "side": (60, 240)}   # 국면 길이(일) 균등 분포
+REGIME_NEXT = {"bull": (("bear", 0.6), ("side", 0.4)), "bear": (("bull", 0.5), ("side", 0.5)),
+               "side": (("bull", 0.5), ("bear", 0.5))}
+REGIME_EDGE = {"null": {"bull": 0.0, "bear": 0.0, "side": 0.0},
+               "regime_cond": {"bull": 1.0, "bear": 0.0, "side": 0.5},
+               "regime_filter": {"bull": 1.0, "bear": -0.5, "side": 0.5},
+               "regime_cond_f": {"bull": 1.0, "bear": 0.0, "side": 0.5}}
+FILTERED_KINDS = ("regime_filter", "regime_cond_f")                 # 심은 스펙 = S*_f (국면 필터 포함)
+REGIME_FILTER_SPAN = 1440                                           # trend_regime_1h span(시간) = 60일 EMA
+REGIME_PLANT_LOOKBACK = 24                                          # 완만한 엣지: lookback 24 돌파 전체
+REGIME_FILTER = BlockRef("trend_regime_1h", {"span": REGIME_FILTER_SPAN})
+PLANTED_SPEC_REGIME = StrategySpec("planted_rf", BlockRef("donchian_breakout", {"lookback": PLANT_LOOKBACK}),
+                                   ExitSpec(*PLANT_EXIT), (REGIME_FILTER,))
+GRIDS_REGIME: dict[str, dict] = {
+    "r12": {"entry": {"lookback": [24, 48, 96]},
+            "filters": [[], [{"block": "trend_regime_1h", "grid": {"span": [REGIME_FILTER_SPAN]}}]],
+            "exits": {"sl_pct": [0.6, 1.0], "tp_pct": [1.2], "max_hold_min": [60]}},
+}
+
+
+def regime_schedule(start: str, val_start: str, end: str, seed: int, val_regime: str | None = None
+                    ) -> pd.Series:
+    """일자별 국면 라벨 [start, end). Dev 는 마르코프 국면 전환(REGIME_DAYS·REGIME_NEXT), Val 이후는 val_regime
+    (없으면 REGIMES[seed % 3])."""
+    rng = np.random.default_rng(int(seed) + 77_000)
+    days = pd.date_range(start, end, freq="D", tz="UTC", inclusive="left")
+    vs = pd.Timestamp(val_start, tz="UTC")
+    n_dev = int((days < vs).sum())
+    lab = []
+    cur = REGIMES[int(rng.integers(0, 3))]
+    while len(lab) < n_dev:
+        lo, hi = REGIME_DAYS[cur]
+        lab += [cur] * int(rng.integers(lo, hi + 1))
+        nxt, pr = zip(*REGIME_NEXT[cur])
+        cur = str(rng.choice(nxt, p=pr))
+    vr = val_regime or REGIMES[int(seed) % 3]
+    lab = lab[:n_dev] + [vr] * (len(days) - n_dev)
+    return pd.Series(lab, index=days, dtype=object)
+
+
+@njit(cache=True)
+def _gen_regime(n1, minute0, seed, k_edge, lookback, hold5, h_target, alpha, beta, season, df_t, wick, bar_min,
+                mu_day, edge_day):
+    """_gen + 일자별 드리프트(mu_day: 1분 로그 드리프트)와 엣지 배수(edge_day). 같은 난수 순서.
+    엣지 보정(평균 중립): 돌파 후 드리프트가 시장 평균 드리프트를 바꾸지 않도록, 드리프트가 없는 분에 −k·배수·σ·f/(1−f)
+    를 더한다(f = 드리프트 중인 분의 비율, 1주 EMA). 그래서 B&H 의 국면 드리프트 ≈ mu_day (상승장에서 돌파가 잦아
+    가격이 폭주하는 되먹임을 막음 — 국면 연구는 B&H 대비 판단을 재므로 B&H 가 현실적이어야 한다)."""
+    np.random.seed(seed)
+    o = np.empty(n1)
+    hi = np.empty(n1)
+    lo = np.empty(n1)
+    c = np.empty(n1)
+    n5 = n1 // bar_min + 1
+    hi5 = np.empty(n5)
+    omega = h_target * (1.0 - alpha - beta)
+    h = h_target
+    t_scale = np.sqrt((df_t - 2.0) / df_t)
+    price = 50_000_000.0
+    r_hour = 0.0
+    drift_left = 0
+    bar_hi = -1.0
+    f_ema = 0.25
+    for k in range(n1):
+        m = minute0 + k
+        hod = (m // 60) % 24
+        day = k // 1440
+        if k > 0 and m % 60 == 0:
+            h = omega + alpha * r_hour * r_hour + beta * h
+            h = min(h, 25.0 * h_target)
+            r_hour = 0.0
+        sig = np.sqrt(h / 60.0) * season[hod]
+        z = np.random.randn() / np.sqrt(np.random.chisquare(df_t) / df_t) * t_scale
+        eps = sig * z
+        d = mu_day[day]
+        if drift_left > 0:
+            d += k_edge * edge_day[day] * sig
+            f_ema += (1.0 - f_ema) / 10080.0
+        else:
+            f = min(f_ema, 0.9)
+            d -= k_edge * edge_day[day] * sig * f / (1.0 - f)
+            f_ema += (0.0 - f_ema) / 10080.0
+        r_hour += eps
+        op = price
+        price = price * np.exp(d + eps)
+        o[k] = op
+        c[k] = price
+        hi[k] = max(op, price) * (1.0 + abs(np.random.randn()) * sig * wick)
+        lo[k] = min(op, price) * (1.0 - abs(np.random.randn()) * sig * wick)
+        bar_hi = max(bar_hi, hi[k])
+        if m % bar_min == bar_min - 1:
+            t = k // bar_min
+            hi5[t] = bar_hi
+            bar_hi = -1.0
+            if drift_left > 0:
+                drift_left -= 1
+            if k_edge != 0.0 and t >= lookback and drift_left == 0:
+                mx = -1.0
+                for q in range(t - lookback, t):
+                    mx = max(mx, hi5[q])
+                if price > mx:
+                    drift_left = hold5
+    return o, hi, lo, c
+
+
+def gen_regime_market(start: str, val_start: str, end: str, seed: int, k_edge: float = 0.0,
+                      edge_kind: str = "null", val_regime: str | None = None,
+                      plant_lookback: int = REGIME_PLANT_LOOKBACK) -> tuple[pd.DataFrame, pd.Series]:
+    """국면 전환 1분봉 합성 시장 [start, end) + 일자별 국면 라벨. start 는 자정 정렬."""
+    idx = pd.date_range(start, end, freq="1min", tz="UTC", inclusive="left", name="ts")
+    minute0 = int(idx[0].value // 60_000_000_000)
+    if minute0 % 1440:
+        raise ValueError("start must be midnight-aligned")
+    sched = regime_schedule(start, val_start, end, seed, val_regime)
+    mu = np.array([REGIME_DRIFT[r] / (365.0 * 1440.0) for r in sched], dtype=float)
+    em = np.array([REGIME_EDGE[edge_kind][r] for r in sched], dtype=float)
+    h_target = ANNUAL_VOL ** 2 / (365 * 24)
+    o, h, lo, c = _gen_regime(len(idx), minute0, int(seed), float(k_edge), int(plant_lookback), PLANT_HOLD5,
+                              h_target, GARCH_ALPHA, GARCH_BETA, season_profile(), T_DF, WICK, 5, mu, em)
+    rng = np.random.default_rng(seed)
+    vol = rng.lognormal(0.0, 0.5, len(idx))
+    return (pd.DataFrame({"open": o, "high": h, "low": lo, "close": c, "volume": vol, "quote_volume": vol * c},
+                         index=idx), sched)
+
+
 def _engine_m1(df: pd.DataFrame) -> pd.DataFrame:
     from .campaign import prepare_m1
     return prepare_m1(df, "coinone")      # 합성 시장 = 파이프라인에서 coinone 으로 저장 (make_root) → 같은 준비
@@ -446,17 +587,28 @@ def _gate_cfg(task: dict) -> dict:
 def _campaign_record(env, task: dict, grid: str, family: str | None = None) -> dict:
     """캠페인(grid) + 파이프라인 1회 → 결과 레코드 (S* 가 이 격자에 없으면 star_* 는 None)."""
     from .campaign import CampaignTemplate, run_campaign
+
+    tpl = CampaignTemplate.from_dict(template_for(grid, f"calib_{grid}", family))
+    cr = run_campaign(tpl, env=env)
+    return _evaluate_record(env, cr, task, grid)
+
+
+def _star_spec(task: dict) -> StrategySpec:
+    """이 시장의 심은 스펙: 국면 필터 시장(star_filters)이면 S*_f(돌파 + trend_regime_1h), 아니면 시나리오 S*."""
+    return PLANTED_SPEC_REGIME if task.get("star_filters") else scenario_spec(task.get("scenario", "5m"))
+
+
+def _evaluate_record(env, cr, task: dict, grid: str) -> dict:
+    """저장된 캠페인 결과 cr 에 파이프라인 1회(task 의 관문 설정 = _gate_cfg) → 결과 레코드."""
     from .pipeline import run_pipeline
 
     t0 = time.time()
-    scenario = task.get("scenario", "5m")
-    tpl = CampaignTemplate.from_dict(template_for(grid, f"calib_{grid}", family))
-    cr = run_campaign(tpl, env=env)
+    tpl = cr.template
     out = run_pipeline(cr, env=env, top_k=task["top_k"], n_null=task["n_null"], gate_cfg=_gate_cfg(task),
                        register=False, reference_check=False)
-    sspec = scenario_spec(scenario)
+    sspec = _star_spec(task)
     ex = sspec.exit
-    star = tpl.make_spec(sspec.entry, (), ex.sl, ex.tp, ex.max_hold_min)
+    star = tpl.make_spec(sspec.entry, tuple(sspec.filters), ex.sl, ex.tp, ex.max_hold_min)
     lh_star = star.logic_hash()
     ranked = cr.ranked()
     hit = ranked.index[ranked["logic_hash"] == lh_star]
@@ -523,6 +675,22 @@ def _campaign_record(env, task: dict, grid: str, family: str | None = None) -> d
         "val_used": (out.get("val_status") or {}).get("used"),
         "runtime_sec": round(time.time() - t0, 1),
     }
+    if task.get("regime"):         # 노출 인식 변형 진단 (S* 대표 후보의 G4/G6 shadow·경로)
+        g4 = rep[0]["gates"].get("G4") if rep else None
+        ea4 = (g4 or {}).get("exposure_aware") or {}
+        ea6 = (g6 or {}).get("exposure_aware") or {}
+        bv = (g6 or {}).get("benchmark_val") or {}
+        rec.update(
+            star_first_failed=None if not rep else rep[0].get("first_failed"),
+            star_g4_base=None if not g4 else bool(g4.get("ok_rolling") and g4.get("ok_recent")),
+            star_g4_variant=ea4.get("passed"), star_g4_via=ea4.get("via"),
+            star_g4_n_neutral=ea4.get("rolling_n_neutral"), star_g4_n_active=ea4.get("rolling_n_active"),
+            star_dev_exposure=None if not rep else (rep[0].get("metrics") or {}).get("exposure_days"),
+            star_g6_path=None if not g6 else g6.get("path"), star_g6_flat_status=ea6.get("status"),
+            star_val_exposure=bv.get("exposure_days"), star_val_return=(g6 or {}).get("total_return"),
+            star_val_bh_return=bv.get("bh_total_return"), star_val_n_trades=(g6 or {}).get("n_trades"),
+            validated_paths=[(c["gates"].get("G6") or {}).get("path") for c, lab in zip(cands, labels)
+                             if lab == "validated"])
     return rec
 
 
@@ -545,6 +713,349 @@ def run_market(task: dict) -> dict:
         return rec
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+# ============================================================== 국면 연구 (노출 인식 관문 변형: 현재 vs 변형)
+# 같은 시장·같은 캠페인 결과에 관문 설정만 바꾼 파이프라인을 각각 *따로 복사한 원장*에서 돌린다(Val 사용 원장이
+# 섞이지 않게 — 같은 logic_hash 재사용 규칙 때문에 한 원장에서 두 번 돌리면 두 번째가 첫 결정을 재사용한다).
+REGIME_VARIANTS: dict[str, dict] = {
+    "current": {"exposure_aware.enabled": False},                        # 지금 관문 (변형은 shadow 정보만)
+    "variant": {"exposure_aware.enabled": True},                         # gates.yaml 의 변형 기본값 그대로
+    "variant_loose": {"exposure_aware.enabled": True,                    # 쉼 경로 손실 허용치만 넓힘
+                      "exposure_aware.G6.flat_min_return": -0.05,
+                      "exposure_aware.G6.flat_min_stress_return": -0.08},
+}
+REGIME_KINDS = ("null", "regime_cond", "regime_cond_f", "regime_filter")
+
+
+@dataclass
+class RegimeStudyConfig:
+    mode: str
+    layout: Layout
+    strength: float                         # 심은 스펙의 참 연 Sharpe (전 구간, 비용 후)
+    n_markets: dict                         # {kind: 시장 수} — Val 국면은 seed % 3 순환(bull/bear/side)
+    n_null: int                             # G2 귀무 run 수
+    top_k: int = TOP_K
+    grid: str = "r12"
+    pilot_ks: tuple[float, ...] = (0.0, 0.01, 0.015, 0.02, 0.025, 0.03, 0.04)
+    pilot_seeds: int = 6
+    pilot_years: float = 5.8
+    seed0: int = 11_000
+    jobs: int = 1
+    override_null_runs: bool = False
+    variants: tuple[str, ...] = ("current", "variant")
+
+    def to_record(self) -> dict:
+        d = asdict(self)
+        d["layout"] = asdict(self.layout)
+        return d
+
+
+def regime_quick_config(jobs: int = 1) -> RegimeStudyConfig:
+    """테스트용 구조 점검 (수치 결론용 아님): 짧은 구간, 시장 3개, 귀무 100."""
+    return RegimeStudyConfig("regime-quick", QUICK_LAYOUT, strength=3.0,
+                             n_markets={"null": 1, "regime_cond": 0, "regime_filter": 2}, n_null=100, top_k=2,
+                             pilot_ks=(0.0, 0.03, 0.06), pilot_seeds=1, pilot_years=1.0, jobs=jobs,
+                             override_null_runs=True)
+
+
+def regime_full_config(jobs: int = 4) -> RegimeStudyConfig:
+    return RegimeStudyConfig("regime-full", FULL_LAYOUT, strength=2.0,
+                             n_markets={"null": 30, "regime_cond": 6, "regime_cond_f": 15, "regime_filter": 15},
+                             n_null=1000, jobs=jobs,
+                             variants=("current", "variant", "variant_loose"))
+
+
+def _pilot_regime_one(args) -> tuple[str, float, int, float, float]:
+    kind, k, seed, years = args
+    start = pd.Timestamp("2010-01-01", tz="UTC")
+    end = start + pd.Timedelta(days=round(365.25 * years))
+    vs = end - pd.Timedelta(days=182)
+    df, _ = gen_regime_market(str(start.date()), str(vs.date()), str(end.date()), seed, k, kind)
+    m1 = _engine_m1(df)
+    spec = PLANTED_SPEC_REGIME if kind in FILTERED_KINDS else PLANTED_SPEC
+    st = planted_stats(m1, start + pd.Timedelta(days=31), end, spec)
+    return kind, k, seed, st["sharpe"], st["trades_per_day"]
+
+
+def pilot_regime_edge_map(cfg: RegimeStudyConfig, pool=None) -> dict:
+    """국면 시장 종류별 k ↦ 심은 스펙(regime_cond: S*, regime_filter: S*_f) 의 연 Sharpe(seed 평균; 국면 순서는
+    seed 마다 무작위, Val 국면 seed % 3) → 목표 strength 의 k (단조 보정 후 역보간, 넘으면 선형 외삽)."""
+    kinds = [k for k in REGIME_KINDS if k != "null" and cfg.n_markets.get(k)]
+    tasks = [(kind, k, cfg.seed0 + 50_000 + s, cfg.pilot_years) for kind in kinds for k in cfg.pilot_ks
+             for s in range(cfg.pilot_seeds)]
+    rows = list(pool.map(_pilot_regime_one, tasks)) if pool else [_pilot_regime_one(t) for t in tasks]
+    ks = np.array(cfg.pilot_ks, float)
+    out: dict = {"ks": ks.tolist(), "pilot_years": cfg.pilot_years, "pilot_seeds": cfg.pilot_seeds, "kinds": {},
+                 "k_for": {"null": 0.0}}
+    for kind in kinds:
+        sr = np.array([np.mean([r[3] for r in rows if r[0] == kind and r[1] == k]) for k in ks])
+        tpd = [float(np.mean([r[4] for r in rows if r[0] == kind and r[1] == k])) for k in ks]
+        mono = np.maximum.accumulate(sr)
+        s = float(cfg.strength)
+        if s > mono[-1]:
+            slope = (mono[-1] - mono[-2]) / (ks[-1] - ks[-2])
+            kk = float(ks[-1] + (s - mono[-1]) / slope)
+        else:
+            kk = float(np.interp(s, mono, ks))
+        out["kinds"][kind] = {"sharpe_mean": sr.tolist(), "trades_per_day": tpd}
+        out["k_for"][kind] = kk
+    return out
+
+
+def make_regime_root(tmp: Path, layout: Layout, seed: int, k_edge: float, edge_kind: str,
+                     val_regime: str | None = None) -> pd.Series:
+    from btc_quant.data.store import write_ohlcv
+    (tmp / "config").mkdir(parents=True, exist_ok=True)
+    (tmp / "config" / "splits.yaml").write_text(yaml.safe_dump(layout.splits()))
+    df, sched = gen_regime_market(layout.data_start, layout.val_start, layout.val_end, seed, k_edge, edge_kind,
+                                  val_regime)
+    write_ohlcv(df, "coinone", "BTC-KRW", "1m", root=tmp / "data" / "raw")
+    return sched
+
+
+def _clone_root(src: Path, dst: Path) -> Path:
+    """원장·캠페인·설정만 복사, 데이터는 심볼릭 링크 (변형별 독립 원장)."""
+    dst.mkdir(parents=True, exist_ok=True)
+    for d in ("config", "research"):
+        if (src / d).exists():
+            shutil.copytree(src / d, dst / d)
+    os.symlink((src / "data").resolve(), dst / "data")
+    return dst
+
+
+def run_regime_market(task: dict) -> list[dict]:
+    """국면 시장 1개: 캠페인 1회 → 변형마다 (복사한 원장에서) 파이프라인 1회. 변형별 레코드 목록."""
+    from .campaign import CampaignTemplate, ResearchEnv, load_campaign, run_campaign
+
+    t0 = time.time()
+    layout = Layout(**task["layout"])
+    tmp = Path(tempfile.mkdtemp(prefix="calibreg_"))
+    try:
+        base = tmp / "base"
+        base.mkdir()
+        sched = make_regime_root(base, layout, task["seed"], task["k"], task["kind"], task.get("val_regime"))
+        env = ResearchEnv.at(base)
+        tpl = CampaignTemplate.from_dict(template_for(task["grid"], f"calib_{task['grid']}"))
+        cr = run_campaign(tpl, env=env)
+        vs = pd.Timestamp(layout.val_start, tz="UTC")
+        dev_lab = sched[sched.index < vs]
+        info = {"val_regime": str(sched.iloc[-1]),
+                "dev_regime_share": {r: float((dev_lab == r).mean()) for r in REGIMES},
+                "dev_last_year_regime_share": {r: float((dev_lab.iloc[-365:] == r).mean()) for r in REGIMES}}
+        out = []
+        for vname in task["variants"]:
+            root_v = _clone_root(base, tmp / vname)
+            env_v = ResearchEnv.at(root_v)
+            cr_v = load_campaign(cr.campaign_id, env=env_v)
+            ov = (task.get("variant_overrides") or {}).get(vname)       # params.criteria: 후보 값별 설정
+            ov = REGIME_VARIANTS[vname] if ov is None else ov
+            t_v = {**task, "gate_overrides": {**ov, **(task.get("gate_overrides") or {})}}
+            rec = _evaluate_record(env_v, cr_v, t_v, task["grid"])
+            rec.update({k: task[k] for k in ("kind", "strength", "k", "grid", "seed")}, variant=vname, **info,
+                       study="regime", runtime_total_sec=round(time.time() - t0, 1))
+            out.append(rec)
+        return out
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def build_regime_tasks(cfg: RegimeStudyConfig, k_for: dict) -> list[dict]:
+    base = {"layout": asdict(cfg.layout), "n_null": cfg.n_null, "top_k": cfg.top_k,
+            "override_null_runs": cfg.override_null_runs, "grid": cfg.grid, "regime": True,
+            "variants": list(cfg.variants)}
+    tasks, seed = [], cfg.seed0
+    for kind in REGIME_KINDS:
+        for _ in range(int(cfg.n_markets.get(kind, 0))):
+            tasks.append({**base, "kind": kind, "strength": 0.0 if kind == "null" else float(cfg.strength),
+                          "k": float(k_for.get(kind, 0.0)), "seed": seed, "star_filters": kind in FILTERED_KINDS,
+                          "val_regime": REGIMES[seed % 3]})
+            seed += 1
+    return tasks
+
+
+def summarize_regime(runs: list[dict]) -> dict:
+    """변형 × 시장 종류 × (전체 | Val 국면별): 아무 후보 validated(귀무 = 오탐), S* validated(검정력), Dev 생존 등."""
+    df = pd.DataFrame(runs)
+    rows = []
+    if df.empty:
+        return {"rows": rows}
+    for (var, kind), g in df.groupby(["variant", "kind"], sort=True):
+        for vr, gg in [("all", g), *[(r, g[g["val_regime"] == r]) for r in REGIMES]]:
+            n = len(gg)
+            if not n:
+                continue
+            row = {"variant": var, "kind": kind, "val_regime": vr, "n_markets": n}
+            for col in ("any_validated", "star_validated", "star_dev_passed", "star_g6_passed", "any_dev_survivor"):
+                x = int(gg[col].fillna(False).astype(bool).sum())
+                row[col] = x / n
+                row[col + "_ci"] = wilson(x, n)
+            row["star_outcome"] = {str(k): int(v) for k, v in gg["star_outcome"].value_counts().items()}
+            row["star_g6_path"] = {str(k): int(v) for k, v in gg["star_g6_path"].fillna("-").value_counts().items()}
+            row["star_g6_flat_status"] = {str(k): int(v) for k, v in
+                                          gg["star_g6_flat_status"].fillna("-").value_counts().items()}
+            row["star_g4_via"] = {str(k): int(v) for k, v in gg["star_g4_via"].fillna("-").value_counts().items()}
+            for col in ("star_sharpe_dev", "star_dev_exposure", "star_val_exposure", "star_val_bh_return"):
+                v = pd.to_numeric(gg[col], errors="coerce")
+                row[col + "_mean"] = float(v.mean()) if v.notna().any() else float("nan")
+            paths: dict[str, int] = {}
+            for lst in gg["validated_paths"]:
+                for p_ in lst or []:
+                    paths[str(p_)] = paths.get(str(p_), 0) + 1
+            row["validated_paths"] = paths
+            rows.append(row)
+    return {"rows": rows}
+
+
+def run_regime_study(cfg: RegimeStudyConfig, progress=print, edge: dict | None = None) -> dict:
+    t0 = time.time()
+    pool = ProcessPoolExecutor(max_workers=cfg.jobs, mp_context=get_context("spawn")) if cfg.jobs > 1 else None
+    try:
+        if edge is None:
+            progress(f"[regime] pilot edge map ({len(cfg.pilot_ks)} k × {cfg.pilot_seeds} seeds × {cfg.pilot_years}y)")
+            edge = pilot_regime_edge_map(cfg, pool)
+        else:
+            edge = {**edge, "reused": True}
+        progress(f"[regime] k for strength {cfg.strength}: {edge['k_for']}")
+        tasks = build_regime_tasks(cfg, edge["k_for"])
+        progress(f"[regime] {len(tasks)} markets × {len(cfg.variants)} gate variants")
+        runs = []
+        it = pool.map(run_regime_market, tasks) if pool else map(run_regime_market, tasks)
+        for i, recs in enumerate(it, start=1):
+            runs += recs
+            r0 = recs[0]
+            progress(f"[regime] {i}/{len(tasks)} {r0['kind']} val={r0['val_regime']} seed={r0['seed']}: "
+                     + "; ".join(f"{r['variant']}: validated={r['n_validated']} star={r['star_outcome']} "
+                                 f"g6path={r.get('star_g6_path')} flat={r.get('star_g6_flat_status')}"
+                                 for r in recs) + f" ({r0['runtime_total_sec']}s)")
+    finally:
+        if pool:
+            pool.shutdown()
+    from .campaign import run_params
+    try:
+        pv = run_params()
+    except Exception as e:  # noqa: BLE001
+        pv = {"error": str(e)}
+    return {"config": cfg.to_record(), "edge_map": edge, "runs": runs, "summary": summarize_regime(runs),
+            "runtime_sec": round(time.time() - t0, 1), "created": pd.Timestamp.now("UTC").isoformat(),
+            "gate_config_version": G.load_gate_config().get("version"),
+            "exposure_aware_cfg": G.load_gate_config().get("exposure_aware"),
+            "params_version": pv.get("params_version"), "cost_versions": pv.get("cost_versions")}
+
+
+def g6_stage_market(task: dict) -> list[dict]:
+    """G6 단계 조건부 진단 (귀무 시장용): Dev 관문을 건너뛰고 캠페인 군집 대표 상위 top_k 를 *모두* Val 에
+    올려 G6 판정을 현재 규칙 vs 변형으로 비교한다(원장·Val 예산 미사용; Holm 은 k=1 문턱 α 로 근사).
+    귀무 시장에서는 Dev 관문이 거의 모든 후보를 막아 전체 오탐률이 0 으로 같아지므로, '쉼 경로가 G6 단계에서
+    얼마나 걸러 내는가'를 따로 잰다. 반환 = 후보별 레코드."""
+    from btc_quant.evaluation import inference
+
+    from .campaign import CampaignTemplate, ResearchEnv, get_cost, run_campaign
+    from .pipeline import Pipeline
+
+    layout = Layout(**task["layout"])
+    tmp = Path(tempfile.mkdtemp(prefix="calibg6_"))
+    try:
+        sched = make_regime_root(tmp, layout, task["seed"], task["k"], task["kind"], task.get("val_regime"))
+        env = ResearchEnv.at(tmp)
+        tpl = CampaignTemplate.from_dict(template_for(task["grid"], f"calib_{task['grid']}"))
+        cr = run_campaign(tpl, env=env)
+        cfgs = {v: _gate_cfg({"gate_overrides": REGIME_VARIANTS[v]}) for v in task["variants"]}
+        p0 = Pipeline(cr, env, gate_cfg=cfgs["current"], register=False, reference_check=False, robustness=False,
+                      lessons=False, val_budget=False)
+        top, _ = p0.select_candidates()
+        m1v, vs, ve = p0.load_val()
+        prim = cr.primary()
+        alpha = float(cfgs["current"]["G6"]["val_budget"]["alpha"])
+        out = []
+        for lh in top[: task["top_k"]]:
+            spec = cr.specs[lh]
+            devm = {**prim.loc[lh].to_dict(), **p0.exposure_metrics(p0.dev_result(spec, tpl.costs["primary"]))}
+            res = None
+            for v, cfg in cfgs.items():
+                p = Pipeline(cr, env, gate_cfg=cfg, register=False, reference_check=False, robustness=False,
+                             lessons=False, val_budget=False)
+                p._cache, p._m1, p._ctx_val = p0._cache, p0._m1, p0._ctx_val
+                g, res_v, met, _ = p.g6(spec, m1v, vs, ve, tpl.costs["primary"], tpl.costs["stress"], record=False,
+                                        budget=False, dev_metrics=devm)
+                res = res_v
+                pv = inference.bootstrap_mean_test(res.daily_returns.to_numpy(float), n_boot=500, seed=0)["p_value"]
+                base_ok = g["path"] == "sharpe" or (g.get("base_passed") is True)
+                ea = g.get("exposure_aware") or {}
+                ok4, _ = G.check_g4(devm, cfg)
+                out.append({"seed": task["seed"], "kind": task["kind"], "val_regime": str(sched.iloc[-1]),
+                            "variant": v, "logic_hash": lh, "filtered": bool(spec.filters),
+                            "dev_sharpe_w": float(devm["sharpe_w"]), "dev_exposure": devm.get("exposure_days"),
+                            "g4_passed": bool(ok4), "g6_checks_passed": bool(g["passed"]), "path": g.get("path"),
+                            "flat_status": ea.get("status"), "val_exposure": met.get("exposure_days"),
+                            "val_return": met.get("total_return"), "val_n_trades": met.get("n_trades"),
+                            "val_p": float(pv),
+                            "g6_with_holm": bool((base_ok and pv <= alpha) or g.get("path") == "flat")})
+        return out
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def run_g6_stage(n_null: int = 30, layout: Layout = FULL_LAYOUT, seed0: int = 11_000, jobs: int = 4,
+                 top_k: int = TOP_K, variants=("current", "variant", "variant_loose"), progress=print) -> dict:
+    """귀무 국면 시장 n_null 개(seed 는 regime_full_config 귀무와 같은 순서 → 같은 시장)의 G6 단계 진단."""
+    tasks = [{"layout": asdict(layout), "seed": seed0 + i, "k": 0.0, "kind": "null", "grid": "r12", "top_k": top_k,
+              "val_regime": REGIMES[(seed0 + i) % 3], "variants": list(variants)} for i in range(n_null)]
+    rows = []
+    pool = ProcessPoolExecutor(max_workers=jobs, mp_context=get_context("spawn")) if jobs > 1 else None
+    try:
+        it = pool.map(g6_stage_market, tasks) if pool else map(g6_stage_market, tasks)
+        for i, r in enumerate(it, start=1):
+            rows += r
+            progress(f"[g6stage] {i}/{len(tasks)} seed={tasks[i - 1]['seed']} val={tasks[i - 1]['val_regime']}: "
+                     + ", ".join(f"{x['variant']}:{int(x['g6_with_holm'])}" for x in r))
+    finally:
+        if pool:
+            pool.shutdown()
+    df = pd.DataFrame(rows)
+    summ = []
+    if not df.empty:
+        for (v, vr, f), g in df.groupby(["variant", "val_regime", "filtered"]):
+            n = len(g)
+            x = int(g["g6_with_holm"].sum())
+            summ.append({"variant": v, "val_regime": vr, "filtered": bool(f), "n_candidates": n,
+                         "g6_pass": x / n, "g6_pass_ci": wilson(x, n), "flat_path": int((g["path"] == "flat").sum()),
+                         "g4_pass": float(g["g4_passed"].mean())})
+    return {"rows": rows, "summary": summ}
+
+
+def g6_stage_markdown(res: dict) -> str:
+    L = ["| 관문 | Val 국면 | 국면 필터 후보 | 후보 수 | G6 통과(+Holm k=1 근사) | 쉼 경로 통과 수 | G4 통과(Dev) |",
+         "|---|---|---|---|---|---|---|"]
+    for r in sorted(res["summary"], key=lambda r: (r["val_regime"], r["filtered"], r["variant"])):
+        L.append(f"| {r['variant']} | {r['val_regime']} | {'예' if r['filtered'] else '아니오'} | {r['n_candidates']} | "
+                 f"{_pct(r['g6_pass'])}{_ci(r['g6_pass_ci'])} | {r['flat_path']} | {_pct(r['g4_pass'])} |")
+    return "\n".join(L)
+
+
+def regime_tables_markdown(result: dict) -> str:
+    rows = result["summary"]["rows"]
+    kl = {"null": "귀무", "regime_cond": "(ii) 국면 조건부 엣지 · S* 무필터",
+          "regime_cond_f": "(ii') 국면 조건부 엣지 · S*_f", "regime_filter": "(iii) 국면 필터 엣지(하락 −) · S*_f"}
+    L = ["| 시장 | Val 국면 | 시장 수 | 관문 | 아무 후보 validated (귀무=오탐) | S* validated (검정력) | "
+         "S* Dev 생존 | S* G6 통과(견고성 전) | S* 결과 | S* G6 경로 | S* 쉼 경로 상태 | G4 경로 |",
+         "|---|---|---|---|---|---|---|---|---|---|---|---|"]
+    order = {k: i for i, k in enumerate(REGIME_KINDS)}
+    vorder = {"all": 0, "bear": 1, "bull": 2, "side": 3}
+    for r in sorted(rows, key=lambda r: (order[r["kind"]], vorder[r["val_regime"]], r["variant"])):
+        star = "—" if r["kind"] == "null" else f"{_pct(r['star_validated'])}{_ci(r['star_validated_ci'])}"
+        L.append(f"| {kl[r['kind']]} | {r['val_regime']} | {r['n_markets']} | {r['variant']} | "
+                 f"{_pct(r['any_validated'])}{_ci(r['any_validated_ci'])} | {star} | "
+                 f"{_pct(r['star_dev_passed'])} | {_pct(r['star_g6_passed'])} | {_ff(r['star_outcome'])} | "
+                 f"{_ff(r['star_g6_path'])} | {_ff(r['star_g6_flat_status'])} | {_ff(r['star_g4_via'])} |")
+    e = result["edge_map"]
+    L += ["", f"엣지 세기 보정(파일럿 {e.get('pilot_years')}년 × {e.get('pilot_seeds')} seed"
+          + (", 재사용" if e.get("reused") else "") + "): 목표 Sharpe "
+          f"{result['config']['strength']:g} → k = " + ", ".join(f"{k}: {v:.4f}" for k, v in e["k_for"].items())]
+    for kind, d in (e.get("kinds") or {}).items():
+        L.append(f"- {kind}: k {e['ks']} → Sharpe {np.round(d['sharpe_mean'], 2).tolist()}, 거래/일 "
+                 f"{np.round(d['trades_per_day'], 1).tolist()}")
+    return "\n".join(L)
 
 
 def run_sequence(task: dict) -> dict:
@@ -895,11 +1406,32 @@ def main(argv=None) -> int:
     m.add_argument("--full-smooth", action="store_true", help="완만한 엣지(plant_lookback=24) 검정력만")
     m.add_argument("--full-1m", action="store_true", help="1분 결정·ATR 청산 단기(20분) 고회전 엣지")
     m.add_argument("--cumulative", action="store_true", help="누적 원장: 시장마다 캠페인 10개를 한 원장에서")
+    m.add_argument("--regime", action="store_true",
+                   help="국면 전환 시장: 현재 관문 vs 노출 인식 변형(exposure_aware) 오탐·검정력 (PLAN D14 초안)")
+    ap.add_argument("--regime-quick", action="store_true", help="--regime 의 테스트용 짧은 설정")
+    ap.add_argument("--g6-stage", type=int, default=0, metavar="N",
+                    help="귀무 국면 시장 N 개의 G6 단계 조건부 진단(Dev 관문 생략, 현재 vs 변형)")
     ap.add_argument("--edge-from", default=None, help="이전 결과 json 의 edge_map 재사용(같은 설정일 때만)")
     ap.add_argument("--jobs", type=int, default=min(4, os.cpu_count() or 1))
     ap.add_argument("--out", default=None, help="markdown report path")
     ap.add_argument("--json", default=None, help="raw result json path")
     a = ap.parse_args(argv)
+    if a.g6_stage:
+        res = run_g6_stage(a.g6_stage, jobs=a.jobs)
+        if a.json:
+            Path(a.json).parent.mkdir(parents=True, exist_ok=True)
+            Path(a.json).write_text(json.dumps(res, indent=1, default=str), encoding="utf-8")
+        print(g6_stage_markdown(res))
+        return 0
+    if a.regime or a.regime_quick:
+        rcfg = regime_quick_config(a.jobs) if a.regime_quick else regime_full_config(a.jobs)
+        edge = json.loads(Path(a.edge_from).read_text(encoding="utf-8"))["edge_map"] if a.edge_from else None
+        res = run_regime_study(rcfg, edge=edge)
+        if a.json:
+            Path(a.json).parent.mkdir(parents=True, exist_ok=True)
+            Path(a.json).write_text(json.dumps(res, indent=1, default=str), encoding="utf-8")
+        print(regime_tables_markdown(res))
+        return 0
     cfg = (full_config(a.jobs) if a.full else smooth_config(a.jobs) if a.full_smooth
            else m1_config(a.jobs) if a.full_1m else cumulative_config(a.jobs) if a.cumulative
            else quick_config(a.jobs))

@@ -90,6 +90,45 @@ ctx 를 만들어 넘김; 원장 grid·template.yaml 에 aux 기록). 끝나면 
 - **오답노트**: 파이프라인 끝에 `lessons.record_facts_from_pipeline(pipeline.json, root=…)` (멱등).
 - 원장 실행 기록은 `Ledger.record_runs`(일괄) 로.
 
+### 매수보유(B&H) 기준 지표 (2026-11-10, 정보 전용 — 관문 아님)
+롱 온리 전략이 하락장에서 쉬는 것이 맞는지, 상승장 베타만 먹는지 보려고 모든 실행에 BTC 매수보유(같은 거래소 1분봉
+close, 비용 없음)와의 비교를 붙인다(`metrics.benchmark_metrics`, `summarize(…, benchmark=buy_hold_daily(...))`).
+
+| 키 | 뜻 |
+|---|---|
+| `exposure_time` / `exposure_days` / `days_in_market` | 보유 분 합 / 구간 분 · 포지션이 있던 날 비율 · 그 일수 |
+| `bh_total_return`, `bh_sharpe`, `bh_max_dd` | 같은 기간 B&H (캠페인 상수 → 원장 runs 에는 쓰지 않고 `manifest.json` `benchmark`) |
+| `excess_return_vs_bh`, `sharpe_minus_bh` | 전략 − B&H |
+| `bh_matched_total_return`, `excess_return_vs_matched_bh` | 노출 맞춤 B&H(= exposure_time × BTC 일간 수익 복리)와 그 대비 초과 |
+| `up_capture`, `down_capture` | BTC 상승일/하락일의 전략 평균 ÷ BTC 평균 (일간) |
+| `up_regime_*`, `down_regime_*` | 인과 국면(직전 30일 BTC 수익 부호, 전일까지)별 전략 복리 수익·capture |
+| `downside_dev` | 0 기준 하방편차(연율) |
+| `bh_dd{1..3}_{depth,start,end,strategy_return}`, `worst_bh_dd_strategy_return` | B&H 최악 낙폭 구간 3개(겹침 없음, 고점 다음날~저점)와 그 동안 전략 수익 |
+| `rolling_n_neutral`, `rolling_n_active`, `rolling_frac_positive_active` | 6개월 롤링 창 중 시장 참여일 < 10% 인 '쉬는 창' 수와 그 밖의 창의 양수 비율 (G4 변형 입력) |
+
+- 에이전트 리포트·MCP `get_campaign_report`: Dev 값 전부. Val 의 B&H 비교는 G6 세부 안(`benchmark_val`)이라
+  **사람용 리포트·pipeline.json 에만** 있고 에이전트 사본에는 G6 결과 코드만 남는다. Val 원장 runs 에는 낙폭
+  구간 날짜(`bh_dd*_start/end`)를 쓰지 않는다(Val 안 시점 = 구조 누설).
+
+### 노출 인식 관문 변형 (`exposure_aware`, **기본 OFF**, PLAN D14 초안 — 사람 승인 대기)
+`config/gates.yaml` `exposure_aware.enabled: false` 인 동안 G4/G6 판정은 그대로이고, 변형 결과는 G4/G6 세부의
+`exposure_aware` 에 **shadow(정보)** 로만 남는다(리포트에 "shadow, OFF — information only"). 설계·보정은 docs/PARAMS.md §8.
+- G4 변형: 쉬는 창(시장 참여일 < `neutral_max_exposure`)을 양수 비율 분모에서 제외. 비중립 창 ≥ `min_active_windows`,
+  Dev 시장 참여일 ≥ `min_dev_exposure`. 기존 통과 OR 변형 통과. 최근 12개월 Sharpe > 0 은 그대로.
+- G6 변형('쉬어서 피함' 경로): 기존 조건 OR [Val 시장 참여일 ≤ `flat_max_exposure`, B&H Val 수익 < 0, Val 수익 ≥
+  `flat_min_return`, stress 수익 ≥ `flat_min_stress_return`, MDD ≤ `flat_max_mdd_vs_bh` × B&H MDD, 기존 MDD·MC MDD95,
+  Dev 시장 참여일 ≥ `min_dev_exposure`, Val 거래 ≥ `flat_min_trades`(모자라면 `insufficient_evidence` = 통과 아님)].
+  이 경로는 Val Holm(평균 > 0 증거)을 요구하지 않는다 — 사용은 원장에 k번째로 남는다. 에이전트 결과 코드는 pass/fail 뿐
+  (경로·insufficient_evidence 는 Val 국면을 드러내므로 사람 전용).
+- **Val 재사용 = 이전 결정**: 같은 logic_hash 의 재평가는 지금 설정으로 다시 판정한 결과와 이전 결정을 AND 한다 →
+  이전에 G6 를 떨어진 스펙은 나중에 승인된 기준(이 변형 포함)으로도 같은 Val 에서 통과할 수 없다.
+
+### 탐색적 시도 기록 (`log_exploration`, 2026-11-10)
+캠페인·선별 밖의 사이드 계산(Dev 연도별 이벤트 스터디 등)은 `research.exploration.log_exploration(family, description,
+configs_evaluated, segment="dev")`(연구 모드에서는 MCP `log_exploration`)로 원장에 남긴다: campaigns 행(`grid.kind =
+"exploration"`, 캠페인 폴더 없음) + runs `configs_evaluated` 줄(스펙 없음) → `trials_count(family)` 와 주간 예산에 더해진다.
+Dev 만 허용. 상세 docs/AI_RESEARCH.md §7.1.
+
 ## 무엇이 어디에 저장되나
 
 `research/campaigns/<campaign_id>/` (campaign_id = 원장 id, 예: `camp-000001`)
@@ -97,7 +136,7 @@ ctx 를 만들어 넘김; 원장 grid·template.yaml 에 aux 기록). 끝나면 
 | 파일 | 내용 | git |
 |---|---|---|
 | `template.yaml` | 실행한 템플릿 원문 | 커밋 |
-| `manifest.json` | 가설·캠페인 id, 기간, 데이터 스냅샷 id(aux 포함 시 `…|upbit:…`), 코드 커밋, 스펙·실행 수, 결정 주기·청산 모드, 검정력(`power`), 선별 연결(`screen`), 실행 시간 | 커밋 |
+| `manifest.json` | 가설·캠페인 id, 기간, 데이터 스냅샷 id(aux 포함 시 `…|upbit:…`), 코드 커밋, 스펙·실행 수, 결정 주기·청산 모드, 검정력(`power`), 선별 연결(`screen`), Dev B&H 기준(`benchmark`), 실행 시간 | 커밋 |
 | `summary_top50.csv` | primary 비용 상위 50개 스펙의 파라미터·지표 | 커밋 |
 | `pipeline.json` | 관문 결과(상위 K 후보별 G0~G6 수치, 기여도, 등급, 레지스트리 전이) — **사람 전용**(G6 세부; 연구 모드 읽기 거부) | 커밋 |
 | `pipeline_public.json` | 에이전트 안전 사본(`pipeline.public_pipeline`): G6·등급 G6 = 결과 코드, risk_limits 생략, Val 예산 = 횟수 | 커밋 |
@@ -125,8 +164,9 @@ parquet 는 같은 데이터 스냅샷·코드 커밋이면 재실행으로 결�
 3. G0~G5 통과(Dev 생존)만: **기여도** — 필터 하나 제거 스펙과 짝지은 정상 블록 부트스트랩, Δ가중Sharpe < 1 s.e. 면
    "제거 가능". 스펙은 바꾸지 않고 단순화 스펙을 **새 스펙**으로 리포트(후속 캠페인). 격자 밖 제거 스펙은 별도
    'ablation' 캠페인으로 사전등록 후 실행·기록(시도 수 +1).
-4. **G6** Val(14일 워밍업 포함, 잠금 구간 미포함): Sharpe > 0, stress MDD ≤ 20%, worst_case_mdd95 ≤ 20%,
-   기준 엔진 거래 목록 일치. Val 실행도 원장에 기록(같은 logic_hash → 시도 수 불변).
+4. **G6** Val(14일 워밍업 포함, 잠금 구간 미포함): Sharpe > 0, primary MDD ≤ 20%, stress Sharpe > 0(규칙 b),
+   worst_case_mdd95 ≤ 20%, 기준 엔진 거래 목록 일치, Val 사용 원장 + 누적 Holm. Val 실행도 원장에 기록(같은 logic_hash →
+   시도 수 불변; 재평가는 이전 결정보다 느슨해질 수 없음). 노출 인식 변형은 기본 OFF(위).
 5. **등급**: grade 비용으로 G2·G4·G6 재확인 → 모두 통과 A, 아니면 B.
 6. G6 통과 후보 → 견고성 묶음(Dev). 통과면 `StrategyRegistry` draft → candidate → validated (증거 첨부) +
    risk.yaml, 견고성 실패면 draft → candidate 까지만. G0~G6 실패 후보는 원장·리포트에만.

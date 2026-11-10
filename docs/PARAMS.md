@@ -19,7 +19,7 @@
 | ② 증거 기준 | "얼마나 확실해야 믿는가" | 유의수준, DSR/PBO 문턱, Holm α, 최소 거래 수, 관문 통과선, 견고성 기준 | **합성 보정만**(calibration_study: 귀무 시장 오탐률, 참 Sharpe 별 검정력)과 명시한 목표 | 실제 연구 결과로 조정 금지(골대 이동). 다음 캠페인부터만 적용. 특정 후보·캠페인을 근거로 한 제안은 거부. 사람 승인 | human |
 | ③ 위험 선호 | 사람이 감내할 손실 | 최대 낙폭 허용(G6.max_mdd), 손실 한도 하한(§7), 자본 비중, 주문 금액 | 사람의 가치 판단 | AI 는 결과(정지 빈도·최악 손실·회복 기간)를 표로만 제시, 사람이 고른다 | human |
 
-등급별 개수(2026-11-09): ① 24 · ② 61 · ③ 12 (총 97). ① 추가(같은 날, 데이터 점검 `research/reports/data_audit_20261109.md` 근거, 엄격 방향이라 자동 적용): 코인원 꼬리 정리 `quality.clean_wicks.coinone.k` 0.03→**0.01**·`.window` 15, 긴 공백 워밍업 `quality.gap_warmup.min_gap_minutes` 30·`quality.gap_warmup.bars` 0→**1** — 연구 `prepare_m1`·페이퍼 `M1History` 공통(`quality.wick_params`, `prepare_venue_m1`). `python -m btc_quant.params status` 로 확인.
+등급별 개수(2026-11-09): ① 24 · ② 61 · ③ 12 (총 97). 2026-11-10: ② +12 (`gates.exposure_aware.*` — 노출 인식 관문 변형, **기본 OFF**, §8) → ① 24 · ② 73 · ③ 12 (총 109). ① 추가(같은 날, 데이터 점검 `research/reports/data_audit_20261109.md` 근거, 엄격 방향이라 자동 적용): 코인원 꼬리 정리 `quality.clean_wicks.coinone.k` 0.03→**0.01**·`.window` 15, 긴 공백 워밍업 `quality.gap_warmup.min_gap_minutes` 30·`quality.gap_warmup.bars` 0→**1** — 연구 `prepare_m1`·페이퍼 `M1History` 공통(`quality.wick_params`, `prepare_venue_m1`). `python -m btc_quant.params status` 로 확인.
 
 ### 왜 ①은 비대칭인가
 비용을 올리는 실수는 좋은 전략을 놓치게 할 뿐이지만(기회 손실), 내리는 실수는 나쁜 전략을 실거래로 보낸다(실제 손실).
@@ -136,7 +136,7 @@ snap = params_snapshot()      # {"params_version": "79bc502df565", "cost_version
   `robustness.run_suite(..., thresholds=)` 로 넘기며 파이프라인은 캠페인 시점 설정의 `robustness` 를 쓴다.
   `research/robustness.py` 상수는 같은 값의 대체값이다.
 
-## 5. 현재 상태 (2026-11-09)
+## 5. 현재 상태 (2026-11-09, 2026-11-10 추가)
 
 - 비용 모델: 코인원 3종은 **v2(잠정 B안, 왕복 2/4/8bp)** — 사용자 채팅 승인(2026-11-09), 기록
   `research/param_approvals/`. 업비트 3종은 v1. 첫 실측 보정 제안(실측값 그대로)은 B안으로 대체되어 기각.
@@ -144,3 +144,62 @@ snap = params_snapshot()      # {"params_version": "79bc502df565", "cost_version
 - 견고성 기준(`robustness.*`)은 `config/gates.yaml` `robustness:` 로 이관됐다(값·params_version 변화 없음).
   다른 class ② 기준과 같은 절차(propose-criteria → 사람 승인 → 다음 캠페인부터)로 바꾼다.
 - `risk_prefs.capital_fraction` 은 미정(사람 결정 대기).
+- 2026-11-10: 노출 인식 관문 변형 `gates.exposure_aware.*` 12개 추가(class ②, `enabled: false`). 합성 국면 보정 결과 검정력 증가가 없어 **제안 없음** — §8.
+
+## 8. 노출 인식 관문 변형 (`gates.exposure_aware.*`, class ②, **기본 OFF** — PLAN D14 초안)
+
+롱 온리 전략이 하락장에서 **맞게 쉬는 것**을 관문이 벌하지 않게 하는 선택 규칙이다. 12개 항목 모두 class ②(owner human)이고
+`config/gates.yaml` `exposure_aware:` 에 있다. `enabled: false` 인 동안 판정은 기존 G4/G6 그대로이며, 파이프라인은 변형 판정을
+G4/G6 세부의 `exposure_aware` 에 **shadow(정보)** 로만 남긴다. 실제 캠페인의 shadow 결과는 켜는 근거가 될 수 없다(골대 이동).
+
+| 키 | 값 | 뜻 |
+|---|---|---|
+| `exposure_aware.enabled` | false | 주 스위치. 켜기 = class ② 제안(`study="regime"` 합성 보정) + 사람 승인 → 다음 캠페인부터 |
+| `exposure_aware.min_dev_exposure` | 0.20 | 남용 방지: Dev 에서 포지션이 있던 날 비율 ≥ 20% 인 전략만 변형 적용 (안 거래하는 전략이 '쉼'으로 통과 못 함) |
+| `exposure_aware.G4.enabled` | true | (주 스위치 ON 일 때) G4 변형 사용 |
+| `exposure_aware.G4.neutral_max_exposure` | 0.10 | 6개월 롤링 창의 시장 참여일 < 10% = 중립 창 → 양수 비율 분모에서 제외 |
+| `exposure_aware.G4.min_active_windows` | 20 | 비중립 창 ≥ 20 (Dev 4.8년 ≈ 53창) |
+| `exposure_aware.G6.enabled` | true | (주 스위치 ON 일 때) G6 '쉬어서 피함' 경로 사용 |
+| `exposure_aware.G6.flat_max_exposure` | 0.25 | Val 시장 참여일 ≤ 25% = 대체로 쉼 |
+| `exposure_aware.G6.flat_min_return` | −0.02 | Val 총수익(primary) ≥ −2% |
+| `exposure_aware.G6.flat_min_stress_return` | −0.04 | Val 총수익(stress) ≥ −4% (stress Sharpe > 0 대신) |
+| `exposure_aware.G6.flat_max_mdd_vs_bh` | 0.5 | Val MDD ≤ 0.5 × 같은 기간 B&H MDD |
+| `exposure_aware.G6.flat_require_bh_down` | true | 같은 기간 B&H 총수익 < 0 일 때만 (상승장을 놓친 것은 '피함'이 아님) |
+| `exposure_aware.G6.flat_min_trades` | 10 | Val 거래 < 10 → `insufficient_evidence` (통과 아님) |
+
+설계 원칙
+- **상위 집합**: 기존 규칙 통과 → 변형도 통과. 변형은 '쉬는 창/쉬는 Val' 만 다르게 본다.
+- **엣지 증거는 그대로**: G1·G2(무작위 진입 귀무)·G3·G5(DSR·PBO)는 바뀌지 않는다. G6 쉼 경로는 Sharpe>0·stress Sharpe>0·
+  Val Holm(평균 > 0 증거)을 '손실 없음' 조건으로 대신한다 — 그래서 이 경로의 양(+)의 증거는 Dev 와 잠금(G7, 변형 없음)·
+  전진(G8)이 맡는다. Val 사용은 원장에 k번째로 그대로 기록된다.
+- **최근 12개월 Sharpe > 0(G4)·견고성 묶음은 그대로.**
+- **Val 재사용 = 이전 결정**: 같은 logic_hash 의 재평가는 이전 결정과 AND → 이미 G6 를 떨어진 스펙은 이 변형(또는 어떤 나중
+  기준)으로도 같은 Val 에서 통과할 수 없다(`tests/test_exposure_aware.py::test_val_reuse_returns_prior_decision_and_cannot_be_rescued`).
+- **결과 코드**: 에이전트에게는 pass/fail 만. 경로(`path: flat`)·`insufficient_evidence`·Val B&H 비교는 Val 국면을 드러내므로
+  사람 전용(pipeline.json, human 리포트).
+
+합성 보정 (2026-11-10, `calibration_study --regime` / `--g6-stage`, 리포트 `research/reports/calibration_regime_20261110.md`)
+
+| 지표 | 현재 | 변형 | 완화 변형(−5%/−8%) |
+|---|---|---|---|
+| 오탐: 귀무 국면 시장 30 (하락 Val 10) | 0/30 (0/10) | 0/30 (0/10) | 0/30 (0/10) |
+| 검정력: 필터 국면 엣지 S*_f, 참 Sharpe 2 (30 시장) | 23% | 23% | 23% |
+| G6 단계 조건부 통과: 하락 Val 의 귀무 필터 후보 (Dev 생략, 18) | 0% | 6% | 22% |
+
+→ 목표(오탐 ≤ 5%, 하락 Val 오탐 ≤ 5%, Sharpe 2 검정력 +10%p) 중 **검정력 증가 미달** → `propose_criterion(…, study="regime")`
+= `no_change`, **제안 없음** (`research/reports/criteria_gates_exposure_aware_enabled_20261110_regime.md`). 원인: 현실적인 추세
+필터는 하락 국면에도 새서 쉼 경로가 드물게 적용되고, 적용돼도 견고성 '국면' 검사에서 떨어진다. 완화 변형은 조건부 통과를
+크게 올려 채택하지 않는다.
+
+제안 방법(나중에 다시 잴 때)
+```
+python - <<'PY'
+from btc_quant.params.criteria import Targets, propose_criterion
+propose_criterion("gates.exposure_aware.enabled", [True],
+                  Targets(max_fpr=0.05, min_power=0.0, power_sharpe=2.0, max_fpr_bearish_val=0.05, min_power_gain=0.10),
+                  motivation="<합성 근거만 — 실제 캠페인·후보 언급 금지>", references=["synthetic:calibration_study --regime"],
+                  study="regime", n_null_markets=30, n_planted_markets=15, jobs=4)
+PY
+```
+`study="regime"` 은 `Targets.max_fpr_bearish_val`(하락 Val 귀무 오탐)·`min_power_gain`(현재 값 대비 검정력 증가)을 쓴다.
+MCP `propose_criterion(..., study="regime", max_fpr_bearish_val=, min_power_gain=)` 도 같다.

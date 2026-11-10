@@ -155,3 +155,36 @@ def test_current_k_conditions_read_cost_registry():
     assert cur["cost"] == {"fee_rate": m.fee_rate, "spread_bps": m.spread_bps, "slip_bps": m.slip_bps}
     from btc_quant.data.quality import wick_params
     assert cur["coinone_wick_k"] == wick_params("coinone")[0]
+
+
+# ------------------------------------------------------------------ study="regime" (노출 인식 관문 변형, PLAN D14 초안)
+def test_regime_study_tasks_and_targets(tmp_path):
+    tasks, meta = Q.build_regime_tasks("exposure_aware.enabled", [False, True], "bounded", 2.0, 6, 3,
+                                       k_for={"null": 0.0, "regime_filter": 0.03, "regime_cond_f": 0.03})
+    assert meta["study"] == "regime" and len(tasks) == 6 + 3 * 2
+    assert {t["kind"] for t in tasks} == {"null", "regime_filter", "regime_cond_f"}
+    from btc_quant.research import calibration_study as CS
+    full = {t["seed"]: t["kind"] for t in CS.build_regime_tasks(CS.regime_full_config(),
+                                                                 {"null": 0, "regime_filter": 0, "regime_cond_f": 0})}
+    assert all(full[t["seed"]] == t["kind"] for t in tasks)          # 국면 연구와 같은 seed → 같은 시장
+    assert sum(t["val_regime"] == "bear" for t in tasks if t["kind"] == "null") == 2
+    assert all(t["variant_overrides"] == {"value=False": {"exposure_aware.enabled": False},
+                                          "value=True": {"exposure_aware.enabled": True}} for t in tasks)
+    assert all(t["star_filters"] for t in tasks if t["kind"] == "regime_filter")
+    rows = Q.summarize([{"value": v, "kind": "null", "val_regime": r, "any_validated": False, "star_validated": False,
+                         "star_dev_passed": False} for v in (False, True) for r in ("bear", "bull")]
+                       + [{"value": False, "kind": "planted", "any_validated": False, "star_validated": False,
+                           "star_dev_passed": True},
+                          {"value": True, "kind": "planted", "any_validated": True, "star_validated": True,
+                           "star_dev_passed": True}], [False, True])
+    t = Q.Targets(0.05, 0.0, 2.0, max_fpr_bearish_val=0.05, min_power_gain=0.2)
+    assert Q.recommend(rows, t, False) is True
+    assert Q.recommend(rows, Q.Targets(0.05, 0.0, 2.0, 0.05, 2.0), False) is False   # 증가 목표 미달 → 현재 값
+
+
+def test_regime_proposal_refuses_real_campaign_motivation(tmp_path):
+    root = make_root(tmp_path)
+    with pytest.raises(Q.GoalpostError):
+        Q.propose_criterion("gates.exposure_aware.enabled", [True], Q.Targets(), "rescue camp-000013 after G6 fail",
+                            ["synthetic:regime"], root=root, study="regime", runner=lambda t: [],
+                            k_for={"null": 0.0, "regime_filter": 0.03})

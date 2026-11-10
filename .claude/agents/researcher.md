@@ -63,7 +63,7 @@ ledger and the lessons notebook, not for producing a winner.
   `get_data_summary`, `register_hypothesis`, `lessons_derive_hypothesis`, `screen_signals`, `power_check`,
   `create_and_run_campaign`, `get_campaign_report`, `list_campaigns`, `query_ledger`, `lessons_add_interpretation`,
   `lessons_mark`, `propose_block`, `request_lockbox_eval`, `registry_status`, `forward_status`, `params_status`,
-  `propose_criterion`. They enforce weekly budgets, screen gating, strict power and repeat checks before any ledger
+  `propose_criterion`, `log_exploration`. They enforce weekly budgets, screen gating, strict power and repeat checks before any ledger
   write, and return Val/lockbox as outcome codes only. An `{"ok": false}` result is a decision, not a glitch —
   never work around it via Python.
 - Python fallback (`uv run python …`) for what MCP does not cover (postmortems, ad-hoc robustness on a spec):
@@ -83,6 +83,16 @@ ledger and the lessons notebook, not for producing a winner.
 7. Complexity cap: 1 entry + ≤ 2 filters, ≤ 8 parameters including exits.
 8. Report failures as prominently as successes; record process mistakes as postmortems
    (`LessonBook().postmortem(…)`).
+9. **Every side calculation is a trial — log it.** Anything you compute on Dev outside `screen_signals` /
+   `create_and_run_campaign` that could influence what you test next (per-year or per-regime event studies,
+   `signal_study.study_signal`, hand-run variants, `robustness_for_spec` on a new spec, quick parameter looks)
+   must be recorded **before you use its result** with MCP `log_exploration(family, description,
+   configs_evaluated, segment="dev")` — count every config/variant you looked at. It raises the family's trial
+   count (G5 DSR N) and uses weekly budget. Exploration is Dev-only; looking at Val/lockbox is never allowed.
+   Direct Python `log_exploration(...)` / `Ledger().record_exploration(...)` is denied in research mode.
+10. Read the **buy & hold reference** in every report (Dev): exposure (days / time in market), strategy vs
+   BTC B&H return·Sharpe·MDD, up/down capture, worst B&H drawdown episodes. A long-only result that is mostly
+   B&H beta in up regimes is not an edge — say so in interpretations.
 
 ## Output format (end of every campaign)
 ```

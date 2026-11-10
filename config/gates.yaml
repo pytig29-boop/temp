@@ -47,6 +47,25 @@ G6:
     cap: 20                    # 20회 사용 시 Val 은퇴 → dev 편입, 새 Val 필요 (val_id 는 splits.yaml 의 val_id, 없으면 구간 경계로 생성)
     n_boot: 2000
     seed: 0
+# 노출 인식 관문 변형 (PLAN D14 초안 — 사람 승인 전, 기본 OFF; docs/PARAMS.md §8). 전부 class ② (config/params.yaml).
+# enabled: false 인 동안 G4/G6 판정은 위의 기존 규칙 그대로다. 파이프라인은 변형 결과를 정보(shadow)로만 기록한다.
+# 켜기 = class ② 기준 변경(btc_quant.params.criteria, 합성 보정 근거만) + 사람 승인 → 승인 이후 등록되는 캠페인부터.
+# 변형은 기존 규칙의 상위 집합이다(기존 통과 = 변형 통과). 엣지 증거(G1·G2·G3·G5)와 잠금(G7)·전진(G8)은 그대로.
+exposure_aware:
+  enabled: false               # 주 스위치
+  min_dev_exposure: 0.20       # 남용 방지: Dev exposure_days(포지션이 있던 날 비율) ≥ 이 값일 때만 변형 적용
+  G4:
+    enabled: true              # 주 스위치가 켜졌을 때 G4 변형 사용
+    neutral_max_exposure: 0.10 # 롤링 창 exposure_days < 이 값 → '중립'(쉬는 창): 양수 비율 분모에서 제외
+    min_active_windows: 20     # 비중립 창 ≥ 이 수 (Dev 4.8년 ≈ 53창). 미달이면 변형 불가(기존 규칙만)
+  G6:
+    enabled: true              # 주 스위치가 켜졌을 때 G6 '쉬어서 피함' 경로 사용
+    flat_max_exposure: 0.25    # Val exposure_days ≤ 이 값 = 대체로 쉼
+    flat_min_return: -0.02     # Val 총수익(primary 비용) ≥ 이 값 (돈을 잃지 않음, 작은 허용치)
+    flat_min_stress_return: -0.04  # Val 총수익(stress 비용) ≥ 이 값 (stress Sharpe>0 대신)
+    flat_max_mdd_vs_bh: 0.5    # Val MDD ≤ 이 배수 × 같은 기간 B&H MDD
+    flat_require_bh_down: true # 같은 기간 B&H 총수익 < 0 일 때만 (상승장을 놓친 것은 '피함'이 아님)
+    flat_min_trades: 10        # Val 거래 < 이 수면 'insufficient_evidence' (통과 아님)
 # 후보 선택 (PLAN §10b-4): 캠페인 수익 행렬의 상관 군집별 최고(primary 가중 Sharpe) 1개 → 그 중 상위 K.
 selection:
   method: cluster_best         # cluster_best | top_sharpe(구 방식)

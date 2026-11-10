@@ -18,7 +18,7 @@
 | | `candidate-review` | 예상 실패 유형 사전 기록 + 견고성 묶음 + 반대 논리 체크리스트 + 리포트 양식 |
 | | `block-authoring` | 새 블록 = 실험 블록(D11, 자동 수용 검사), 근거에 메커니즘·노출 표기 |
 | | `daily-report` | 아침 리포트 (오답노트·주간 예산 포함) |
-| MCP 서버 | `.mcp.json` → `btc_quant.mcp` (`btcq`, docs/MCP.md) | 연구 도구 20개: `list_blocks`, `get_data_summary`, `register_hypothesis`, `find_similar`, `screen_signals`, `power_check`, `create_and_run_campaign`, `list_campaigns`, `get_campaign_report`, `query_ledger`, `lessons_view`, `lessons_add_interpretation`, `lessons_mark`, `lessons_derive_hypothesis`, `propose_block`, `request_lockbox_eval`, `registry_status`, `params_status`, `propose_criterion`, `forward_status`. 승인·활성화·롤백·잠금 개봉·설정/원장 편집·주문·키 도구는 없음 |
+| MCP 서버 | `.mcp.json` → `btc_quant.mcp` (`btcq`, docs/MCP.md) | 연구 도구 21개: `list_blocks`, `get_data_summary`, `register_hypothesis`, `find_similar`, `screen_signals`, `power_check`, `create_and_run_campaign`, `list_campaigns`, `get_campaign_report`, `query_ledger`, `lessons_view`, `lessons_add_interpretation`, `lessons_mark`, `lessons_derive_hypothesis`, `propose_block`, `request_lockbox_eval`, `registry_status`, `params_status`, `propose_criterion`, `forward_status`, `log_exploration`. 승인·활성화·롤백·잠금 개봉·설정/원장 편집·주문·키 도구는 없음 |
 
 에이전트는 MCP 도구를 쓰고(주간 예산·선별 연결·엄격 검정력·중복 점검을 원장 쓰기 전에 강제, Val/잠금은
 결과 코드만 — 원장에 쓰는 연구 진입점의 Bash 직접 실행은 연구 모드 hook 이 거부, §4.2), MCP 가 다루지 않는 일(사후분석, 개별 스펙 견고성 재계산 등)만 skill 문서의 Python API
@@ -54,7 +54,7 @@ claude -p "daily-report skill로 오늘 아침 리포트 작성"
   `data-steward`를 호출한다.
 - 클라우드 환경에서는 환경 설정의 환경 변수에 `BTCQ_RESEARCH_MODE=1`을 넣는다.
 - 확인: 연구 모드에서 아무 도구나 한 번 쓰면 `logs/research_tool_calls.jsonl`에 줄이 추가된다.
-- MCP 서버 `btcq`(`.mcp.json`)는 프로젝트 MCP 서버로 자동 등록된다(첫 실행 시 승인, `/mcp` 로 확인, 도구 20개).
+- MCP 서버 `btcq`(`.mcp.json`)는 프로젝트 MCP 서버로 자동 등록된다(첫 실행 시 승인, `/mcp` 로 확인, 도구 21개).
   사용법·안전 속성은 docs/MCP.md.
 
 ## 4. 무엇이 차단되나 (연구 모드)
@@ -87,10 +87,10 @@ claude -p "daily-report skill로 오늘 아침 리포트 작성"
 - `.env`, `runtime/secrets`를 언급하는 명령.
 - **MCP 우회 차단** (2026-11-09): 원장·오답노트에 쓰는 연구 진입점의 직접 실행 — `btc_quant.research.cli run|screen|gates`
   (`btc-quant-research` 포함), Python 의 `run_campaign`/`run_pipeline`/`run_screen`/`run_forward`/`record_runs_batch`/
-  `signal_study.screen`, `Ledger` 쓰기(`register_hypothesis`, `create_campaign`, `record_*`, `open_val_evaluation`,
-  `append`), `LessonBook` 의 `add_interpretation`/`mark`/`derive_hypothesis`/`apply_derivation`. 명령 문자열(`python -c`,
+  `signal_study.screen`, `Ledger` 쓰기(`register_hypothesis`, `create_campaign`, `record_*`(`record_exploration` 포함),
+  `open_val_evaluation`, `append`), `research.exploration.log_exploration`, `LessonBook` 의 `add_interpretation`/`mark`/`derive_hypothesis`/`apply_derivation`. 명령 문자열(`python -c`,
   heredoc)과 `python <script.py>`·`python -m <btc_quant 밖 모듈>` 대상 파일 내용을 검사한다. 이 일들은 MCP 도구
-  (`screen_signals`, `create_and_run_campaign`, `register_hypothesis`, `lessons_*`)로만 한다 — 주간 예산·선별 필수·
+  (`screen_signals`, `create_and_run_campaign`, `register_hypothesis`, `lessons_*`, `log_exploration`)로만 한다 — 주간 예산·선별 필수·
   엄격 검정력·중복 점검이 원장 쓰기 전에 강제되는 경로다(docs/MCP.md §4.3). 허용으로 남는 것: 원장·오답노트 읽기,
   `find_similar`/`check_template`/`trial_budget`, `study_signal`(순수 계산), `robustness_for_spec`, `postmortem`,
   `render_markdown`, `record_facts_from_*`(멱등), `research.cli list|report`, `calibration_study`(임시 저장소).
@@ -145,7 +145,8 @@ PLAN §10b-9 "Val/잠금은 결과 코드만"을 파일 수준에서 강제한�
 | ② 신호 선별 | 진입(+필터) 이벤트 스터디 vs 매칭 귀무, 계열 단위 다중검정(BH). 통과 신호만 전략화 | MCP `screen_signals` (연구 모드에서 `signal_study.screen`·`run_screen` 직접 실행은 hook 거부) |
 | ③ 검정력 | 계획 격자의 실질 시도 수에서 G5 통과 최소 Sharpe | `btc_quant.research.power` (CLI `--days --grid --family --target`) |
 | ④ 전략 캠페인 | 진입·필터 고정, 청산 = ATR 배수 SL/TP + 정보 지평 기반 최대 보유, **청산 변형 ≤ 6** | MCP `create_and_run_campaign` (사람: `research.cli run <template>`) |
-| ⑤ 관문·견고성 | G0~G6 파이프라인(Val 예산·누적 Holm), 견고성 묶음(지연·상위 거래 제거·연도 제외·비용 ×1.5·국면·알파·거래소 재현), skeptic | `create_and_run_campaign` 안에서 실행, 결과 `get_campaign_report`; 개별 재계산 `robustness.robustness_for_spec` |
+| ⑤ 관문·견고성 | G0~G6 파이프라인(Val 예산·누적 Holm), **매수보유(B&H) 기준**(정보 전용: 노출, B&H 대비 수익·Sharpe·MDD, 노출 맞춤 B&H, 상승/하락 capture, 최악 B&H 낙폭 구간 — Dev 는 에이전트 리포트, Val 비교는 사람용 리포트만), 견고성 묶음(지연·상위 거래 제거·연도 제외·비용 ×1.5·국면·알파·거래소 재현), skeptic | `create_and_run_campaign` 안에서 실행, 결과 `get_campaign_report`; 개별 재계산 `robustness.robustness_for_spec` |
+| 사이드 계산 | 선별·캠페인 밖의 모든 Dev 계산은 결과를 쓰기 전에 시도로 기록 (§7.1) | MCP `log_exploration` |
 | ⑥ 오답노트 | 사실 자동 기록 → 해석 0~3개(미검증) → 이전 해석 검증/반박 표시 → 사후분석 | 사실은 파이프라인이 자동 기록, MCP `lessons_add_interpretation`·`lessons_mark`·`lessons_derive_hypothesis`, Python `postmortem`, `render_markdown` |
 
 ## 6. 오답노트 (`research/lessons/`, `btc_quant.research.lessons`)
@@ -182,6 +183,23 @@ PLAN §10b-9 "Val/잠금은 결과 코드만"을 파일 수준에서 강제한�
 
 근거: 실질 시도가 늘수록 G5 통과에 필요한 Sharpe 가 오른다(PLAN §10b 표). 예산은 "많이 돌려 하나 걸리기"를
 막고, 신호 선별(구성당 1시도)과 원칙적 청산(≤ 6)으로 시도를 아끼게 한다.
+
+### 7.1 탐색적 시도 기록 (`log_exploration`, 2026-11-10)
+선별·캠페인 밖의 **사이드 계산도 시도다**. 예: Dev 연도별·국면별 이벤트 스터디, `signal_study.study_signal` 로
+몇 가지 구성을 들여다본 것, `robustness_for_spec` 을 새 스펙에 돌려 본 것, 손으로 돌려 본 파라미터 몇 개.
+그 결과가 다음 가설 선택에 쓰이면 선택 편향의 원천인데, 지금까지는 원장에 흔적이 없어 G5 의 N(계열 시도 수)이
+실제보다 작게 잡혔다.
+
+- researcher 는 사이드 계산 결과를 **쓰기 전에** MCP `log_exploration(family, description, configs_evaluated,
+  segment="dev")` 로 기록한다(본 구성·변형 수를 모두 센다). 에이전트 정의·`research-campaign`·`lessons-review` skill 이
+  이를 필수로 명시한다. 기록하지 않은 사이드 계산은 과정 실수(사후분석 대상)다.
+- 원장: hypotheses 1 + campaigns 1(`grid.kind = "exploration"`, 설명·구성 수·구간) + runs `configs_evaluated` 줄
+  (`metrics.kind = "exploration"`, 스펙 없음, 고유 logic_hash) → `Ledger.trials_count(family)`(G5 DSR N_family)와
+  주간 예산(`trial_budget`)에 그대로 더해진다.
+- Dev 만 허용(val/lockbox/forward 는 거부 — 탐색 자체가 금지). 예산을 넘었어도 **기록은 거부하지 않고** 경고만
+  돌려준다(기록을 막으면 기록하지 않는 쪽으로 유인되므로).
+- 연구 모드에서 Python 직접 호출(`log_exploration(…)`, `Ledger().record_exploration(…)`)은 guard hook 이 원장 직접
+  쓰기로 거부한다 — MCP 경로만.
 
 ## 8. 한계 (정직하게)
 

@@ -31,7 +31,8 @@ logs/research_tool_calls.jsonl and the call is denied when it:
      checks (weekly budget, screen gate, strict power, repeat check):
      `btc_quant.research.cli run|screen|gates`, Python that calls run_campaign /
      run_pipeline / run_screen / run_forward / signal_study.screen /
-     Ledger().record_* / register_hypothesis / create_campaign / LessonBook
+     Ledger().record_* (incl. record_exploration) / research.exploration.log_exploration /
+     register_hypothesis / create_campaign / LessonBook
      add_interpretation / mark / derive_hypothesis / apply_derivation — including
      the contents of a `python <script.py>` / `python -m <local module>` target.
      Use the btcq MCP tools instead (docs/MCP.md §4.3).
@@ -164,7 +165,9 @@ RESEARCH_BYPASS_RES = [
     re.compile(r"\b(run_campaign|run_pipeline|run_screen|run_forward|record_runs_batch)\b"),
     re.compile(r"signal_study\s+import\s+[^\n;]*(?<![\w.])screen\b(?!_)|signal_study\.screen\s*\("),
     re.compile(r"\.(register_hypothesis|create_campaign|record_runs?|record_lockbox_\w+|open_val_evaluation|"
-               r"record_val_result|record_forward_result|record_transition)\s*\("),
+               r"record_val_result|record_forward_result|record_transition|record_exploration)\s*\("),
+    # 탐색적 시도 기록(research.exploration.log_exploration) — 연구 모드에서는 MCP log_exploration 으로만
+    re.compile(r"\blog_exploration\s*\(|exploration\s+import\s+[^\n;]*\blog_exploration\b"),
     re.compile(r"\bLedger\s*\([^)]*\)\s*\.\s*append\s*\(|\bledger\s*\.\s*append\s*\("),
     re.compile(r"\b(add_interpretation|derive_hypothesis|apply_derivation)\s*\("),
 ]

@@ -89,6 +89,12 @@ VAL_SUMMARY_KEYS = ("n_days", "sharpe", "sharpe_w", "mean_daily", "std_daily", "
                     "n_trades", "expectancy", "win_rate", "trades_per_day")
 
 
+# Val B&H 비교 (G6 세부 안 — 사람 전용). 에이전트 사본(pipeline_public.json)에는 G6 결과 코드만 남는다.
+VAL_BENCHMARK_KEYS = ("total_return", "sharpe", "max_dd", "exposure_time", "exposure_days", "bh_total_return", "bh_sharpe", "bh_max_dd",
+                      "excess_return_vs_bh", "sharpe_minus_bh", "bh_matched_total_return",
+                      "excess_return_vs_matched_bh", "up_capture", "down_capture", "downside_dev",
+                      "worst_bh_dd_strategy_return")
+
 PIPELINE_FULL = "pipeline.json"            # 사람용 전체 (G6 세부 포함) — 연구 모드 guard 가 직접 읽기를 거부
 PIPELINE_PUBLIC = "pipeline_public.json"   # 에이전트용 (Val/잠금 = 결과 코드만) — MCP get_campaign_report 가 읽음
 VAL_STATUS_PUBLIC_KEYS = ("val_id", "cap", "used", "remaining")
@@ -156,8 +162,9 @@ def val_holm_decision(ledger, val_id: str, k: int, p_value: float, vb_cfg: dict)
 
 
 def _val_metrics(met: dict) -> dict:
-    """Val 지표를 원장에 기록할 때: 연·월 단위 분해 키 제거."""
-    return {k: v for k, v in met.items() if k not in ("spec_id", "cost") and not k.startswith("sharpe_year_")}
+    """Val 지표를 원장에 기록할 때: 연·월 단위 분해 키와 B&H 낙폭 구간 날짜(Val 안의 시점 = 구조 누설) 제거."""
+    return {k: v for k, v in met.items() if k not in ("spec_id", "cost") and not k.startswith("sharpe_year_")
+            and not (k.startswith("bh_dd") and k.endswith(("_start", "_end")))}
 
 
 # ============================================================== 유틸
@@ -314,6 +321,9 @@ class Pipeline:
         self._m1 = None
         self._cache = None
         self._ctx_val: Context | None = None
+        ea4 = (G.exposure_aware_cfg(self.cfg).get("G4") or {})
+        self.neutral_exposure = float(ea4.get("neutral_max_exposure", M.NEUTRAL_EXPOSURE))
+        self._bh_dev = None
 
     # ---------------------------------------------------------- 데이터
     @property
@@ -333,6 +343,24 @@ class Pipeline:
         tr = fast.simulate_prepared(p, ex.sl, ex.tp, ex.max_hold_min,
                                     get_cost(cost_name), si, ei, ex.atr_bars if ex.is_atr else None)
         return fast.to_result(p, tr, get_cost(cost_name), self.start, self.end, spec.id, spec.logic_hash())
+
+    def dev_benchmark(self, days: pd.DatetimeIndex) -> pd.Series:
+        """Dev BTC 매수보유 일간 수익 (같은 거래소 1분봉 close, 비용 없음) — 정보 전용."""
+        if self._bh_dev is None or not self._bh_dev.index.equals(days):
+            self._bh_dev = M.buy_hold_daily(self.cache.m1["close"], days)
+        return self._bh_dev
+
+    @staticmethod
+    def val_benchmark(m1v: pd.DataFrame, days: pd.DatetimeIndex, vs) -> pd.Series:
+        """Val B&H 일간 수익. 첫날 기준가 = Val 시작 직전(워밍업 구간) 마지막 close."""
+        c = m1v["close"]
+        before = c[c.index < vs]
+        return M.buy_hold_daily(c, days, first_price=float(before.iloc[-1]) if len(before) else None)
+
+    def exposure_metrics(self, res) -> dict:
+        """후보 Dev 노출·B&H 지표 (관문 설정의 중립 임계값으로 다시 계산 → G4 변형/shadow 입력)."""
+        return M.benchmark_metrics(res.daily_returns, res.trades, self.dev_benchmark(res.daily_returns.index),
+                                   neutral_exposure=self.neutral_exposure)
 
     # ---------------------------------------------------------- 캠페인 수준 (G5 입력)
     def campaign_stats(self) -> dict:
@@ -557,6 +585,7 @@ class Pipeline:
             dec = res.get("decision") or {}
             return {"val_id": vid, "reused": prior["id"], "k": prior["k"], "cap": int(vb["cap"]),
                     "p_value": prior["p_value"], "holm_passed": bool(dec.get("holm_passed", False)),
+                    "prior_passed": bool(prior.get("passed")),
                     "note": "logic_hash already used this Val; prior decision reused (not counted again)"
                             + ("" if prior["result"] else " — prior evaluation has no result (aborted) → fail")}
         try:
@@ -568,7 +597,8 @@ class Pipeline:
         return {"val_id": vid, "opening": op["id"], "k": op["k"], "cap": int(vb["cap"])}
 
     def g6(self, spec: StrategySpec, m1v, vs, ve, cost_name: str, stress_name: str,
-           record: bool = True, budget: bool | None = None, ctx: Context | None = None) -> tuple:
+           record: bool = True, budget: bool | None = None, ctx: Context | None = None,
+           dev_metrics: dict | None = None) -> tuple:
         """G6. budget=True(기본: self.val_budget) 이면 Val 사용 원장 + 누적 Holm 적용 (primary 비용 전용).
         사용 상한 도달 시 Val 을 평가하지 않고 (gate, None, None, None) 반환.
         스펙은 그대로(timeframe·ATR 청산) run_fast / run_reference. ctx = Val 보조 데이터(기본 load_val 의 것)."""
@@ -582,10 +612,14 @@ class Pipeline:
                 return _gate(False, val_budget=vbd, cost=cost_name, val_status="exhausted"), None, None, None
         res = fast.run_fast(spec, m1v, get_cost(cost_name), vs, ve, ctx=ctx)
         st = fast.run_fast(spec, m1v, get_cost(stress_name), vs, ve, ctx=ctx)
-        met, smet = M.summarize(res, HALF_LIFE_DAYS), M.summarize(st, HALF_LIFE_DAYS)
+        bh = self.val_benchmark(m1v, res.daily_returns.index, vs)
+        met = M.summarize(res, HALF_LIFE_DAYS, benchmark=bh, neutral_exposure=self.neutral_exposure)
+        smet = M.summarize(st, HALF_LIFE_DAYS, benchmark=bh, neutral_exposure=self.neutral_exposure)
         mc = montecarlo.worst_case_mdd95(res.trades["net_ret"].to_numpy(float),
                                          n_sims=self.cfg["G6"]["mc_sims"])
-        ok, d = G.check_g6(met, smet, mc, self.cfg)
+        ok, d = G.check_g6(met, smet, mc, self.cfg, dev_metrics=dev_metrics)
+        # Val B&H 비교 (사람 전용: pipeline.json / human 리포트. 에이전트 사본은 G6 를 결과 코드로 대체)
+        d["benchmark_val"] = {k: met.get(k) for k in VAL_BENCHMARK_KEYS if k in met}
         d.update(cost=cost_name, stress_cost=stress_name, n_trades=met["n_trades"],
                  total_return=met["total_return"], max_dd=met["max_dd"], n_days=met["n_days"],
                  sharpe_w=met["sharpe_w"])
@@ -607,7 +641,9 @@ class Pipeline:
                 dec = val_holm_decision(self.env.ledger, vbd["val_id"], vbd["k"], bt["p_value"], vb_cfg)
                 vbd.update(p_value=bt["p_value"], mean_block=bt["mean_block"], n_boot=bt["n_boot"], **dec)
                 checks_ok = ok
-                ok = ok and dec["holm_passed"]
+                # '쉬어서 피함' 경로(exposure_aware, 기본 OFF)는 평균 > 0 증거를 요구하지 않는다(G6 변형 설명).
+                # 사용 자체는 원장에 k번째로 기록되고 p 도 Holm 입력으로 남는다.
+                ok = ok and (dec["holm_passed"] or d.get("path") == "flat")
                 summ = {k: met[k] for k in VAL_SUMMARY_KEYS if k in met}
                 summ.update(stress_mdd=d["stress_mdd"], mc_mdd95=d["mc_mdd95"],
                             reference_engine_match=d.get("reference_engine_match"))
@@ -615,8 +651,11 @@ class Pipeline:
                     vbd["opening"], ok, bt["p_value"], summ,
                     {k: vbd[k] for k in ("alpha", "holm_mode", "m", "rank", "threshold", "n_prior", "holm_passed")}
                     | {"g6_checks_passed": bool(checks_ok)})
-            else:   # 재사용: 같은 스펙·같은 Val → 결정은 첫 사용 시점에 확정
-                ok = ok and vbd["holm_passed"]
+            else:   # 재사용: 같은 스펙·같은 Val → 결정은 첫 사용 시점에 확정. 지금 설정(예: 나중에 승인된
+                # 기준 변경, exposure_aware)으로 다시 판정한 결과는 이전 결정보다 *엄격해질* 수만 있다 —
+                # 이전에 G6 를 떨어진 스펙은 같은 Val 에서 다시 통과할 수 없다(골대 이동 방지).
+                ok = ok and vbd["holm_passed"] and vbd.get("prior_passed", False)
+                d["val_reuse_prior_passed"] = vbd.get("prior_passed", False)
             d["val_budget"] = vbd
             d["val_p_value"], d["val_k"], d["val_holm_passed"] = vbd.get("p_value"), vbd.get("k"), vbd["holm_passed"]
         if record:
@@ -697,6 +736,9 @@ class Pipeline:
                  "uses_experimental": spec_uses_experimental(spec)}
             res = self.dev_result(spec, self.costs["primary"])
             c["yearly"] = M.yearly_table(res.daily_returns, res.trades).reset_index(names="year").to_dict("records")
+            bm = self.exposure_metrics(res)          # 노출·B&H (Dev, 정보 + G4 변형 입력)
+            row.update(bm)
+            c["metrics"].update(bm)
             gts = c["gates"]
             gts["G0"] = gate_g0(spec, self.cache, allowed_aux=tuple(tpl.aux))
             ok1, d1 = G.check_g1(row, self.cfg)
@@ -727,7 +769,8 @@ class Pipeline:
             if m1v is None:
                 m1v, vs, ve = self.load_val()
             spec = cr.specs[c["logic_hash"]]
-            g6, vres, vmet, mc = self.g6(spec, m1v, vs, ve, self.costs["primary"], self.costs["stress"])
+            g6, vres, vmet, mc = self.g6(spec, m1v, vs, ve, self.costs["primary"], self.costs["stress"],
+                                         dev_metrics=c["metrics"])
             c["gates"]["G6"] = g6
             if not g6["passed"]:
                 c["grade"] = None
@@ -738,10 +781,11 @@ class Pipeline:
             c["risk_limits"] = G.risk_limits_from_validation(vres.daily_returns, mc, vmet["trades_per_day"], self.cfg)
             # 등급: grade 비용으로 G2/G4/G6 재확인
             grow = self.grade_tbl.loc[c["logic_hash"]].to_dict()
+            grow.update(self.exposure_metrics(self.dev_result(spec, self.costs["grade"])))
             g2g = self.g2(spec, grow, self.costs["grade"])
             ok4g, d4g = G.check_g4(grow, self.cfg)
             g6g, *_ = self.g6(spec, m1v, vs, ve, self.costs["grade"], self.costs["grade_stress"],
-                              budget=False)      # 같은 후보의 비용 견고성 확인 → Val 예산 미사용
+                              budget=False, dev_metrics=grow)      # 같은 후보의 비용 견고성 확인 → Val 예산 미사용
             c["grade_checks"] = {"G2": g2g, "G4": _gate(ok4g, **d4g), "G6": g6g}
             c["grade"] = "A" if (g2g["passed"] and ok4g and g6g["passed"]) else "B"
             # 견고성 묶음 (Dev) — 실패하면 validated 로 올리지 않는다

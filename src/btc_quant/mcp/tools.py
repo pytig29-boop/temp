@@ -37,6 +37,7 @@ TOOL_NAMES = (
     "create_and_run_campaign", "list_campaigns", "get_campaign_report", "query_ledger", "lessons_view",
     "lessons_add_interpretation", "lessons_mark", "lessons_derive_hypothesis", "propose_block",
     "request_lockbox_eval", "registry_status", "params_status", "propose_criterion", "forward_status",
+    "log_exploration",
 )
 
 # 이 서버에 절대 있어서는 안 되는 기능 (테스트가 도구 이름·설명에 대해 강제한다).
@@ -76,7 +77,19 @@ LEDGER_DEFAULT_EXCLUDE = {"campaigns": ("grid",), "runs": ("spec",)}
 # Dev 실행 지표 중 반환하는 것 (전략 실행 / 신호 선별 실행)
 RUN_METRIC_KEYS = ("n_days", "n_trades", "recent_n_trades", "sharpe", "sharpe_w", "recent_sharpe", "max_dd",
                    "expectancy", "win_rate", "trades_per_day", "mean_daily", "std_daily", "total_return",
-                   "rolling_frac_positive", "exposure")
+                   "rolling_frac_positive", "exposure",
+                   # 노출·B&H 기준 (Dev, 정보 전용 — metrics.benchmark_metrics)
+                   "exposure_time", "exposure_days", "rolling_n_neutral", "rolling_n_active",
+                   "rolling_frac_positive_active", "downside_dev", "excess_return_vs_bh", "sharpe_minus_bh",
+                   "bh_matched_total_return", "excess_return_vs_matched_bh", "up_capture", "down_capture",
+                   "up_regime_return", "down_regime_return", "up_regime_capture", "down_regime_capture",
+                   "worst_bh_dd_strategy_return")
+# 후보 Dev B&H 비교 (get_campaign_report candidates[].benchmark_dev) — 전략 값과 같은 Dev 기간 B&H 값
+BENCHMARK_DEV_KEYS = ("total_return", "sharpe", "max_dd", "bh_total_return", "bh_sharpe", "bh_max_dd",
+                      "exposure_time", "exposure_days", "bh_matched_total_return", "excess_return_vs_bh",
+                      "excess_return_vs_matched_bh", "up_capture", "down_capture", "up_regime_return",
+                      "down_regime_return", "up_regime_capture", "down_regime_capture", "downside_dev",
+                      *(f"bh_dd{i}_{k}" for i in (1, 2, 3) for k in ("depth", "start", "end", "strategy_return")))
 SCREEN_METRIC_KEYS = ("kind", "n_events", "p_signal", "info_horizon", "best_primary_horizon",
                       "saturation_horizon", "profile", "bar_minutes")
 DEV_METRIC_KEYS = RUN_METRIC_KEYS
@@ -482,6 +495,7 @@ class ResearchTools:
                                "data_snapshot": man.get("data_snapshot"), "code_commit": man.get("code_commit"),
                                "timeframe": man.get("timeframe"), "exits": man.get("exits"),
                                "period": man.get("period"), "params_version": man.get("params_version"),
+                               "benchmark_dev": _scalars(man.get("benchmark")) or None,
                                "power": {k: pw.get(k) for k in ("required_sharpe_ann", "target_sharpe_ann",
                                                                 "n_trials_dsr", "warning")},
                                "screen_gate": ({k: (man.get("screen") or {}).get(k)
@@ -536,7 +550,10 @@ class ResearchTools:
             "uses_experimental": c.get("uses_experimental") or [],
             "metrics_dev": {k: (c.get("metrics") or {}).get(k) for k in DEV_METRIC_KEYS
                             if k in (c.get("metrics") or {})},
+            "benchmark_dev": {k: (c.get("metrics") or {}).get(k) for k in BENCHMARK_DEV_KEYS
+                              if k in (c.get("metrics") or {})} or None,
             "gates_dev": {g: _scalars(gates[g]) for g in GATES_DEV if g in gates},
+            "G4_exposure_aware": _scalars((gates.get("G4") or {}).get("exposure_aware")) or None,
             "dev_passed": c.get("dev_passed"), "first_failed": c.get("first_failed"),
             "G6_val": _outcome(g6.get("passed")) if isinstance(g6, dict) else "not evaluated",
             "G6_outcome": (g6.get("outcome") or _outcome(g6.get("passed"))) if isinstance(g6, dict)
@@ -833,6 +850,26 @@ class ResearchTools:
         return out
 
     @tool
+    def log_exploration(self, family: str, description: str, configs_evaluated: int,
+                        segment: str = "dev") -> dict[str, Any]:
+        """사이드 계산(이벤트 스터디·손으로 돌린 변형 등)을 시도로 원장에 기록 (research.exploration).
+        Dev 만. 예산 초과여도 기록하고 경고(이미 한 계산을 숨기지 않게)."""
+        from btc_quant.research.exploration import ExplorationError, log_exploration
+        try:
+            out = log_exploration(family, description, configs_evaluated, segment=segment, env=self.env(),
+                                  author="ai")
+        except ExplorationError as e:
+            raise ToolFailure("invalid_argument", str(e)) from None
+        b = out.get("weekly_budget") or {}
+        out["warning"] = (f"family {family!r} weekly trial budget is now exhausted or exceeded "
+                          f"(remaining {b.get('remaining')}): plan fewer trials this week"
+                          if isinstance(b.get("remaining"), int) and b["remaining"] <= 0 else None)
+        out["run_ids"] = out["run_ids"][:20] + (["…"] if len(out["run_ids"]) > 20 else [])
+        out["note"] = ("Logged as trials (ledger runs, metrics.kind='exploration'): they raise N_family for G5 DSR "
+                       "of every later campaign in this family.")
+        return out
+
+    @tool
     def params_status(self) -> dict[str, Any]:
         from btc_quant.params.costs import (
             all_cost_models,
@@ -860,14 +897,18 @@ class ResearchTools:
     def propose_criterion(self, key: str, candidates: list, motivation: str, references: list[str] | None = None,
                           max_fpr: float = 0.05, min_power: float = 0.70, power_sharpe: float = 2.0,
                           mode: str = "bounded", n_null_markets: int = 20, n_planted_markets: int = 10,
-                          jobs: int = 1) -> dict[str, Any]:
+                          jobs: int = 1, study: str = "standard", max_fpr_bearish_val: float | None = None,
+                          min_power_gain: float | None = None) -> dict[str, Any]:
         from btc_quant.params.criteria import Targets, propose_criterion
         from btc_quant.research.campaign import config_root
         if mode not in ("bounded", "quick", "full"):
             raise ToolFailure("invalid_argument", "mode must be bounded | quick | full")
         if not candidates:
             raise ToolFailure("invalid_argument", "give candidate values")
-        st = propose_criterion(key, list(candidates), Targets(max_fpr, min_power, power_sharpe), motivation,
+        if study not in ("standard", "regime"):
+            raise ToolFailure("invalid_argument", "study must be standard | regime (regime-switching synthetic markets)")
+        st = propose_criterion(key, list(candidates), Targets(max_fpr, min_power, power_sharpe, max_fpr_bearish_val,
+                                                              min_power_gain), motivation, study=study,
                                references=list(references or []), mode=mode, n_null_markets=int(n_null_markets),
                                n_planted_markets=int(n_planted_markets), jobs=max(1, int(jobs)),
                                root=config_root(self.env()), progress=self.log, runner=self._criteria_runner,

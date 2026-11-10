@@ -29,6 +29,10 @@ everything goes through the API. `B.verify()` must return `[]`.
 - **Lessons expire.** Each fact has scope (venue, timeframe, segment/period, blocks) and `review_after` +
   `reexamine_if`. A failed idea under Upbit costs is not a ban under Coinone 0 %; a lesson from 5m bars does
   not automatically hold at 1m.
+- **Side calculations are trials.** If an interpretation or a derived hypothesis rests on anything you computed
+  outside a screen/campaign (per-year event study on Dev, a regime split, hand-run variants), that calculation
+  must already be logged with MCP `log_exploration(family, description, configs_evaluated)` — cite its
+  exploration campaign id in the evidence. Unlogged side calculations are a process mistake (postmortem).
 - **Derived hypotheses inherit trial cost.** Use `B.derive_hypothesis(parent, text, rationale, success)`;
   the parent family is kept so `Ledger.trials_count(family)` accumulates. A new family name needs a human
   override (refused in research mode).

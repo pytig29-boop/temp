@@ -708,7 +708,7 @@ class CampaignResult:
         return p.sort_values(["sharpe_w", "logic_hash"], ascending=[False, True]).reset_index(drop=True)
 
 
-METRIC_DROP = ("spec_id", "cost")
+METRIC_DROP = ("spec_id", "cost", *M.BENCHMARK_CONSTANT_KEYS)   # B&H 자체 값은 manifest["benchmark"] 에 한 번
 
 
 def _metrics_record(m: dict) -> dict:
@@ -781,6 +781,8 @@ def run_campaign(template: CampaignTemplate | str | Path, root: str | Path | Non
     exits = tpl.exit_combos()
     rows, items, ret_cols, specs = [], [], {}, {}
     days = None
+    bh = None                   # BTC 매수보유 일간 수익 (정보 전용; 모든 스펙에 같은 일자)
+    bench_const: dict = {}
     combos = tpl.signal_combos()
     for ci, (entry, filters, set_idx) in enumerate(combos):
         p = cache.prepared(entry, filters)
@@ -794,7 +796,11 @@ def run_campaign(template: CampaignTemplate | str | Path, root: str | Path | Non
                 lh = spec.logic_hash()
                 specs[lh] = spec
                 res = fast.to_result(p, tr, cost, start, end, spec.id, lh)
-                met = {**M.summarize(res, HALF_LIFE_DAYS), **gross_metrics(p, tr, cost, start, end)}
+                if bh is None or not bh.index.equals(res.daily_returns.index):
+                    bh = M.buy_hold_daily(m1["close"], res.daily_returns.index)
+                met = {**M.summarize(res, HALF_LIFE_DAYS, benchmark=bh), **gross_metrics(p, tr, cost, start, end)}
+                if not bench_const:
+                    bench_const = {k: met.get(k) for k in M.BENCHMARK_CONSTANT_KEYS if k in met}
                 if cost_name == tpl.costs["primary"]:
                     ret_cols[lh] = mat[xi]
                 rows.append({"logic_hash": lh, "spec_id": spec.id, "filter_set": set_idx,
@@ -825,6 +831,7 @@ def run_campaign(template: CampaignTemplate | str | Path, root: str | Path | Non
         "n_runs": len(items), "costs": tpl.costs, "evaluated_costs": eval_costs,
         "runtime_sec": round(time.time() - t0, 2), "half_life_days": HALF_LIFE_DAYS,
         "power": pw, "screen": screen,
+        "benchmark": {"kind": "BTC buy & hold (same venue 1m close, no cost)", **bench_const},
         "params": pver, "params_version": pver.get("params_version"), "cost_versions": pver.get("cost_versions"),
     }
     out = save_campaign(env, tpl, camp_id, results, returns, manifest)

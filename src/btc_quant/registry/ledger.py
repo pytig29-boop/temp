@@ -297,6 +297,48 @@ class Ledger:
                 "metrics": mets or {}, **extra} for spec, lh, cost_name, mets in norm]
             return [r["id"] for r in self._append_many_locked("runs", recs)]
 
+    def record_exploration(self, family: str, description: str, configs_evaluated: int, period: dict,
+                           *, labels: list[str] | None = None, author: str = "ai", note: str = "",
+                           code_commit: str | None = None, data_snapshot: str | None = None) -> dict:
+        """탐색적 시도(사이드 계산: 연도별 이벤트 스터디 등)를 원장에 남긴다 — 캠페인이 아닌 계산도 시도다.
+
+        hypotheses 1줄 + campaigns 1줄(grid.kind = "exploration") + runs `configs_evaluated` 줄(고유 logic_hash =
+        exploration 캠페인 id + 순번 → `trials_count(family=…)` 에 그대로 더해져 G5 DSR 의 N_family 를 올린다).
+        runs.spec 은 없고 metrics.kind = "exploration" (전략 지표 없음). 반환 {hypothesis_id, campaign_id, run_ids}."""
+        import hashlib
+
+        n = int(configs_evaluated)
+        if n < 1:
+            raise ValueError("configs_evaluated must be ≥ 1")
+        if not family or not str(family).strip():
+            raise ValueError("family required (exploratory trials count toward that family)")
+        if not description or not str(description).strip():
+            raise ValueError("description required")
+        if labels is not None and len(labels) != n:
+            raise ValueError("labels must have one entry per evaluated config")
+        per = _period(period)
+        with self.lock():
+            hyp = self._append_locked("hypotheses", {
+                "text": f"[exploration] {description}", "rationale": "exploratory side calculation (logged trial)",
+                "success_criteria": "n/a (exploration: counted as trials, no gate)", "author": author})
+            camp = self._append_locked("campaigns", {
+                "hypothesis_id": hyp["id"], "grid": {"kind": "exploration", "description": description,
+                                                     "configs_evaluated": n, "segment": per.get("segment"),
+                                                     **({"labels": list(labels)} if labels else {})},
+                "grid_size": n, "budget": n, "cost_models": ["exploration"], "period": per, "family": family,
+                "note": note or f"exploration: {n} config(s) evaluated on {per.get('segment')}"})
+            recs = []
+            for i in range(n):
+                lh = hashlib.sha256(f"{camp['id']}:{i}".encode()).hexdigest()[:16]
+                recs.append({"campaign_id": camp["id"], "hypothesis_id": hyp["id"], "family": family,
+                             "spec_id": f"exploration_{camp['id']}_{i + 1}", "spec_version": None, "logic_hash": lh,
+                             "spec": None, "cost_name": "exploration", "period": per,
+                             "data_snapshot": data_snapshot, "code_commit": code_commit,
+                             "metrics": {"kind": "exploration", "index": i + 1,
+                                         **({"label": str(labels[i])} if labels else {})}})
+            runs = self._append_many_locked("runs", recs)
+        return {"hypothesis_id": hyp["id"], "campaign_id": camp["id"], "run_ids": [r["id"] for r in runs]}
+
     def trials_count(self, campaign_id: str | None = None, family: str | None = None) -> int:
         """시도 횟수 = 고유 (campaign_id, logic_hash) 수. 같은 스펙의 비용 모델별 실행은 1회로 센다.
         캠페인을 새로 만들어 다시 돌린 조합은 누적된다(PLAN §5.1)."""

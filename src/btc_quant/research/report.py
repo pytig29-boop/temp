@@ -72,14 +72,25 @@ def _gate_line(name: str, g: dict) -> str:
         "G2": ["sharpe_w", "p_value", "percentile", "n_null", "calibration", "p_signal_rate", "p", "tf_min",
                "atr_bars", "n_trades_median", "candidate_n_trades", "sharpe_w_median", "sharpe_w_p95", "cost"],
         "G3": ["selected", "neighbor_median", "required", "n_neighbors"],
-        "G4": ["rolling_frac_positive", "rolling_n_windows", "recent_sharpe"],
+        "G4": ["rolling_frac_positive", "rolling_n_windows", "recent_sharpe", "base_passed"],
         "G5": ["dsr", "pbo", "sr", "sr0", "n_trials", "var_trial_sr"],
         "G6": ["rule", "sharpe", "max_dd", "stress_sharpe", "stress_mdd", "mc_mdd95", "n_trades", "total_return",
                "cost", "stress_cost", "reference_engine_match", "val_k", "val_p_value", "val_holm_passed",
-               "ok_sharpe", "ok_mdd", "ok_stress_sharpe", "ok_mc_mdd"],
+               "ok_sharpe", "ok_mdd", "ok_stress_sharpe", "ok_mc_mdd", "path", "base_passed",
+               "val_reuse_prior_passed"],
     }.get(name, [])
     parts = [f"{k}={_f(_v(g.get(k)), 4)}" for k in keys if k in g]
-    return f"- **{name} {_pf(g)}** — " + ", ".join(parts)
+    line = f"- **{name} {_pf(g)}** — " + ", ".join(parts)
+    ea = g.get("exposure_aware")
+    if isinstance(ea, dict) and name in ("G4", "G6"):
+        tag = "ACTIVE" if ea.get("enabled") else "shadow, OFF — information only"
+        ek = {"G4": ["applicable", "rolling_n_active", "rolling_n_neutral", "rolling_frac_positive_active",
+                     "exposure_days", "via", "passed", "reason"],
+              "G6": ["applicable", "status", "exposure_days", "total_return", "stress_total_return", "max_dd",
+                     "bh_total_return", "bh_max_dd", "n_trades", "dev_exposure_days", "passed", "reason"]}[name]
+        line += (f"\n  - exposure-aware variant ({tag}): "
+                 + ", ".join(f"{k}={_f(_v(ea.get(k)), 4)}" for k in ek if k in ea))
+    return line
 
 
 def _wk(exchange) -> str:
@@ -176,10 +187,14 @@ def render(campaign_id: str, root: str | Path | None = None, env: ResearchEnv | 
     prim = cr.ranked()
     L.append("## Top specs (primary cost, ranked by weighted Sharpe)\n")
     cols = ["spec_id", "filters", *tpl.exit_keys, "sharpe_w", "sharpe", "recent_sharpe",
-            "n_trades", "recent_n_trades", "expectancy", "max_dd", "rolling_frac_positive"]
+            "n_trades", "recent_n_trades", "expectancy", "max_dd", "rolling_frac_positive", "exposure_days"]
     pcols = [c for c in prim.columns if c.startswith("entry.") or ("." in c and c.split(".")[0] in
              {f.block for fs in tpl.filter_sets for f in fs})]
-    L.append(_table(prim.head(10).to_dict("records"), cols[:2] + pcols + cols[2:]))
+    L.append(_table(prim.head(10).to_dict("records"), cols[:2] + pcols + [c for c in cols[2:] if c in prim.columns]))
+    bm = man.get("benchmark") or {}
+    if bm.get("bh_total_return") is not None:
+        L.append(f"BTC buy & hold over the same Dev period (information only): total return "
+                 f"{_f(bm.get('bh_total_return'))}, Sharpe {_f(bm.get('bh_sharpe'))}, MDD {_f(bm.get('bh_max_dd'))}.\n")
     L.append(f"Distribution of weighted Sharpe over all {len(prim)} specs: "
              f"median {prim['sharpe_w'].median():.3f}, share > 0 {(prim['sharpe_w'] > 0).mean():.1%}, "
              f"max {prim['sharpe_w'].max():.3f}.\n")
@@ -237,6 +252,10 @@ def render(campaign_id: str, root: str | Path | None = None, env: ResearchEnv | 
             if nb:
                 L.append("- G3 neighbors: " + ", ".join(f"{n['change']}→{_f(n['sharpe_w'], 2)}" for n in nb))
             L.append("")
+            L += benchmark_lines(m, "Dev, primary cost")
+            g6d = c["gates"].get("G6")
+            if not agent and isinstance(g6d, dict) and g6d.get("benchmark_val"):
+                L += benchmark_lines(g6d["benchmark_val"], "**Val** — HUMAN-ONLY")
             if c.get("yearly"):
                 L.append("Yearly (Dev, primary cost):\n")
                 L.append(_table(c["yearly"], ["year", "n_days", "total_return", "sharpe", "max_dd", "n_trades"]))
@@ -295,6 +314,49 @@ def render(campaign_id: str, root: str | Path | None = None, env: ResearchEnv | 
     else:
         L.append("## Gates\n\nPipeline not run yet (`python -m btc_quant.research.cli run …` runs it).\n")
     return "\n".join(L)
+
+
+BH_DEV_ROWS = (("Total return", "total_return", "bh_total_return"),
+               ("Sharpe", "sharpe", "bh_sharpe"),
+               ("Max drawdown", "max_dd", "bh_max_dd"))
+
+
+def benchmark_lines(m: dict, label: str) -> list[str]:
+    """전략 vs BTC 매수보유(같은 기간·같은 거래소 close, 비용 없음) — 정보 전용, 관문 아님."""
+    if m.get("bh_total_return") is None and m.get("exposure_days") is None:
+        return []
+    L = [f"Buy & hold reference ({label}; information only — not a gate):\n",
+         "| | strategy | BTC buy & hold |", "|---|---|---|"]
+    for name, a, b in BH_DEV_ROWS:
+        L.append(f"| {name} | {_f(m.get(a))} | {_f(m.get(b))} |")
+    L.append("")
+    keys = [("time in market (exposure_time)", "exposure_time"), ("days in market (exposure_days)", "exposure_days"),
+            ("exposure-matched B&H return", "bh_matched_total_return"),
+            ("excess vs matched B&H", "excess_return_vs_matched_bh"), ("excess vs B&H", "excess_return_vs_bh"),
+            ("up-day capture", "up_capture"), ("down-day capture", "down_capture"),
+            ("up-regime return (trailing 30d BTC > 0)", "up_regime_return"),
+            ("down-regime return (trailing 30d BTC ≤ 0)", "down_regime_return"),
+            ("up-regime capture", "up_regime_capture"), ("down-regime capture", "down_regime_capture"),
+            ("downside deviation (ann.)", "downside_dev"),
+            ("rolling 6m windows neutral / active", None)]
+    parts = []
+    for lab, k in keys:
+        if k is None:
+            if m.get("rolling_n_neutral") is not None:
+                parts.append(f"{lab} {m.get('rolling_n_neutral')} / {m.get('rolling_n_active')} "
+                             f"(neutral = exposure_days < {_f(m.get('rolling_neutral_exposure'), 2)})")
+        elif m.get(k) is not None:
+            parts.append(f"{lab} {_f(m.get(k))}")
+    L.append("- " + "; ".join(parts))
+    eps = []
+    for i in range(1, 4):
+        if m.get(f"bh_dd{i}_depth") is not None and m.get(f"bh_dd{i}_depth") == m.get(f"bh_dd{i}_depth"):
+            span = (f" {m.get(f'bh_dd{i}_start')}→{m.get(f'bh_dd{i}_end')}" if m.get(f"bh_dd{i}_start") else "")
+            eps.append(f"#{i}{span} B&H −{_f(m.get(f'bh_dd{i}_depth'))} → strategy {_f(m.get(f'bh_dd{i}_strategy_return'))}")
+    if eps:
+        L.append("- Worst B&H drawdown episodes: " + "; ".join(eps))
+    L.append("")
+    return L
 
 
 def _rob_row(name: str, v: dict) -> dict:

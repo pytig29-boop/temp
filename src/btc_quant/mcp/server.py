@@ -74,6 +74,10 @@ DESCRIPTIONS = {
                          "approval and applies from the next campaign. Can take a long time.",
     "forward_status": "Forward incubation status of validated/challenger strategies from the ledger (latest daily "
                       "record, ok days, within-band share). Read-only.",
+    "log_exploration": "Record an exploratory side calculation (e.g. per-year event study on Dev, a few hand-run "
+                       "variants) as trials in the ledger: configs_evaluated runs count toward the family's trial "
+                       "count (G5 DSR N) and weekly budget. Required for every side calculation. Dev only; never "
+                       "refused for budget (warns).",
 }
 
 READ_ONLY = {"list_blocks", "get_data_summary", "find_similar", "power_check", "list_campaigns",

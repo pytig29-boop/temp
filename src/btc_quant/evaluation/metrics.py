@@ -171,6 +171,216 @@ def rolling_positive_fraction(daily, window: int = ROLLING_WINDOW_DAYS,
     return float((r > 0).mean()), int(r.size)
 
 
+# ============================================================== 노출·매수보유(B&H) 기준 (정보 전용, 관문 아님)
+# 노출(exposure) 두 가지
+#   exposure_time = 보유 분 합 / 구간 전체 분      (robustness.check_alpha 의 'exposure' 와 같은 정의)
+#   exposure_days = 포지션이 하루 중 한 번이라도 열려 있던 날의 비율  ("시장에 있었던 날")
+# 관문 변형(G4/G6 exposure_aware, 기본 OFF)은 exposure_days 를 쓴다: 몇 달 동안 '쉬는' 전략을 가려내는 데는
+# 하루 단위 참여 여부가 맞고, 짧게 자주 거래하는 전략(시간 노출은 작지만 매일 거래)을 '쉬었다'로 보지 않는다.
+NEUTRAL_EXPOSURE = 0.10            # 롤링 창이 '중립'(쉬는 창)인 exposure_days 상한 — gates.yaml exposure_aware.G4 기본값과 같음
+BH_REGIME_LOOKBACK_DAYS = 30       # 국면 = 직전 30일 BTC 수익 부호 (인과, robustness.regime_lookback_days 와 같음)
+BH_N_EPISODES = 3                  # B&H 최악 낙폭 구간 수
+# 캠페인 안에서 모든 스펙에 같은 값(벤치마크 자체) → 원장 runs 에는 쓰지 않고 manifest["benchmark"] 에 한 번
+BENCHMARK_CONSTANT_KEYS = ("bh_total_return", "bh_sharpe", "bh_max_dd", "bh_n_up_days", "bh_n_down_days",
+                           "bh_n_up_regime_days", "bh_n_down_regime_days",
+                           *(f"bh_dd{i}_{k}" for i in range(1, BH_N_EPISODES + 1)
+                             for k in ("depth", "start", "end")))
+
+
+def buy_hold_daily(close: pd.Series, days: pd.DatetimeIndex, first_price: float | None = None) -> pd.Series:
+    """1분봉 close → `days`(UTC 자정 라벨) 위의 BTC 매수보유 일간 수익 (비용 없음).
+
+    r_d = close(d 의 마지막 1분봉) / close(d−1 의 마지막 1분봉) − 1. 첫날 기준가 = first_price(기본: 첫날 첫 1분봉
+    close). 데이터가 없는 날은 0(가격 그대로)."""
+    c = pd.Series(close).dropna().astype(float)
+    if c.empty or len(days) == 0:
+        return pd.Series(0.0, index=days, dtype=float)
+    idx = pd.DatetimeIndex(days)
+    cidx = c.index
+    if isinstance(cidx, pd.DatetimeIndex) and idx.tz is not None and cidx.tz is None:
+        c.index = cidx.tz_localize(idx.tz)
+    elif isinstance(cidx, pd.DatetimeIndex) and idx.tz is None and cidx.tz is not None:
+        c.index = cidx.tz_convert(None)
+    c = c[(c.index >= idx[0]) & (c.index < idx[-1] + pd.Timedelta(days=1))]
+    if c.empty:
+        return pd.Series(0.0, index=days, dtype=float)
+    last = c.groupby(c.index.floor("D")).last().reindex(idx).ffill()
+    p0 = float(first_price) if first_price is not None else float(c.iloc[0])
+    last = last.fillna(p0)
+    prev = last.shift(1)
+    prev.iloc[0] = p0
+    return (last / prev - 1.0).astype(float)
+
+
+def days_in_market(trades: pd.DataFrame | None, days: pd.DatetimeIndex) -> np.ndarray:
+    """일자별 bool: 그날 포지션이 한 번이라도 열려 있었나 (진입일 ~ 청산일 포함)."""
+    n = len(days)
+    out = np.zeros(n, dtype=bool)
+    if trades is None or not len(trades) or n == 0 or not isinstance(days, pd.DatetimeIndex):
+        return out
+    idx = pd.DatetimeIndex(days)
+
+    def norm(x):
+        t = pd.DatetimeIndex(pd.to_datetime(x))
+        if idx.tz is not None and t.tz is None:
+            t = t.tz_localize(idx.tz)
+        elif idx.tz is None and t.tz is not None:
+            t = t.tz_convert(None)
+        return t.floor("D")
+    ref = idx.as_unit("ns").asi8                     # 단위(ns/us)가 다를 수 있다 → 같은 단위로 비교
+    e0 = np.searchsorted(ref, norm(trades["entry_time"]).as_unit("ns").asi8, side="left")
+    e1 = np.searchsorted(ref, norm(trades["exit_time"]).as_unit("ns").asi8, side="right")
+    diff = np.zeros(n + 1, dtype=np.int64)
+    np.add.at(diff, np.clip(e0, 0, n), 1)
+    np.add.at(diff, np.clip(e1, 0, n), -1)
+    return np.cumsum(diff[:n]) > 0
+
+
+def rolling_exposure(in_market: np.ndarray, window: int = ROLLING_WINDOW_DAYS,
+                     step: int = ROLLING_STEP_DAYS) -> np.ndarray:
+    """rolling_sharpe 와 같은 창(끝 정렬, step 일씩 과거로)의 exposure_days. 길이 < window 면 빈 배열."""
+    x = np.asarray(in_market, dtype=float)
+    n = x.size
+    ends = list(range(n, window - 1, -step))[::-1]
+    if not ends:
+        return np.zeros(0)
+    cs = np.concatenate([[0.0], np.cumsum(x)])
+    return np.array([(cs[e] - cs[e - window]) / window for e in ends], dtype=float)
+
+
+def rolling_exposure_aware(daily, in_market, neutral_exposure: float = NEUTRAL_EXPOSURE,
+                           window: int = ROLLING_WINDOW_DAYS, step: int = ROLLING_STEP_DAYS) -> dict:
+    """노출 인식 롤링 안정성 (G4 변형 입력): exposure_days < neutral_exposure 인 창 = '중립'(쉬는 창) →
+    양수 비율의 분모에서 제외. 반환 {rolling_n_windows, rolling_n_neutral, rolling_n_active,
+    rolling_frac_positive_active, rolling_neutral_exposure}. 활성 창이 없으면 frac = 0."""
+    r = rolling_sharpe(daily, window, step)
+    ex = rolling_exposure(in_market, window, step)
+    if r.size != ex.size:          # 길이가 다르면(일자 불일치) 판정 불가 → 모두 활성으로
+        ex = np.ones(r.size)
+    neutral = ex < float(neutral_exposure)
+    act = ~neutral
+    n_act = int(act.sum())
+    pos = r.to_numpy() > 0
+    return {"rolling_n_windows": int(r.size), "rolling_n_neutral": int(neutral.sum()), "rolling_n_active": n_act,
+            "rolling_frac_positive_active": float((pos & act).sum() / n_act) if n_act else 0.0,
+            "rolling_neutral_exposure": float(neutral_exposure)}
+
+
+def _compound(x: np.ndarray) -> float:
+    return float(np.prod(1.0 + x) - 1.0) if x.size else 0.0
+
+
+def drawdown_episodes(daily, n: int = BH_N_EPISODES) -> list[dict]:
+    """겹치지 않는 낙폭 구간(고점 → 저점) 깊이 순 상위 n 개: [{depth, peak_pos, trough_pos}] — 위치는
+    daily 의 행 번호. peak_pos 는 고점이 *확정된* 날(그 다음 날부터 하락에 포함), -1 = 시작 자본."""
+    x = np.asarray(pd.Series(daily).fillna(0.0).to_numpy(float))
+    if x.size == 0:
+        return []
+    eq = np.concatenate([[1.0], np.cumprod(1.0 + x)])
+    peak = np.maximum.accumulate(eq)
+    dd = 1.0 - eq / peak
+    eps = []
+    i, m = 0, eq.size
+    while i < m:
+        if dd[i] <= 1e-12:
+            i += 1
+            continue
+        j = i
+        while j < m and dd[j] > 1e-12:
+            j += 1
+        seg = dd[i:j]
+        t = i + int(np.argmax(seg))
+        eps.append({"depth": float(dd[t]), "peak_pos": i - 2, "trough_pos": t - 1})
+        i = j
+    eps.sort(key=lambda e: -e["depth"])
+    return eps[:n]
+
+
+def benchmark_metrics(daily: pd.Series, trades: pd.DataFrame | None, bh_daily: pd.Series | None,
+                      regime_lookback_days: int = BH_REGIME_LOOKBACK_DAYS, n_episodes: int = BH_N_EPISODES,
+                      neutral_exposure: float = NEUTRAL_EXPOSURE) -> dict:
+    """전략 일간 수익 vs 같은 기간 BTC 매수보유 (정보 전용 — 어떤 관문도 이것으로 판정하지 않는다;
+    단 G4/G6 exposure_aware 변형(기본 OFF)은 exposure_days·bh_total_return·bh_max_dd 를 읽는다).
+
+    키 (bh_daily 가 없으면 노출 관련 키만)
+      exposure_time, exposure_days, days_in_market, downside_dev(연율, 0 기준 하방편차),
+      rolling_n_neutral, rolling_n_active, rolling_frac_positive_active, rolling_neutral_exposure,
+      bh_total_return, bh_sharpe, bh_max_dd, excess_return_vs_bh, sharpe_minus_bh,
+      bh_matched_total_return(= exposure_time × BTC 일간 수익의 복리), excess_return_vs_matched_bh,
+      up_capture / down_capture (일간, BTC 수익 부호로 나눈 날들: 전략 평균 / BTC 평균),
+      up_regime_return / down_regime_return / up_regime_capture / down_regime_capture
+        (국면 = 직전 regime_lookback_days 일 BTC 수익 부호, 전일 종가까지 — 인과),
+      bh_dd{i}_depth / bh_dd{i}_start / bh_dd{i}_end / bh_dd{i}_strategy_return (B&H 최악 낙폭 구간 i 동안
+        전략 복리 수익), worst_bh_dd_strategy_return (가장 깊은 구간의 전략 수익)."""
+    s = pd.Series(daily).dropna().astype(float)
+    n = s.size
+    x = s.to_numpy()
+    out: dict = {}
+    idx = s.index if isinstance(s.index, pd.DatetimeIndex) else None
+    inm = days_in_market(trades, idx) if idx is not None else np.zeros(n, dtype=bool)
+    hold = float(trades["hold_min"].astype(float).sum()) if trades is not None and len(trades) else 0.0
+    out["exposure_time"] = float(min(1.0, hold / (n * 1440.0))) if n else 0.0
+    out["days_in_market"] = int(inm.sum())
+    out["exposure_days"] = float(inm.mean()) if n else 0.0
+    out["downside_dev"] = float(np.sqrt(np.mean(np.minimum(x, 0.0) ** 2)) * np.sqrt(ANN)) if n else 0.0
+    out.update({k: v for k, v in rolling_exposure_aware(s, inm, neutral_exposure).items()
+                if k != "rolling_n_windows"})
+    if bh_daily is None or n == 0:
+        return out
+    b = pd.Series(bh_daily).astype(float)
+    if idx is not None and isinstance(b.index, pd.DatetimeIndex):
+        b = b.reindex(idx).fillna(0.0)
+    else:
+        b = pd.Series(b.to_numpy()[:n], index=s.index)
+    y = b.to_numpy()
+    total = _compound(x)
+    bh_total = _compound(y)
+    bh_mdd, _ = max_drawdown(y)
+    out.update(bh_total_return=bh_total, bh_sharpe=sharpe(y), bh_max_dd=bh_mdd,
+               excess_return_vs_bh=total - bh_total, sharpe_minus_bh=sharpe(x) - sharpe(y))
+    matched = out["exposure_time"] * y
+    out["bh_matched_total_return"] = _compound(matched)
+    out["excess_return_vs_matched_bh"] = total - out["bh_matched_total_return"]
+
+    def capture(mask) -> float:
+        if not mask.any():
+            return float("nan")
+        mb = float(y[mask].mean())
+        return float(x[mask].mean() / mb) if mb != 0 else float("nan")
+    up, dn = y > 0, y < 0
+    out.update(up_capture=capture(up), down_capture=capture(dn), bh_n_up_days=int(up.sum()),
+               bh_n_down_days=int(dn.sum()))
+    # 인과 국면: 직전 L 일 BTC 누적 수익 부호 (d 의 국면은 d−1 까지의 수익)
+    L = int(regime_lookback_days)
+    ly = np.log1p(y)
+    cs = np.concatenate([[0.0], np.cumsum(ly)])
+    trail = np.full(n, np.nan)
+    if n > L:
+        trail[L:] = cs[L:n] - cs[0:n - L]
+    ru, rd = trail > 0, trail <= 0
+    rd &= np.isfinite(trail)
+    out.update(up_regime_return=_compound(x[ru]), down_regime_return=_compound(x[rd]),
+               up_regime_capture=capture(ru), down_regime_capture=capture(rd),
+               bh_n_up_regime_days=int(ru.sum()), bh_n_down_regime_days=int(rd.sum()))
+    eps = drawdown_episodes(y, n_episodes)
+    for i in range(1, n_episodes + 1):
+        if i <= len(eps):
+            e = eps[i - 1]
+            a, z = max(e["peak_pos"] + 1, 0), e["trough_pos"]
+            lab = (lambda p: str(s.index[p].date()) if idx is not None else str(p))
+            out[f"bh_dd{i}_depth"] = e["depth"]
+            out[f"bh_dd{i}_start"] = lab(a)
+            out[f"bh_dd{i}_end"] = lab(z)
+            out[f"bh_dd{i}_strategy_return"] = _compound(x[a:z + 1])
+        else:
+            out[f"bh_dd{i}_depth"] = float("nan")
+            out[f"bh_dd{i}_start"] = None
+            out[f"bh_dd{i}_end"] = None
+            out[f"bh_dd{i}_strategy_return"] = float("nan")
+    out["worst_bh_dd_strategy_return"] = out["bh_dd1_strategy_return"]
+    return out
+
+
 def recent(daily: pd.Series, days: int = RECENT_DAYS) -> pd.Series:
     """마지막 `days` 일 (DatetimeIndex 면 달력 기준 (end-days, end], 아니면 마지막 days 개)."""
     s = pd.Series(daily).dropna()
@@ -179,13 +389,17 @@ def recent(daily: pd.Series, days: int = RECENT_DAYS) -> pd.Series:
     return s.iloc[-days:]
 
 
-def summarize(result, half_life_days: float = 365) -> dict:
+def summarize(result, half_life_days: float = 365, benchmark: pd.Series | None = None,
+              neutral_exposure: float = NEUTRAL_EXPOSURE) -> dict:
     """BacktestResult → 평탄 dict (관문 입력). 낙폭은 양수 크기.
 
     키: n_days, sharpe, sharpe_w, mean_w, std_w, n_eff, mean_daily, std_daily, skew,
     kurtosis(정규=3), total_return, cagr, max_dd, max_dd_days, n_trades, expectancy, win_rate,
     profit_factor, avg_hold_min, trades_per_day, recent_sharpe, recent_n_trades,
-    rolling_frac_positive, rolling_n_windows, sharpe_year_YYYY.
+    rolling_frac_positive, rolling_n_windows, sharpe_year_YYYY
+    + 노출·B&H 기준 (`benchmark_metrics`, 정보 전용): exposure_time, exposure_days, days_in_market, downside_dev,
+    rolling_n_neutral/active, rolling_frac_positive_active, rolling_neutral_exposure, 그리고 benchmark(같은
+    일자의 BTC 매수보유 일간 수익, `buy_hold_daily`)가 주어지면 bh_* · capture · 낙폭 구간 키.
     """
     s = pd.Series(result.daily_returns).dropna().astype(float)
     x = s.to_numpy()
@@ -231,6 +445,7 @@ def summarize(result, half_life_days: float = 365) -> dict:
     else:
         out["recent_n_trades"] = 0
     out["rolling_frac_positive"], out["rolling_n_windows"] = rolling_positive_fraction(s)
+    out.update(benchmark_metrics(s, trades, benchmark, neutral_exposure=neutral_exposure))
     if isinstance(s.index, pd.DatetimeIndex) and n:
         for y, row in yearly_table(s, trades).iterrows():
             out[f"sharpe_year_{y}"] = float(row["sharpe"])

@@ -119,6 +119,9 @@ class Targets:
     max_fpr: float = 0.05
     min_power: float = 0.70
     power_sharpe: float = 2.0
+    # study="regime" 전용 (국면 전환 합성 시장, calibration_study.run_regime_market):
+    max_fpr_bearish_val: float | None = None   # 하락 Val 귀무 시장에서의 오탐률 상한 (None = 검사 안 함)
+    min_power_gain: float | None = None        # 현재 값 대비 검정력 증가 하한 (None = 검사 안 함)
 
 
 @dataclass
@@ -193,6 +196,77 @@ def check_anti_goalpost(key: str, motivation: str, references: list[str] | tuple
 
 
 # ============================================================== 실행
+def _vname(v) -> str:
+    return f"value={v!r}"
+
+
+def build_regime_tasks(dotted: str, values: list, mode: str, power_sharpe: float, n_null_markets: int,
+                       n_planted_markets: int, k_for: dict | None = None, seed0: int | None = None,
+                       n_null_runs: int | None = None, progress: Callable = print) -> tuple[list[dict], dict]:
+    """study="regime": 국면 전환 합성 시장(calibration_study.regime_full_config 와 **같은 seed 순서·같은 시장**).
+    시장 하나에 캠페인 1회, 후보 값마다 *복사한 원장*에서 파이프라인 1회(공통 난수). 귀무 = 앞에서부터 n_null_markets 개
+    (Val 국면 seed % 3 순환 → 1/3 하락 Val), 심은 시장 = 국면 필터 스펙 S*_f 를 심은 종류(FILTERED_KINDS)마다 앞에서부터
+    n_planted_markets 개. 무필터 S* 시장(regime_cond)은 노출 인식 변형과 무관(늘 시장에 있음)해 제외한다."""
+    from btc_quant.research import calibration_study as CS
+    cfg = CS.regime_quick_config() if mode == "quick" else CS.regime_full_config()
+    cfg.strength = float(power_sharpe)
+    if n_null_runs is not None:
+        cfg.n_null, cfg.override_null_runs = int(n_null_runs), True
+    if seed0 is not None:
+        cfg.seed0 = int(seed0)
+    k_source = "explicit (stored regime-study pilot)"
+    if k_for is None:
+        progress(f"[criteria] regime pilot for Sharpe {power_sharpe} ({len(cfg.pilot_ks)} k × {cfg.pilot_seeds} seeds)")
+        k_for = CS.pilot_regime_edge_map(cfg)["k_for"]
+        k_source = "regime pilot (calibration_study.pilot_regime_edge_map, current cost registry)"
+    names = [_vname(v) for v in values]
+    tasks, used = [], {}
+    for t in CS.build_regime_tasks(cfg, k_for):
+        kind = t["kind"]
+        cap = n_null_markets if kind == "null" else n_planted_markets if kind in CS.FILTERED_KINDS else 0
+        if used.get(kind, 0) >= cap:
+            continue
+        used[kind] = used.get(kind, 0) + 1
+        t["variants"] = names
+        t["variant_overrides"] = {_vname(v): {dotted: v} for v in values}
+        tasks.append(t)
+    meta = {"study": "regime", "layout": asdict(cfg.layout), "n_null_runs": cfg.n_null, "top_k": cfg.top_k,
+            "k_for": k_for, "k_source": k_source, "grid": cfg.grid, "seed0": cfg.seed0, "markets": used,
+            "regime_design": {"drift": CS.REGIME_DRIFT, "days": CS.REGIME_DAYS, "edge": CS.REGIME_EDGE,
+                              "filter_span_h": CS.REGIME_FILTER_SPAN}}
+    return tasks, meta
+
+
+def regime_runner_from_results(runs: list[dict], value_to_variant: dict) -> Callable[[list[dict]], list[dict]]:
+    """이미 실행한 국면 연구(calibration_study --regime 의 json "runs", 같은 코드·같은 seed)의 레코드를 runner 로.
+    value_to_variant = {후보 값: 연구의 변형 이름} (예: {False: "current", True: "variant"}). 연구의 변형 설정이
+    {dotted: 값} 과 같아야 한다 — 호출자가 보장(REGIME_VARIANTS). 없는 (seed, 변형) 이 있으면 KeyError."""
+    idx = {(int(r["seed"]), r["variant"]): r for r in runs}
+
+    def run(tasks: list[dict]) -> list[dict]:
+        out = []
+        for t in tasks:
+            for v, var in value_to_variant.items():
+                r = idx[(int(t["seed"]), var)]
+                if r["kind"] != t["kind"]:
+                    raise KeyError(f"seed {t['seed']}: study kind {r['kind']} != task kind {t['kind']}")
+                out.append({**r, "variant": _vname(v)})
+        return regime_runs_to_value_runs(out, list(value_to_variant))
+    return run
+
+
+def regime_runs_to_value_runs(recs: list[dict], values: list) -> list[dict]:
+    """run_regime_market 레코드(variant = _vname(값)) → summarize 가 읽는 {value, kind(null|planted), …}."""
+    by = {_vname(v): v for v in values}
+    out = []
+    for r in recs:
+        if r.get("variant") not in by:
+            continue
+        out.append({**r, "value": by[r["variant"]], "kind": "null" if r["kind"] == "null" else "planted",
+                    "market_kind": r["kind"]})
+    return out
+
+
 def build_tasks(dotted: str, values: list, mode: str, power_sharpe: float, n_null_markets: int,
                 n_planted_markets: int, k_for: dict | None = None, seed0: int = 9000,
                 n_null_runs: int | None = None, grid: str = "g12", derive_k: bool | Callable = False,
@@ -236,8 +310,17 @@ def default_runner(tasks: list[dict], jobs: int = 1, progress: Callable = print)
     from concurrent.futures import ProcessPoolExecutor
     from multiprocessing import get_context
 
-    from btc_quant.research.calibration_study import run_market
+    from btc_quant.research.calibration_study import run_market, run_regime_market
     out = []
+    if tasks and tasks[0].get("regime"):           # study="regime": 시장마다 값별 레코드 목록
+        values = list({repr(v): v for t in tasks for v in [o for ov in t["variant_overrides"].values()
+                                                          for o in ov.values()]}.values())
+        if jobs > 1:
+            with ProcessPoolExecutor(max_workers=jobs, mp_context=get_context("spawn")) as pool:
+                recs = [r for rs in pool.map(run_regime_market, tasks) for r in rs]
+        else:
+            recs = [r for t in tasks for r in run_regime_market(t)]
+        return regime_runs_to_value_runs(recs, values)
     if jobs > 1:
         with ProcessPoolExecutor(max_workers=jobs, mp_context=get_context("spawn")) as pool:
             for t, r in zip(tasks, pool.map(run_market, tasks)):
@@ -260,16 +343,33 @@ def summarize(runs: list[dict], values: list) -> list[dict]:
         pla = [r for r in runs if r["value"] == v and r["kind"] == "planted"]
         fp = sum(bool(r["any_validated"]) for r in nul)
         pw = sum(bool(r["star_validated"]) for r in pla)
+        bear = [r for r in nul if r.get("val_regime") == "bear"]
+        fpb = sum(bool(r["any_validated"]) for r in bear)
         rows.append({"value": v, "n_null": len(nul), "fpr": fp / len(nul) if nul else float("nan"),
+                     "n_null_bear_val": len(bear), "fpr_bear_val": fpb / len(bear) if bear else float("nan"),
+                     "fpr_bear_val_ci": wilson(fpb, len(bear)),
                      "fpr_ci": wilson(fp, len(nul)), "n_planted": len(pla),
                      "power": pw / len(pla) if pla else float("nan"), "power_ci": wilson(pw, len(pla)),
                      "dev_survival": (sum(bool(r["star_dev_passed"]) for r in pla) / len(pla)) if pla else float("nan")})
     return rows
 
 
+def meets_targets(r: dict, targets: Targets, cur_row: dict | None = None) -> bool:
+    if not (r["n_null"] and r["n_planted"] and r["fpr"] <= targets.max_fpr and r["power"] >= targets.min_power):
+        return False
+    if targets.max_fpr_bearish_val is not None:
+        fb = r.get("fpr_bear_val", float("nan"))
+        if not (r.get("n_null_bear_val") and fb <= targets.max_fpr_bearish_val):
+            return False
+    if targets.min_power_gain is not None and cur_row is not None and r is not cur_row:
+        if not r["power"] - cur_row["power"] >= targets.min_power_gain:
+            return False
+    return True
+
+
 def recommend(rows: list[dict], targets: Targets, current: Any) -> Any:
-    ok = [r for r in rows if r["n_null"] and r["n_planted"] and r["fpr"] <= targets.max_fpr
-          and r["power"] >= targets.min_power]
+    cur_row = next((r for r in rows if r["value"] == current), None)
+    ok = [r for r in rows if meets_targets(r, targets, cur_row)]
     if not ok:
         return None
 
@@ -286,7 +386,8 @@ def propose_criterion(key: str, candidates: list, targets: Targets, motivation: 
                       n_planted_markets: int = 10, jobs: int = 1, root=None,
                       runner: Callable[[list[dict]], list[dict]] | None = None, k_for: dict | None = None,
                       n_null_runs: int | None = None, allow_smoke: bool = False,
-                      progress: Callable = print, derive_k: bool | Callable = True) -> CriterionStudy:
+                      progress: Callable = print, derive_k: bool | Callable = True,
+                      study: str = "standard", seed0: int | None = None) -> CriterionStudy:
     """derive_k: 저장된 k 의 보정 조건(비용·꼬리 정리)이 현재와 다르면 현재 비용 레지스트리로 k 를 다시 유도
     (True = derive_full_k, 함수 = 그 함수, False = StaleCalibrationError). k_for 를 주면 그대로 쓴다."""
     root = repo_root(root)
@@ -297,15 +398,29 @@ def propose_criterion(key: str, candidates: list, targets: Targets, motivation: 
     current = reg.resolve(p)
     values = list(dict.fromkeys([current, *candidates]))
     st = CriterionStudy(key, dotted, current, values, targets, mode)
-    tasks, meta = build_tasks(dotted, values, mode, targets.power_sharpe, n_null_markets, n_planted_markets,
-                              k_for=k_for, n_null_runs=n_null_runs, derive_k=derive_k, jobs=jobs,
-                              progress=progress)
-    progress(f"[criteria] {key}: {len(values)} values × {n_null_markets + n_planted_markets} markets "
-             f"= {len(tasks)} runs ({mode})")
+    if study == "regime":
+        tasks, meta = build_regime_tasks(dotted, values, mode, targets.power_sharpe, n_null_markets,
+                                         n_planted_markets, k_for=k_for, seed0=seed0, n_null_runs=n_null_runs,
+                                         progress=progress)
+    elif study == "standard":
+        tasks, meta = build_tasks(dotted, values, mode, targets.power_sharpe, n_null_markets, n_planted_markets,
+                                  k_for=k_for, n_null_runs=n_null_runs, derive_k=derive_k, jobs=jobs,
+                                  progress=progress)
+    else:
+        raise ValueError("study must be 'standard' or 'regime'")
+    if study == "regime":
+        progress(f"[criteria] {key}: {len(values)} values × {len(tasks)} regime markets "
+                 f"= {len(values) * len(tasks)} pipeline runs ({mode}, study regime)")
+    else:
+        progress(f"[criteria] {key}: {len(values)} values × {n_null_markets + n_planted_markets} markets "
+                 f"= {len(tasks)} runs ({mode})")
+    meta["runner"] = ("default (runs the synthetic markets now)" if runner is None else
+                      "supplied runner (e.g. stored results of the same synthetic study, same seeds)")
     runs = (runner or (lambda t: default_runner(t, jobs, progress)))(tasks)
     st.rows = summarize(runs, values)
     st.recommended = recommend(st.rows, targets, current)
-    rep_rel = REPORTS_REL / f"criteria_{re.sub(r'[^A-Za-z0-9]+', '_', key)}_{today().replace('-', '')}.md"
+    rep_rel = REPORTS_REL / (f"criteria_{re.sub(r'[^A-Za-z0-9]+', '_', key)}_{today().replace('-', '')}"
+                             + ("_regime" if study == "regime" else "") + ".md")
     if st.recommended is None:
         st.status = "no_candidate_meets_targets"
     elif st.recommended == current:
@@ -336,17 +451,28 @@ def report_markdown(st: CriterionStudy, meta: dict) -> str:
          f"생성 {st.created} · 모드 `{st.mode}` · 코드 `src/btc_quant/params/criteria.py` (calibration_study 시장 재사용)", "",
          f"- 현재 값: `{st.current}` (config/gates.yaml `{st.dotted}`)",
          f"- 목표: 오탐률 ≤ {t.max_fpr:.0%} (귀무 시장에서 validated 후보 ≥ 1), "
-         f"검정력 ≥ {t.min_power:.0%} (참 연 Sharpe {t.power_sharpe:g} 의 심은 스펙 S* validated)",
+         f"검정력 ≥ {t.min_power:.0%} (참 연 Sharpe {t.power_sharpe:g} 의 심은 스펙 S* validated)"
+         + (f", 하락 Val 귀무 오탐률 ≤ {t.max_fpr_bearish_val:.0%}" if t.max_fpr_bearish_val is not None else "")
+         + (f", 현재 값 대비 검정력 +{t.min_power_gain:.0%}p 이상" if t.min_power_gain is not None else ""),
+         f"- 합성 연구: `{meta.get('study', 'standard')}`"
+         + (" — 국면 전환 시장(상승·하락·횡보 수개월씩, Val 국면 seed%3 순환), 심은 시장 = 국면 필터 엣지 S*_f "
+            f"(설계 {meta.get('regime_design')})" if meta.get("study") == "regime" else ""),
          f"- 합성 설정: {meta.get('layout')}, 격자 {meta.get('grid')}, G2 귀무 {meta.get('n_null_runs')}회, "
          f"top_k {meta.get('top_k')}, k {meta.get('k_for')} ({meta.get('k_source', 'quick pilot')}; 조건 "
          f"{meta.get('k_conditions', '-')}). 후보 값마다 같은 seed(공통 난수).",
+         f"- 실행: {meta.get('runner', 'default')}; 시장 수 {meta.get('markets', '-')}",
          "- 실제 캠페인·후보 결과는 쓰지 않았다(anti-goalpost 검사 통과). 승인 시 **다음 캠페인부터** 적용.", "",
-         "| 값 | 귀무 시장 | 오탐률 [95%] | 심은 시장 | 검정력 [95%] | S* Dev 생존 | 목표 충족 |",
-         "|---|---|---|---|---|---|---|"]
+         "| 값 | 귀무 시장 | 오탐률 [95%] | 하락 Val 귀무 | 하락 Val 오탐률 [95%] | 심은 시장 | 검정력 [95%] | "
+         "S* Dev 생존 | 목표 충족 |",
+         "|---|---|---|---|---|---|---|---|---|"]
+    cur_row = next((r for r in st.rows if r["value"] == st.current), None)
     for r in st.rows:
-        ok = r["fpr"] <= t.max_fpr and r["power"] >= t.min_power
+        ok = meets_targets(r, t, cur_row)
+        fb = r.get("fpr_bear_val", float("nan"))
+        fbci = r.get("fpr_bear_val_ci") or (float("nan"), float("nan"))
         L.append(f"| `{r['value']}`{' (현재)' if r['value'] == st.current else ''} | {r['n_null']} | "
-                 f"{r['fpr']:.0%} [{r['fpr_ci'][0]:.0%}–{r['fpr_ci'][1]:.0%}] | {r['n_planted']} | "
+                 f"{r['fpr']:.0%} [{r['fpr_ci'][0]:.0%}–{r['fpr_ci'][1]:.0%}] | {r.get('n_null_bear_val', 0)} | "
+                 + (f"{fb:.0%} [{fbci[0]:.0%}–{fbci[1]:.0%}]" if fb == fb else "–") + f" | {r['n_planted']} | "
                  f"{r['power']:.0%} [{r['power_ci'][0]:.0%}–{r['power_ci'][1]:.0%}] | {r['dev_survival']:.0%} | "
                  f"{'예' if ok else '아니오'} |")
     L += ["", f"결과: **{st.status}**" + (f" — 추천 값 `{st.recommended}`" if st.recommended is not None else ""), ""]

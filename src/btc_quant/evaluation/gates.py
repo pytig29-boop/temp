@@ -65,16 +65,71 @@ def check_g3(selected_sharpe: float, neighbor_sharpes, cfg: dict | None = None
                 "required": need, "n_neighbors": int(nb.size)}
 
 
+def exposure_aware_cfg(cfg: dict | None = None) -> dict:
+    """gates.yaml exposure_aware (없으면 꺼짐). PLAN D14 초안 — 기본 OFF."""
+    c = (cfg or load_gate_config()).get("exposure_aware") or {}
+    return c
+
+
+def exposure_aware_active(cfg: dict | None, gate: str) -> bool:
+    c = exposure_aware_cfg(cfg)
+    return bool(c.get("enabled")) and bool((c.get(gate) or {}).get("enabled", True))
+
+
+def g4_exposure_variant(metrics: dict, cfg: dict | None = None) -> dict:
+    """G4 노출 인식 변형 판정(정보·shadow 겸용). 롤링 창 중 exposure_days < neutral_max_exposure 인 '중립' 창을
+    분모에서 빼고 양수 비율 ≥ min_rolling_positive_frac. 조건: 비중립 창 ≥ min_active_windows, Dev 전체
+    exposure_days ≥ min_dev_exposure (거의 거래하지 않는 전략이 중립 창으로 G4 를 피하지 못하게). 기존 규칙의
+    상위 집합: rolling_ok = 기존 rolling 통과 OR 변형 통과. 최근 12개월 Sharpe > 0 은 그대로."""
+    c = _cfg(cfg, "G4")
+    ea = exposure_aware_cfg(cfg)
+    e4 = ea.get("G4") or {}
+    thr = float(e4.get("neutral_max_exposure", 0.10))
+    base_roll = (float(metrics["rolling_frac_positive"]) >= c["min_rolling_positive_frac"]
+                 and int(metrics.get("rolling_n_windows", 0)) > 0)
+    ok_recent = float(metrics["recent_sharpe"]) > c["min_recent_sharpe"]
+    d: dict = {"neutral_max_exposure": thr, "min_active_windows": int(e4.get("min_active_windows", 0)),
+               "min_dev_exposure": float(ea.get("min_dev_exposure", 0.0))}
+    have = all(k in metrics and metrics[k] is not None
+               for k in ("rolling_n_active", "rolling_frac_positive_active", "exposure_days"))
+    m_thr = metrics.get("rolling_neutral_exposure")
+    if not have or m_thr is None or abs(float(m_thr) - thr) > 1e-12:
+        d.update(applicable=False, reason="exposure metrics missing or computed at another neutral threshold",
+                 passed=bool(base_roll and ok_recent))
+        return d
+    n_act, n_neu = int(metrics["rolling_n_active"]), int(metrics.get("rolling_n_neutral", 0))
+    fr = float(metrics["rolling_frac_positive_active"])
+    ex = float(metrics["exposure_days"])
+    d.update(applicable=True, rolling_n_active=n_act, rolling_n_neutral=n_neu, rolling_frac_positive_active=fr,
+             exposure_days=ex, ok_active_windows=n_act >= d["min_active_windows"],
+             ok_dev_exposure=ex >= d["min_dev_exposure"], ok_rolling_active=fr >= c["min_rolling_positive_frac"])
+    var_roll = d["ok_active_windows"] and d["ok_dev_exposure"] and d["ok_rolling_active"] and n_act > 0
+    d["ok_rolling"] = bool(base_roll or var_roll)
+    d["via"] = "base" if base_roll else ("neutral_windows" if var_roll else None)
+    d["passed"] = bool(d["ok_rolling"] and ok_recent)
+    return d
+
+
 def check_g4(metrics: dict, cfg: dict | None = None) -> tuple[bool, dict]:
     """G4 안정: 6개월 롤링 창 ≥ 60% 양수, 최근 12개월 Sharpe > 0.
-    ("고정 파라미터 그대로" 는 절차 요건 — 호출 측이 동일 스펙임을 보장.)"""
+    ("고정 파라미터 그대로" 는 절차 요건 — 호출 측이 동일 스펙임을 보장.)
+    exposure_aware.enabled(기본 false) 이면 `g4_exposure_variant` 로 판정한다. 꺼져 있으면 변형 결과는
+    details["exposure_aware"] 에 정보(shadow)로만 남는다."""
     c = _cfg(cfg, "G4")
     fr, rs = float(metrics["rolling_frac_positive"]), float(metrics["recent_sharpe"])
     d = {"rolling_frac_positive": fr, "rolling_n_windows": int(metrics.get("rolling_n_windows", 0)),
          "recent_sharpe": rs, "ok_rolling": fr >= c["min_rolling_positive_frac"],
          "ok_recent": rs > c["min_recent_sharpe"]}
     d["ok_rolling"] = d["ok_rolling"] and d["rolling_n_windows"] > 0
-    return d["ok_rolling"] and d["ok_recent"], d
+    ok = d["ok_rolling"] and d["ok_recent"]
+    if "exposure_aware" in (cfg or load_gate_config()) and "rolling_frac_positive_active" in metrics:
+        v = g4_exposure_variant(metrics, cfg)
+        active = exposure_aware_active(cfg, "G4")
+        d["exposure_aware"] = {"enabled": active, **v}
+        if active:
+            d["base_passed"] = bool(ok)
+            ok = bool(v["passed"])
+    return ok, d
 
 
 def check_g5(dsr: float, pbo: float, cfg: dict | None = None) -> tuple[bool, dict]:
@@ -85,15 +140,61 @@ def check_g5(dsr: float, pbo: float, cfg: dict | None = None) -> tuple[bool, dic
     return d["ok_dsr"] and d["ok_pbo"], d
 
 
+def g6_flat_variant(val_metrics: dict, stress: dict, mc_mdd95: float, cfg: dict | None = None,
+                    dev_metrics: dict | None = None) -> dict:
+    """G6 '쉬어서 하락장을 피함' 경로(정보·shadow 겸용, 규칙 b 의 dict stress 전용).
+
+    통과(path='flat'): Val exposure_days ≤ flat_max_exposure, 같은 기간 B&H 총수익 < 0(flat_require_bh_down),
+    Val 총수익 ≥ flat_min_return, stress 총수익 ≥ flat_min_stress_return, Val MDD ≤ flat_max_mdd_vs_bh × B&H MDD,
+    기존 MDD ≤ max_mdd 와 MC MDD95 ≤ max_mc_mdd95 그대로, Dev exposure_days ≥ min_dev_exposure, 그리고
+    Val 거래 ≥ flat_min_trades. 거래 수만 모자라면 'insufficient_evidence'(통과 아님). Sharpe>0·stress Sharpe>0
+    (와 파이프라인의 Val Holm)은 '평균 > 0' 증거를 요구하므로 이 경로에서는 위 '손실 없음' 조건이 대신한다 —
+    양(+)의 증거는 Dev(G2·G5)와 잠금(G7)·전진(G8)이 맡는다."""
+    c = _cfg(cfg, "G6")
+    ea = exposure_aware_cfg(cfg)
+    e6 = ea.get("G6") or {}
+    need = ("exposure_days", "total_return", "max_dd", "bh_total_return", "bh_max_dd", "n_trades")
+    if not isinstance(stress, dict) or any(val_metrics.get(k) is None for k in need):
+        return {"applicable": False, "reason": "Val exposure/B&H metrics missing (or legacy stress rule)",
+                "passed": False, "status": "not_applicable"}
+    ex = float(val_metrics["exposure_days"])
+    ret = float(val_metrics["total_return"])
+    sret = float(stress.get("total_return", float("nan")))
+    mdd = abs(float(val_metrics["max_dd"]))
+    bh_ret, bh_mdd = float(val_metrics["bh_total_return"]), abs(float(val_metrics["bh_max_dd"]))
+    ntr = int(val_metrics["n_trades"])
+    dev_ex = None if not dev_metrics or dev_metrics.get("exposure_days") is None else float(dev_metrics["exposure_days"])
+    d = {"applicable": True, "exposure_days": ex, "total_return": ret, "stress_total_return": sret, "max_dd": mdd,
+         "bh_total_return": bh_ret, "bh_max_dd": bh_mdd, "n_trades": ntr, "dev_exposure_days": dev_ex,
+         "flat_max_exposure": float(e6.get("flat_max_exposure", 0.25)),
+         "ok_flat": ex <= float(e6.get("flat_max_exposure", 0.25)),
+         "ok_bh_down": (bh_ret < 0) if bool(e6.get("flat_require_bh_down", True)) else True,
+         "ok_return": ret >= float(e6.get("flat_min_return", -0.02)),
+         "ok_stress_return": sret >= float(e6.get("flat_min_stress_return", -0.04)),
+         "ok_mdd_vs_bh": mdd <= float(e6.get("flat_max_mdd_vs_bh", 0.5)) * bh_mdd,
+         "ok_mdd": mdd <= c["max_mdd"], "ok_mc_mdd": abs(float(mc_mdd95)) <= c["max_mc_mdd95"],
+         "ok_dev_exposure": dev_ex is not None and dev_ex >= float(ea.get("min_dev_exposure", 0.0)),
+         "ok_min_trades": ntr >= int(e6.get("flat_min_trades", 10))}
+    no_harm = all(d[k] for k in ("ok_flat", "ok_bh_down", "ok_return", "ok_stress_return", "ok_mdd_vs_bh",
+                                 "ok_mdd", "ok_mc_mdd", "ok_dev_exposure"))
+    d["passed"] = bool(no_harm and d["ok_min_trades"])
+    d["status"] = ("flat_pass" if d["passed"] else "insufficient_evidence" if no_harm else
+                   "not_flat" if not d["ok_flat"] else "fail")
+    return d
+
+
 def check_g6(val_metrics: dict, stress, mc_mdd95: float,
-             cfg: dict | None = None) -> tuple[bool, dict]:
+             cfg: dict | None = None, dev_metrics: dict | None = None) -> tuple[bool, dict]:
     """G6 검증(Val) — 2026-11-09 사용자 결정 (b):
     - Sharpe(primary=conservative 비용) > min_sharpe
     - 최대낙폭은 **primary 비용** 기준: val_metrics["max_dd"] ≤ max_mdd
     - stress 비용에서는 Sharpe > min_stress_sharpe 만 요구 (낙폭 크기는 판정하지 않음)
     - 거래당 MC MDD95 ≤ max_mc_mdd95
     `stress` 는 stress 비용 summarize dict(권장). 하위 호환: float 이면 구 규칙(stress MDD ≤ max_stress_mdd)으로 판정.
-    낙폭 값은 크기(부호 무관, abs)."""
+    낙폭 값은 크기(부호 무관, abs).
+    exposure_aware(기본 OFF): 켜져 있으면 기존 조건 OR `g6_flat_variant`(path='flat'). 꺼져 있으면 변형 결과는
+    details["exposure_aware"] 에 정보로만. details["path"] = 'sharpe' | 'flat' | None. dev_metrics = 같은 스펙의
+    Dev summarize (변형의 Dev 노출 조건)."""
     c = _cfg(cfg, "G6")
     sr = float(val_metrics["sharpe"])
     mc = abs(float(mc_mdd95))
@@ -109,7 +210,18 @@ def check_g6(val_metrics: dict, stress, mc_mdd95: float,
         smdd = abs(float(stress))
         d.update(stress_mdd=smdd, ok_stress_mdd=smdd <= c.get("max_stress_mdd", c["max_mdd"]), rule="legacy")
         ok = d["ok_sharpe"] and d["ok_stress_mdd"] and d["ok_mc_mdd"]
-    return ok, d
+    d["path"] = "sharpe" if ok else None
+    if "exposure_aware" in (cfg or load_gate_config()) and isinstance(stress, dict):
+        v = g6_flat_variant(val_metrics, stress, mc_mdd95, cfg, dev_metrics)
+        active = exposure_aware_active(cfg, "G6")
+        d["exposure_aware"] = {"enabled": active, **v}
+        if active and not ok and v["passed"]:
+            d["base_passed"] = False
+            ok = True
+            d["path"] = "flat"
+        elif active:
+            d["base_passed"] = bool(ok)
+    return bool(ok), d
 
 
 def check_g7(p_value: float, prior_p_values=(), cfg: dict | None = None) -> tuple[bool, dict]:

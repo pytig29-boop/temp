@@ -93,11 +93,12 @@ Tool names in Claude Code are `mcp__btcq__<tool>`. Every result is JSON `{"ok": 
 | list blocks | `list_blocks` | `REGISTRY.all(kind, include_experimental=True)`, docs/BLOCKS.md |
 | ① hypothesis | `register_hypothesis` (standalone pre-registration); screens/campaigns register their template hypothesis themselves | – (ledger writes via Bash are denied in research mode) |
 | derived hypothesis | `lessons_derive_hypothesis` (with `template=` → applied + checked) | `check_template` (read-only) |
-| ② screen | `screen_signals` (weekly budget enforced) | – (denied in research mode); `signal_study.study_signal` for a side calculation (no ledger) |
+| ② screen | `screen_signals` (weekly budget enforced) | – (denied in research mode); `signal_study.study_signal` for a side calculation — **then `log_exploration` (MCP) with the number of configs you looked at, before using the result** |
 | ③ power | `power_check` | `power.budget_report`, `research.power` CLI |
 | ④ campaign + gates + robustness + base report | `create_and_run_campaign` (screen-gated, budget, strict power, repeat check enforced) | – (denied in research mode; humans: `research.cli run <template>`) |
 | results | `get_campaign_report`, `list_campaigns` (G6 = outcome code only) | `research/campaigns/<id>/pipeline_public.json`, `research/reports/campaign_<id>.md` (agent-safe) |
-| extra robustness on a spec | – | `robustness.robustness_for_spec(spec)` |
+| extra robustness on a spec | – | `robustness.robustness_for_spec(spec)` → then `log_exploration` (1 config per spec) |
+| **any side calculation** (per-year / per-regime event study, hand-run variants) | `log_exploration(family, description, configs_evaluated)` — **required, before using the result**; Dev only; counts as trials (G5 N, weekly budget) | – (direct Python call denied in research mode) |
 | ledger query | `query_ledger` (whitelisted; `table="trials"` for counts) | `trials_count(family=…)` (the runs / val_evaluations / lockbox / transitions jsonl files are human-only) |
 | lessons | `lessons_add_interpretation`, `lessons_mark` | `LessonBook().postmortem/render_markdown` |
 | lockbox | `request_lockbox_eval` (files a request; never opens) | a **human** runs `admin_cli approve-lockbox` |
@@ -110,6 +111,8 @@ Tool names in Claude Code are `mcp__btcq__<tool>`. Every result is JSON `{"ok": 
 ## Budget: family trials before/after · weekly remaining · power: required Sharpe at N_eff
 ## Signal screen: <screen cmp> passed configs, info horizon, ATR-unit MFE/MAE
 ## Funnel G0 → … → G5 → ablation → G6 (pass/fail only)
+## Buy & hold reference (Dev): exposure, strategy vs B&H return/Sharpe/MDD, up/down capture, worst B&H drawdowns
+## Exploratory trials logged (log_exploration ids, configs counted)
 ## Robustness (Dev) table
 ## Lessons: fact id, taxonomy, interpretations (unverified), marks, post-mortems
 ## Requests (lockbox / human) and next hypothesis (derive_hypothesis, same family)
