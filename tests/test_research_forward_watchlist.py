@@ -311,7 +311,7 @@ def test_watchlist_universe_half_sizing_mtm(env):
     assert r["status"] == "ok" and r["state"] == "watchlist" and r["observation_only"] is True
     assert r["universe"] == UNI and set(r["per_asset"]) == set(UNI)
     assert r["accounting"] == "mtm" and r["sizing"] == {"entry_fraction": 0.5}
-    lb, wmin = F.rest_warmup_window(spec)
+    _, wmin = F.rest_warmup_window(spec)
     # 자산마다 메모리 내 REST 워밍업 (끝 = Forward 시작), Forward 수집은 Forward 시작 이후만
     warm = {(ex, sym) for ex, sym, st, en in calls if st < FWD_START}
     assert warm == {("coinone", sym) for sym in UNI}

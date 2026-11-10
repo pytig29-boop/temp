@@ -48,7 +48,7 @@ def _ema_lookback(p: dict) -> int:
     """마지막 값을 전체 이력과 같게 재현하는 봉 수: EMA 초기값 가중치 (1−α)^n ≤ EMA_TOL, + 워밍업 span."""
     span = float(p.get("span", 180))
     a = 2.0 / (span + 1.0)
-    return int(math.ceil(math.log(EMA_TOL) / math.log(1.0 - a))) + int(span) + 2
+    return math.ceil(math.log(EMA_TOL) / math.log(1.0 - a)) + int(span) + 2
 
 
 def _ratio(bars: pd.DataFrame, span: int) -> pd.Series:

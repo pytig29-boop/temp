@@ -1,0 +1,70 @@
+# PREP ONLY — user decision "B" (chat 2026-11-10): risk-managed holding (managed_hold). NOT RUN.
+# Do not run until the pending gate review has answered docs/MANAGED_HOLD.md §5 and the screen
+# (screens/managed_hold_4h_u3_screen.yaml) has passed for the spans used here (requires_screen_pass).
+#
+# Structure ("default long / exit on filter", docs/MANAGED_HOLD.md §2):
+#   entry       trend_ema_4h(span, band_bp)  — state block, True while close > EMA·(1+band)
+#   signal_exit trend_ema_off(span, band_bp) — tied to the entry values (match_entry), exit when close < EMA·(1−band)
+#   SL 50 % / TP 100000 % = catastrophe-only (practically never hit), max hold 1800 days (> Dev length) → the only
+#   exit in practice is the trend signal; after an exit the engine re-enters (after one cooldown bar) once the trend
+#   is back on. Full sleeve (no partial sizing). Equal fixed sleeves 1/3 per coin = equal-weight basket when all on.
+# Evaluation vs equal-weight B&H: existing benchmark metrics (bh_max_dd, sharpe_minus_bh, up/down capture,
+# bh_dd1..3_strategy_return, exposure) + DCA overlay (btc_quant.research.managed_hold.dca_compare, report-only).
+name: managed_hold_4h_u3
+universe:
+- BTC-KRW
+- XRP-KRW
+- ETH-KRW
+data:
+  exchange: coinone
+  timeframe: 1m
+  aux: []
+timeframe: 4h
+family: managed_hold
+entry:
+  block: trend_ema_4h
+  grid:
+    span:
+    - 90
+    - 180
+    band_bp:
+    - 0.0
+    - 100.0
+filters:
+- []
+signal_exit:
+  block: trend_ema_off
+  match_entry:
+  - span
+  - band_bp
+exits:
+  sl_pct:
+  - 50.0
+  tp_pct:
+  - 100000.0
+  max_hold_min:
+  - 2592000
+requires_screen_pass: true
+costs:
+  primary: coinone_conservative
+  grade: upbit_conservative
+  stress: coinone_stress
+  grade_stress: upbit_stress
+budget: 4
+hypothesis:
+  text: 'Coinone 3-asset universe [BTC-KRW, XRP-KRW, ETH-KRW] (D15, equal sleeves), 4h: hold each coin while
+    close > EMA(close, span)·(1+band) and go to cash when close < EMA·(1−band) (trend_ema_4h / trend_ema_off, span
+    90/180 4h bars = 15/30 days, band 0/100 bp; catastrophe-only SL/TP, max hold > Dev). Versus equal-weight
+    buy & hold on Dev (MTM daily returns, per-asset coinone_conservative cost): max drawdown at most 0.6x B&H, Sharpe_w
+    above B&H, down-capture < 0.5 with up-capture > 0.5.'
+  rationale: 'User decision B (2026-11-10): risk-managed holding instead of short-horizon edges. Mechanism M3 at long
+    horizons (time-series momentum / moving-average timing): persistent crypto down-trends driven by trend-following
+    and leverage liquidations; the slow EMA state avoids part of the deep drawdowns. Counterparty: late sellers in
+    down-trends. Band = hysteresis against whipsaw cost. Kills: whipsaw cost, gap crashes faster than a 4h decision,
+    sideways regimes, Dev concentration (2021 bull / 2022 bear). Evidence (Dev only; lockbox none, Val none): none at
+    preparation time; the screen must pass first. Gate-fit questions (G1 300-trade minimum, G2 random-entry null,
+    G3-G5 Sharpe-based objective) are open for the pending gate review (docs/MANAGED_HOLD.md §5) - gates unchanged.'
+  success_criteria: 'Primary (defined vs B&H, report-level until the gate review decides): best Dev spec has
+    bh-relative max_dd ratio <= 0.6, sharpe_minus_bh > 0, down_capture < 0.5, up_capture > 0.5, and the same signs
+    under upbit_conservative cost. Gates G0-G6 are applied unchanged; failures on gates that the review judges
+    ill-posed for a default-long objective are reported as such, not overridden.'

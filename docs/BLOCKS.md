@@ -39,6 +39,8 @@ True@t = 봉 t가 닫힌 시점(t+봉길이)까지의 정보로 조건 성립. �
 | `venue_gap_closed` | exit_signal | `venue_gap_revert` 와 같은 z `≥ exit_z` | window=240, exit_z=0 | window [60,120,240,480]; exit_z [-0.5,0,0.5,1] | ✓ (requires `upbit`) | experimental |
 | `composite_z` | entry · 합성 점수 | 프리셋 성분 x_c 마다 `z_c=clip((x_c-mean(x_{c,t-288..t-1}))/std(…),±3)` (최소 144개), `mean_c(sign_c·z_c) ≥ threshold` — 동일 가중, 적합 가중치 없음. reversion=(−r_6, −boll_48, +log1p vol), momentum=(r_12, r_48, chanpos_48), volume_momentum=(r_12, +log1p vol) | preset="momentum", threshold=1.5 | preset [reversion, momentum, volume_momentum]; threshold [0.5,1,1.5,2] | ✓ | experimental |
 | `composite_z_upbit` | entry · 합성 점수 · 교차거래소 | `composite_z` 와 같은 z·클립·평균. lead=(r_1(upbit), r_1(upbit)−r_1(target)), lead_gap=(r_1(upbit), −g), g=log close−log upbit_close, upbit_capitulation=(−r_6, −boll_48, +log1p upbit vol) | preset="lead_gap", threshold=1.5 | preset [lead, lead_gap, upbit_capitulation]; threshold [0.5,1,1.5,2] | ✓ (requires `upbit`) | experimental |
+| `trend_ema_4h` | entry · 장기 추세 상태 (managed_hold) | 상태형: `close_t > EMA(close,span)_t·(1+band_bp/1e4)` — 추세 중 계속 True, 앞 span 봉 False. `trend_ema_off` 와 같은 값으로 묶어(`signal_exit.match_entry`) '추세 동안 보유' (docs/MANAGED_HOLD.md) | span=180, band_bp=0 | span [42,90,180,360] (4h: 7/15/30/60일); band_bp [0,50,100,200] | ✓ | experimental |
+| `trend_ema_off` | exit_signal · 장기 추세 꺼짐 (managed_hold) | `close_t < EMA(close,span)_t·(1−band_bp/1e4)`, 앞 span 봉 False. band_bp > 0 = 진입과 히스테리시스 띠 | span=180, band_bp=0 | span [42,90,180,360]; band_bp [0,50,100,200] | ✓ | experimental |
 
 ## 결정 주기 호환성 (15m / 1h / 4h, PLAN §10 스윙 연구 — 2026-11-09 추가)
 격자는 봉 개수 단위라 긴 봉에서는 같은 파라미터가 훨씬 긴 벽시계 창이 된다(4h 에서 `lookback=48` = 8일).
@@ -52,6 +54,7 @@ True@t = 봉 t가 닫힌 시점(t+봉길이)까지의 정보로 조건 성립. �
 | `range_compression_break` | ✓ | ✓ | ✓ (1일 = 24봉) | **거부** | 1일 백분위 창 = 6봉(해상도 1/6, `squeeze_pct=0.1` 불가), lookback 12–48봉(2–8일) ≫ 1일 창 |
 | `vol_regime` | ✓ | ✓ | ✓ (7일 = 168봉) | 허용 (거침) | 7일 순위 창 = 42봉(최소 6), `window=48`(8일) > 순위 창 → 느린 변동성 추세 지표 |
 | `volume_z`, `donchian_breakout`, `atr_channel_breakout`, `ema_*`, `roc_threshold`, `bollinger_z_revert`, `rsi_oversold_bounce`, `random_entry`, `ema_cross_down` | ✓ | ✓ | ✓ | ✓ | 봉 개수 단위 그대로 (4h `donchian 288` = 48일). `ema_slope`·`roc_threshold` 의 bp 문턱은 봉당 값 — 긴 봉에서 더 자주 충족 |
+| `trend_ema_4h`, `trend_ema_off` | ✓ | ✓ | ✓ | ✓ (설계 주기) | 봉 개수: span 42/90/180/360 = 4h 7/15/30/60일. EMA 정확 재현 창(잔존 가중치 ≤ 1e-12)이 4h span 180 에서 ≈ 415일 > 페이퍼 워밍업 상한 120일 — 상한에서 잔존 ≈ 3.5e-4 (docs/MANAGED_HOLD.md) |
 | `composite_z`, `composite_z_upbit` | ✓ | ✓ | ✓ | ✓ | 창 모두 봉 개수: 표준화 W=288봉 = 5m 1일 · 1h 12일 · 4h 48일 · 1m 4.8시간, r_48 = 4h 8일. `composite_z_upbit` 의 lead 프리셋은 1h 이상에서 정보가 거의 없을 것(선행 = 초~1분) |
 | `binance_*`, `upbit_*`, `venue_gap_*` (aux) | ✓ | ✓ | ✓ | ✓ (기대 정보 없음) | aux 는 같은 B 로 `to_tf` — 선행 메커니즘(수 초~1분)이 봉보다 훨씬 짧아 4h 에서는 정보가 거의 없을 것으로 예상(거부는 안 함) |
 

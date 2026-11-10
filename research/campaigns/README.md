@@ -181,6 +181,20 @@ ladder:
 - G1 = 독립 포지션 수, G2 귀무 = 같은 사다리 구조 + 무작위 첫 진입(포지션 수 맞춤), G3 인접 = 분할 수·간격 한 칸(격자 모드면 다른
   청산 방식 포함), 견고성 `tail`(기본 정보 전용).
 
+### 신호 청산 (`signal_exit` — 2026-11-10, docs/MANAGED_HOLD.md "기본 롱 / 필터 청산")
+
+```yaml
+signal_exit:
+  block: trend_ema_off            # exit_signal 블록
+  grid: {band_bp: [50.0]}         # 선택: 각 파라미터 값 정확히 1개(고정) — 격자를 넓히지 않는다
+  match_entry: [span]             # 선택: 진입 블록의 같은 이름 파라미터 값을 그대로 사용
+```
+- 생략 = 신호 청산 없음(기존 스펙·해시 그대로). 지정하면 모든 스펙 `exit.signal_exit` 에 들어가 logic_hash 가 갈리고, 신호 청산
+  파라미터는 스펙 n_params 에 포함된다(MAX_PARAMS 8). 스펙 수·예산은 변하지 않는다.
+- 캠페인 신호 캐시·파이프라인 Dev 재계산(G0·G3·G4·G5·G6)·견고성·페이퍼·전진 모두 같은 신호 청산을 쓴다. G2 귀무
+  (`nulls.RandomEntryNull`)는 기존처럼 신호 청산 없이 무작위 진입 + 같은 SL/TP/만기 — 기본 롱 전략에 대한 적합성은 관문 검토 질문
+  (docs/MANAGED_HOLD.md §5). manifest `signal_exit`.
+
 ## 무엇이 어디에 저장되나
 
 `research/campaigns/<campaign_id>/` (campaign_id = 원장 id, 예: `camp-000001`)
