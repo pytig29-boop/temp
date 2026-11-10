@@ -150,8 +150,10 @@ def test_gate_config_for_campaign_prospective(tmp_path):
 # ------------------------------------------------------------------ 견고성 기준 (gates.yaml)
 def test_robustness_thresholds_in_gates_yaml_and_catalogued():
     cfg = G.load_gate_config()
-    assert cfg["robustness"] == R.DEFAULT_THRESHOLDS == R.THRESHOLDS     # 같은 값으로 이관
-    assert R.load_thresholds() == R.DEFAULT_THRESHOLDS
+    # 같은 값으로 이관 — 이후 승인된 변경(D22: alpha_min_tstat 2.0 → 1.5, camp-000032 부터)만 다르다
+    assert {**cfg["robustness"], "alpha_min_tstat": 2.0} == R.DEFAULT_THRESHOLDS == R.THRESHOLDS
+    assert cfg["robustness"]["alpha_min_tstat"] == 1.5
+    assert R.load_thresholds() == {**R.DEFAULT_THRESHOLDS, "alpha_min_tstat": 1.5}
     reg = load_registry()                                                  # 검증 통과 (drift 없음, 전부 수록)
     assert validate(reg) == []
     for k in R.DEFAULT_THRESHOLDS:

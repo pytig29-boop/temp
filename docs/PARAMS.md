@@ -177,6 +177,21 @@ snap = params_snapshot()      # {"params_version": "79bc502df565", "cost_version
     백테스트는 데이터 추정 유지. Dev 비교 `research/reports/ticks_policy_check_20261110.md`.
   - params_version 은 목록 추가·값 변경으로 바뀜.
 
+- **2026-11-10 (사용자 명시 승인, 채팅 — 관문 재검토 Q1·Q2·Q3·Q7 "추천대로 가자", PLAN D20~D22·D24)**. 근거는 합성 보정만
+  (`research/reports/gate_review_calibration_20261110.md`, 추가 표·일치 점검 `gate_review_calibration_addendum_20261110.md`).
+  새 옵션 키 6개를 먼저 기본값(= 이전 동작)으로 목록에 추가한 뒤, 일치 점검(실제 파이프라인 vs 오프라인 평가기 51/51 후보) 통과 후 승인 적용.
+  모두 **applies_from_campaign 32** (camp-000031 이전은 옛 기준, 재계산 불변).
+  - class ② `gates.G6.stress_mode` sharpe → **off**, `gates.G6.val_budget.evidence` holm → **combined**
+    (`combined_alpha` 0.05; `fixed_p` 0.05 는 fixed 모드 전용) — `pp-20261110-r1-g6-stress-sharpe-off-combined-dev-val-da13b2`.
+  - class ③ `gates.G6.drawdown_mode` reject → **size** (제안 기록상 ③ 위험 선호로 묶음; 판정에 영향을 주므로 전향 적용),
+    `gates.G6.min_position_scale` **0.25** (사용자 선택 기록) — `pp-20261110-r1-size-g6-drawdown-position-size-scalin-e4306b`.
+    `max_mdd`·`max_mc_mdd95` 0.20 그대로(Q3).
+  - class ② `gates.G3.neighbor_median_ratio` 0.5 → **0.25**, `robustness.alpha_min_tstat` 2.0 → **1.5** —
+    `pp-20261110-r1-plus-g3-neighbor-ratio-0-25-robustnes-9d40a4`.
+  - class ① `costs.coinone_stress@XRP-KRW` v1 → **v2** (왕복 14 → 23.8bp, 엄격) — `pp-20261110-coinone-xrp-stress-cost-up-to-measured-r-3aac47`,
+    근거 `research/reports/params_costs_xrp_stress_20261110.md`. 업비트 XRP 스트레스 불변(이미 더 엄격).
+  - 6개월 뒤(2027-05) 관문 재검토(Q5): 통과 수·T1 페이퍼 결과로 오탐 수준 재평가.
+
 ## 6. 노출 인식 관문 변형 (`gates.exposure_aware.*`, class ②, **기본 OFF** — PLAN D14 초안)
 
 롱 온리 전략이 하락장에서 **맞게 쉬는 것**을 관문이 벌하지 않게 하는 선택 규칙이다. 12개 항목 모두 class ②(owner human)이고

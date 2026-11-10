@@ -40,8 +40,13 @@ def test_current_package_matches_gates_yaml():
     cfg = G.load_gate_config()
     p = S.current_package()
     assert p["g1_min_trades"] == cfg["G1"]["min_trades"] and p["g5_dsr"] == cfg["G5"]["min_dsr"]
-    assert p["g6_mc"] == cfg["G6"]["max_mc_mdd95"] and p["val_alpha"] == cfg["G6"]["val_budget"]["alpha"]
-    assert p["rob_regime"] == cfg["robustness"]["regime_max_pnl_share"] and p["val_mode"] == "holm"
+    # 현재 = R1+plus+크기 조절 (D20~D22): combined → stouffer(combined_alpha), stress 끔, size 0.25
+    assert p["g6_mc"] == cfg["G6"]["max_mc_mdd95"] and p["val_alpha"] == cfg["G6"]["val_budget"]["combined_alpha"]
+    assert p["rob_regime"] == cfg["robustness"]["regime_max_pnl_share"] and p["val_mode"] == "stouffer"
+    assert p["g6_stress"] is None and p["g6_dd_mode"] == "size" and p["g6_min_scale"] == 0.25
+    assert p["g3_ratio"] == 0.25 and p["rob_alpha_t"] == 1.5
+    old = _pre_r1_pkg()
+    assert old["val_mode"] == "holm" and old["val_alpha"] == 0.10 and old["g6_dd_mode"] == "reject"
     # 수집용 설정은 null_runs 만 바꾼다
     sc = S.study_gate_cfg(123)
     assert sc["G2"]["null_runs"] == 123 and cfg["G2"]["null_runs"] != 123
@@ -59,8 +64,14 @@ def test_dsr_recomputation_matches_selection():
     assert S.n_trials_for({"dsr_n": "sum_keff"}, 2, 12, 60, 7) == 7.0
 
 
+def _pre_r1_pkg() -> dict:
+    """R1(D20~D22) 이전 기준의 패키지 — 아래 순차 논리 시험은 누적 Holm·탈락 낙폭의 의미를 고정해서 본다."""
+    from btc_quant.params import gate_config_for_campaign
+    return S.current_package(gate_config_for_campaign("camp-000031"))
+
+
 def test_sequential_logic_dev_then_val_holm_then_robustness():
-    pkg = S.current_package()
+    pkg = _pre_r1_pkg()
     cands = [_cand(1, val_p=0.20, is_star=True),          # Dev 통과, Val k=1 문턱 0.10 → holm 실패
              _cand(2, g2_p=0.30),                          # Dev 실패(G2) → Val 을 쓰지 않는다
              _cand(3, val_p=0.04),                         # Dev 통과, k=2: Holm(0.20, 0.04; m=2) → 0.04 ≤ 0.05 통과
@@ -87,7 +98,7 @@ def test_sequential_logic_dev_then_val_holm_then_robustness():
 
 
 def test_cumulative_program_trials_val_reuse_and_cap():
-    pkg = S.current_package()
+    pkg = _pre_r1_pkg()
     # 캠페인 1: 필터 후보가 Dev 생존 → 기여도 재실행 시도 2개가 원장에 더해진다. 캠페인 2 의 DSR 시도 수에 반영.
     c1 = [_cand(1, lh="a", val_p=0.03, abl_new=["d1", "d2"])]
     c2 = [_cand(1, lh="a", val_p=0.03), _cand(2, lh="b", val_p=0.03, is_star=True)]

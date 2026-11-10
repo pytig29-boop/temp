@@ -146,7 +146,7 @@ PLAN §10b-9 "Val/잠금은 결과 코드만"을 파일 수준에서 강제한�
 | ② 신호 선별 | 진입(+필터) 이벤트 스터디 vs 매칭 귀무, 계열 단위 다중검정(BH). 통과 신호만 전략화 | MCP `screen_signals` (연구 모드에서 `signal_study.screen`·`run_screen` 직접 실행은 hook 거부) |
 | ③ 검정력 | 계획 격자의 실질 시도 수에서 G5 통과 최소 Sharpe | `btc_quant.research.power` (CLI `--days --grid --family --target`) |
 | ④ 전략 캠페인 | 진입·필터 고정, 청산 = ATR 배수 SL/TP + 정보 지평 기반 최대 보유, **청산 변형 ≤ 6** | MCP `create_and_run_campaign` (사람: `research.cli run <template>`) |
-| ⑤ 관문·견고성 | G0~G6 파이프라인(Val 예산·누적 Holm), **매수보유(B&H) 기준**(정보 전용: 노출, B&H 대비 수익·Sharpe·MDD, 노출 맞춤 B&H, 상승/하락 capture, 최악 B&H 낙폭 구간 — Dev 는 에이전트 리포트, Val 비교는 사람용 리포트만), 견고성 묶음(지연·상위 거래 제거·연도 제외·비용 ×1.5·국면·알파·거래소 재현), skeptic | `create_and_run_campaign` 안에서 실행, 결과 `get_campaign_report`; 개별 재계산 `robustness.robustness_for_spec` |
+| ⑤ 관문·견고성 | G0~G6 파이프라인(Val 예산·누적 Holm — camp-000032 부터 D20~D22: Val 증거 = Dev+Val 결합(Stouffer, 결합 p ≤ 0.05·Val Sharpe > 0), stress Sharpe 표시만, 낙폭 = 크기 조절(≥ 25%), G3 이웃 비 0.25, 알파 t ≥ 1.5; 사용 기록·상한·재사용 규칙 불변), **매수보유(B&H) 기준**(정보 전용: 노출, B&H 대비 수익·Sharpe·MDD, 노출 맞춤 B&H, 상승/하락 capture, 최악 B&H 낙폭 구간 — Dev 는 에이전트 리포트, Val 비교는 사람용 리포트만), 견고성 묶음(지연·상위 거래 제거·연도 제외·비용 ×1.5·국면·알파·거래소 재현), skeptic | `create_and_run_campaign` 안에서 실행, 결과 `get_campaign_report`; 개별 재계산 `robustness.robustness_for_spec` |
 | 사이드 계산 | 선별·캠페인 밖의 모든 Dev 계산은 결과를 쓰기 전에 시도로 기록 (§7.1) | MCP `log_exploration` |
 | ⑥ 오답노트 | 사실 자동 기록 → 해석 0~3개(미검증) → 이전 해석 검증/반박 표시 → 사후분석 | 사실은 파이프라인이 자동 기록, MCP `lessons_add_interpretation`·`lessons_mark`·`lessons_derive_hypothesis`, Python `postmortem`, `render_markdown` |
 

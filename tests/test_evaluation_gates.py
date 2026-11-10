@@ -10,10 +10,12 @@ def test_config_numbers_match_plan():
     c = g.load_gate_config()
     assert c["G1"] == {"min_trades": 300, "min_recent_trades": 60, "recent_days": 365}
     assert c["G2"]["null_runs"] == 1000 and c["G2"]["null_top_fraction"] == 0.05
-    assert c["G3"]["neighbor_median_ratio"] == 0.5
+    assert c["G3"]["neighbor_median_ratio"] == 0.25          # D22 (camp-000032 부터; 이전 0.5)
     assert c["G4"]["min_rolling_positive_frac"] == 0.60
     assert c["G5"]["min_dsr"] == 0.95 and c["G5"]["max_pbo"] == 0.30
-    assert c["G6"]["max_stress_mdd"] == 0.20 and c["G6"]["max_mc_mdd95"] == 0.20
+    assert c["G6"]["max_stress_mdd"] == 0.20 and c["G6"]["max_mc_mdd95"] == 0.20 and c["G6"]["max_mdd"] == 0.20
+    assert (c["G6"]["stress_mode"], c["G6"]["drawdown_mode"], c["G6"]["min_position_scale"]) == ("off", "size", 0.25)
+    assert c["G6"]["val_budget"]["evidence"] == "combined" and c["G6"]["val_budget"]["combined_alpha"] == 0.05
     assert c["G7"]["alpha"] == 0.10 and c["G7"]["cap"] == 10
     assert c["primary_metric"]["half_life_days"] == 365
 
@@ -32,9 +34,16 @@ def test_g2():
     assert not g.check_g2({"sharpe_w": -0.1}, null - 5)[0]
 
 
+def _pre_r1():
+    from btc_quant.params import gate_config_for_campaign
+    return gate_config_for_campaign("camp-000031")      # R1(D20~D22) 이전 기준
+
+
 def test_g3():
-    assert g.check_g3(2.0, [1.0, 1.2, 0.5])[0]
-    assert not g.check_g3(2.0, [0.9, 0.5, 2.0])[0]
+    assert g.check_g3(2.0, [1.0, 1.2, 0.5], _pre_r1())[0]
+    assert not g.check_g3(2.0, [0.9, 0.5, 2.0], _pre_r1())[0]
+    assert g.check_g3(2.0, [0.9, 0.5, 2.0])[0]                 # D22: 이웃 비 0.25 (0.9 ≥ 0.5)
+    assert not g.check_g3(2.0, [0.4, 0.3, 2.0])[0]
     assert not g.check_g3(-1.0, [1.0])[0]
     assert not g.check_g3(1.0, [])[0]
 
@@ -58,10 +67,15 @@ def test_g6_sign_agnostic():
 
 def test_g6_rule_b():
     # stress 낙폭이 커도 stress Sharpe > 0 이고 primary 낙폭이 기준 이내면 통과
-    ok, d = g.check_g6({"sharpe": 2.0, "max_dd": 0.12}, {"sharpe": 0.3, "max_dd": 0.75}, 0.15)
+    c = _pre_r1()
+    ok, d = g.check_g6({"sharpe": 2.0, "max_dd": 0.12}, {"sharpe": 0.3, "max_dd": 0.75}, 0.15, c)
     assert ok and d["rule"] == "b"
-    assert not g.check_g6({"sharpe": 2.0, "max_dd": 0.25}, {"sharpe": 0.3, "max_dd": 0.3}, 0.15)[0]
-    assert not g.check_g6({"sharpe": 2.0, "max_dd": 0.12}, {"sharpe": -0.1, "max_dd": 0.3}, 0.15)[0]
+    assert not g.check_g6({"sharpe": 2.0, "max_dd": 0.25}, {"sharpe": 0.3, "max_dd": 0.3}, 0.15, c)[0]
+    assert not g.check_g6({"sharpe": 2.0, "max_dd": 0.12}, {"sharpe": -0.1, "max_dd": 0.3}, 0.15, c)[0]
+    # 현재 기준 (D20·D21): stress Sharpe 표시만, 낙폭 25% → 크기 0.8 로 통과, 낙폭 90% → 0.22 < 0.25 탈락
+    ok, d = g.check_g6({"sharpe": 2.0, "max_dd": 0.25}, {"sharpe": -0.1, "max_dd": 0.3}, 0.15)
+    assert ok and d["position_scale"] == pytest.approx(0.8)
+    assert not g.check_g6({"sharpe": 2.0, "max_dd": 0.90}, {"sharpe": 0.3, "max_dd": 0.9}, 0.15)[0]
 
 
 def test_g7_cumulative_holm():

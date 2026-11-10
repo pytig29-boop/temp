@@ -29,6 +29,11 @@
 | D17 | 자산별 비용 모델 | **사용자 명시 승인 (채팅 2026-11-10)**. XRP·ETH 슬리브는 자산별 비용 모델 `<name>@<SYM>`(config/costs.yaml, class ①)을 쓴다 — 호가 단위·스프레드가 BTC 와 다름(15분 REST 호가 표본: 코인원 편도 중앙값/p99 BTC 0.49/1.38, XRP 3.36/3.37(스프레드 6.7bp = 1원 tick), ETH 1.74/5.20bp). 코인원 왕복 XRP **8 / 10 / 14bp**, ETH **5 / 8 / 14bp**(수수료 0, 스프레드 = 측정 중앙값, 나머지 slip), 업비트(등급) XRP 18.7 / 22.7 / 39.4, ETH 15.5 / 19.5 / 36.4bp(수수료 0.05% + 측정 스프레드(stress = p99) + 업비트 BTC 프리셋 slip). BTC 모델 불변. 캠페인·파이프라인(G2·G6·등급·견고성)·신호 선별·전진·페이퍼 모두 사용. 근거 research/reports/params_costs_per_asset_20261110.md, 기록 research/param_approvals/pp-20261110-per-asset-cost-models-* | 11-10 |
 | D18 | 관문 일간 수익 = MTM | **사용자 명시 승인 (채팅 2026-11-10), class ② 엄격화**. `gates.yaml evaluation.daily_returns: mtm` — 보유 분할을 매 UTC 일 종가에 청산 평가한 일간 수익으로 G2~G6·몬테카를로 MDD95(포지션 중간 MTM 저점 포함)·견고성·§7 한도를 판정. **모든 전략**(사다리는 필수, 단일 진입도 전향적으로). **다음 캠페인(camp-000025)부터** — 그 전에 등록된 캠페인은 realized 그대로(매니페스트 `daily_returns` 고정, 재계산 불변). 근거 research/reports/criteria_mtm_and_ladder_tail_20261110.md | 11-10 |
 | D19 | 사다리 스펙 꼬리 검사 판정 | **사용자 명시 승인 (채팅 2026-11-10), class ② 엄격화**. `robustness.tail_enabled: ladder` — 분할 매수 사다리 스펙은 견고성 'tail' 검사가 판정에 쓰이고(실패 = 견고성 실패 → candidate 에서 멈춤), 그 밖의 스펙은 정보 전용 그대로. 기준은 기존 기본값(MTM 최악 일 10%, 최악 주 15%, CVaR5 3%, 최대 보유 연속 30일, 2022 총수익 ≥ −20%). 다음 캠페인(camp-000025)부터 | 11-10 |
+| D20 | R1: G6 스트레스·Val 증거 | **사용자 명시 승인 (채팅 2026-11-10 Q1 '추천대로'), class ②**. `G6.stress_mode: off` — stress 비용 Val Sharpe 는 계산·표시만(비용 강건성은 견고성 비용 ×1.5 가 맡음). `G6.val_budget.evidence: combined` — Val 증거 = Dev DSR 의 z 와 Val 부트스트랩 p 의 Stouffer 결합 (z_dev+z_val)/√2, 결합 p ≤ 0.05 **그리고** Val Sharpe > 0 (6개월 단독 Holm 대신). Val 사용 기록(k)·상한 20·재사용 규칙(이전 판정이 통과였을 때만 재사용)은 그대로 — 이미 Val 에서 떨어진 스펙은 다시 통과할 수 없다. 합성 근거: 오탐 0/232 유지(낙폭 탈락 시), Sharpe 2 검출 8% → 18%. 다음 캠페인부터 | 11-10 |
+| D21 | R1-a: 낙폭 = 크기 조절 | **사용자 명시 승인 (Q2·Q3), class ③**. `G6.drawdown_mode: size` — 낙폭이 한도(20%, 유지)를 넘으면 탈락 대신 운용 크기를 줄인다: `position_scale = min(1, 0.20/Val MDD, 0.20/MC MDD95)`, **하한 25%**(`min_position_scale`) 미만이면 탈락. 후보·위험 사이드카(`*.risk.yaml`)에 `position_scale` 기록, §7 한도는 축소된 수익 기준, 페이퍼는 진입 명목·실현 기여에, 전진은 별도 '운용 크기 기준' 수익·낙폭에 곱한다. 에이전트용 사본에는 보이지 않는다(Val 유래). 다음 캠페인부터 | 11-10 |
+| D22 | R1-plus | **사용자 명시 승인 (Q1), class ②**. G3 이웃 비 0.5 → **0.25**, 견고성 알파 t 2.0 → **1.5**. 합성: R1+plus+크기 조절(0.25) 오탐 1/232 (0.4%), 어려운 귀무 1/74, Sharpe 2 검출 42%, 실제 파이프라인 일치 51/51 후보 (research/reports/gate_review_calibration_addendum_20261110.md). 다음 캠페인부터 | 11-10 |
+| D23 | 단계별 승격 | **사용자 결정 (Q4)**. T0 연구 → T1 페이퍼(지금의 validated) → T2 소액 실전(총자본 10% × position_scale, 사람 승인) → T3 증액(누적 전진 증거 + 사람 승인). 구현 = Phase 4 (실거래 주문 실행기는 별도 승인 과제) | 11-10 |
+| D24 | XRP 스트레스 비용 | **사용자 명시 승인 (Q7), class ① 엄격화**. `coinone_stress@XRP-KRW` 왕복 14 → **23.8bp** (v2, 실시간 호가 약 6시간 표본의 p99 × 1.5 상한; 스프레드 6.7 유지). 업비트 XRP 스트레스는 이미 더 엄격 → 불변. BTC 비용 하향은 72시간 표본까지 보류. 근거 research/reports/params_costs_xrp_stress_20261110.md | 11-10 |
 | D8 | 비용 등급 | 모든 후보를 코인원 0%와 업비트 비용 양쪽에서 평가. **A등급**: 업비트 비용에서도 관문 통과(이벤트 종료에 강함) / **B등급**: 0%에서만 통과(이벤트 종료 시 자동 정지). 성과가 비슷하면 A 우선 | 11-09 |
 
 ### Phase 0 결과 (1년 데이터 기준)
@@ -162,7 +167,7 @@ exit:
 | **G4 안정** | Dev | 6개월 롤링 창 ≥ 60% 양수, 최근 12개월 Sharpe > 0, 고정 파라미터 그대로 |
 | **G5 선택편향** | Dev | **Deflated Sharpe ≥ 0.95** (원장의 *실질* 시도 횟수 사용 — 수익곡선 상관으로 군집화), 캠페인 **PBO < 0.3** |
 | **기여도 분석** | Dev | 필터를 하나씩 제거 → 유의하게 나빠지지 않으면 제거 후 재실행(시도 횟수 +1) |
-| **G6 검증** | Val | Sharpe(conservative) > 0, stress 비용 MDD ≤ 20%, 거래당 몬테카를로 MDD 95% ≤ 20% |
+| **G6 검증** | Val | Sharpe(conservative) > 0, 낙폭: MDD ≤ 20%·거래당 몬테카를로 MDD 95% ≤ 20% — D21 이후 캠페인은 **크기 조절**(넘으면 크기를 줄이고, 25% 미만이면 탈락), Val 증거: 누적 Holm — D20 이후 캠페인은 **Dev+Val 결합 증거**(결합 p ≤ 0.05, Val Sharpe > 0); stress 비용 Sharpe > 0 은 D20 이후 표시만 |
 | **G7 잠금** | Lockbox | §5.3 |
 | **G8 실시간** | Forward | 페이퍼 ≥ 3주 & ≥ 30거래, 실측 슬리피지 ≤ conservative 가정, 손익이 백테스트 90% 구간 안 |
 

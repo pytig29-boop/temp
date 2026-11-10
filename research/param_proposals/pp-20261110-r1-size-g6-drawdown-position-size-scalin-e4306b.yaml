@@ -1,0 +1,22 @@
+# 파라미터 변경 제안 — 사람 승인 전에는 아무 효과 없음. 승인: python -m btc_quant.params approve <id>
+id: pp-20261110-r1-size-g6-drawdown-position-size-scalin-e4306b
+created: '2026-11-10T12:29:39+00:00'
+created_by: agent (user decision in chat 2026-11-10)
+class: 3
+kind: criterion
+title: 'R1-size: G6 drawdown position-size scaling, floor 25% (Q2/Q3)'
+evidence: research/reports/gate_review_calibration_20261110.md; research/reports/gate_review_calibration_addendum_20261110.md
+rationale: 'Drawdown limits (20%, unchanged per Q3) become position sizing: scale = min(1, 0.20/Val MDD, 0.20/MC
+  MDD95); fail only if scale < 0.25. Synthetic: with R1+plus, FPR 1/232 (0.4%), hard-null 1/74, Sharpe-2 detection
+  42% (floor 0.25 = no-limit upper bound in this sample). Paper/forward apply the scale.'
+changes:
+- key: gates.G6.drawdown_mode
+  from: reject
+  to: size
+  target: param:gates.G6.drawdown_mode
+- key: gates.G6.min_position_scale
+  from: 0.25
+  to: 0.25
+  target: param:gates.G6.min_position_scale
+status: pending
+content_hash: 0cf70e57df997ef8

@@ -22,7 +22,7 @@ G2:
   null_runs: 1000              # 같은 필터·청산 + 무작위 진입
   null_top_fraction: 0.05      # 상위 5%: p = (1+#null>=obs)/(B+1) <= 0.05
 G3:
-  neighbor_median_ratio: 0.5   # 인접 조합 Sharpe 중앙값 >= 선택 조합의 50%
+  neighbor_median_ratio: 0.25  # 인접 조합 Sharpe 중앙값 >= 선택 조합의 50%
 G4:
   rolling_window_days: 182     # 6개월
   rolling_step_days: 30
@@ -42,8 +42,8 @@ G6:
   max_mc_mdd95: 0.20           # 이하(<=), 거래당 몬테카를로 MDD 95백분위
   mc_sims: 10000
   # R1 옵션 (gate_review_20261110, 기본 = 현재 동작). 바꾸기 = 제안 + 사람 승인 → 다음 캠페인부터.
-  stress_mode: sharpe          # sharpe = stress 비용 Val Sharpe > min_stress_sharpe 요구 | off = 계산·표시만 (② )
-  drawdown_mode: reject        # reject = 낙폭 초과 시 탈락 | size = 크기 조절: position_scale = min(1, max_mdd/ValMDD,
+  stress_mode: 'off'           # sharpe = stress 비용 Val Sharpe > min_stress_sharpe 요구 | off = 계산·표시만 (② )
+  drawdown_mode: size          # reject = 낙폭 초과 시 탈락 | size = 크기 조절: position_scale = min(1, max_mdd/ValMDD,
                                #   max_mc_mdd95/MCMDD95) ≥ min_position_scale 이면 낙폭 조건 통과 (②; 하한은 ③)
   min_position_scale: 0.25     # size 모드 크기 하한 (③ 위험 선호)
   # Val 사용 원장 + 누적 Holm (PLAN §10b-4, §5.3 잠금 규칙과 같은 구조). 후보마다 Val 평가 *전에*
@@ -60,7 +60,7 @@ G6:
     # Val 증거 규칙 (R1 옵션, 기본 holm = 현재 동작). 사용 기록(k)·상한(cap)·재사용 규칙은 모든 방식에서 같다.
     #   holm = 위 누적 Holm | fixed = p ≤ fixed_p (다중성 보정 없음) |
     #   combined = Dev DSR 의 z 와 Val z = Φ⁻¹(1−p) 의 Stouffer 결합 (z_dev+z_val)/√2: 결합 p ≤ combined_alpha 그리고 Val Sharpe > 0
-    evidence: holm
+    evidence: combined
     fixed_p: 0.05
     combined_alpha: 0.05
 # 노출 인식 관문 변형 (PLAN D14 초안 — 사람 승인 전, 기본 OFF; docs/PARAMS.md §6). 전부 class ② (config/params.yaml).
@@ -123,7 +123,7 @@ robustness:
   regime_max_pnl_share: 0.70   # 한 국면 손익 비중 > 70% 면 국면 의존
   regime_mode: pnl_share       # 국면 검사 판정 방식: pnl_share(위 비중 규칙, 현재) | dominant_alpha(비중 초과 시 지배 국면 안 노출-맞춤 B&H 대비 초과 ≥ 아래 값이면 통과) | informational(표시만)
   regime_dominant_min_excess: 0.0  # dominant_alpha 전용: 지배 국면 안 노출-맞춤 B&H 대비 연율 초과수익 하한
-  alpha_min_tstat: 2.0         # 알파 t ≥ 2 (Newey–West)
+  alpha_min_tstat: 1.5         # 알파 t ≥ 2 (Newey–West)
   alpha_nw_lags: 5             # Newey–West 시차
   cross_venue_min_ratio: 0.5   # Sharpe(다른 거래소)/Sharpe(대상) ≥ 0.5, 다른 거래소 Sharpe > 0
   # 꼬리 위험 검사 'tail' (2026-11-10, 분할 매수 사다리·부분 사이징과 함께 추가, PLAN D16; D19).

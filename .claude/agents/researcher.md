@@ -53,6 +53,12 @@ ledger and the lessons notebook, not for producing a winner.
 5. Gates G0–G6 via the pipeline (MCP `create_and_run_campaign`; running `research.cli run`/`run_campaign`/
    `run_pipeline` from Bash is denied in research mode); robustness suite (`btc_quant.research.robustness.robustness_for_spec`) on Dev
    survivors; skeptic review for anything that survives.
+   From camp-000032 (PLAN D20–D22, user-approved): G6 Val evidence = combined Dev+Val evidence (Stouffer of the
+   Dev DSR z and the Val p, combined p ≤ 0.05 and Val Sharpe > 0) instead of a stand-alone Val Holm test; the
+   stress-cost Val Sharpe is reported only; drawdown limits size the position (scale ≥ 25%) instead of rejecting;
+   G3 neighbour ratio 0.25; robustness alpha t ≥ 1.5. Val usage records, cap and reuse rules are unchanged —
+   a spec that already failed Val can never pass on the same Val. Agents still see G6 as pass/fail only
+   (position_scale is Val-derived and withheld).
 6. **Lessons**: facts are recorded by the pipeline (`record_facts_from_pipeline(<campaign dir>)` re-runs it,
    idempotent), then add at most a few interpretations with MCP `lessons_add_interpretation(fact_id, text,
    confidence, evidence, proposed_test=…)` — each must cite evidence and propose a falsifying test. Use the

@@ -1,0 +1,23 @@
+# 파라미터 변경 제안 — 사람 승인 전에는 아무 효과 없음. 승인: python -m btc_quant.params approve <id>
+id: pp-20261110-r1-g6-stress-sharpe-off-combined-dev-val-da13b2
+created: '2026-11-10T12:29:39+00:00'
+created_by: agent (user decision in chat 2026-11-10)
+class: 2
+kind: criterion
+title: 'R1: G6 stress Sharpe off + combined Dev+Val evidence (Q1)'
+evidence: research/reports/gate_review_calibration_20261110.md; research/reports/gate_review_calibration_addendum_20261110.md
+rationale: 'Synthetic calibration (232 null markets, 84 per strength): removing the G6 stress-cost Sharpe condition
+  and replacing the stand-alone 6-month Val Holm test with combined Dev+Val Stouffer evidence (p<=0.05 and Val Sharpe>0)
+  keeps the null false-positive rate at 0/232 with drawdown rejection and raises Sharpe-2 detection 8% -> 18%. Val
+  usage records, cap and reuse rule unchanged.'
+changes:
+- key: gates.G6.stress_mode
+  from: sharpe
+  to: 'off'
+  target: param:gates.G6.stress_mode
+- key: gates.G6.val_budget.evidence
+  from: holm
+  to: combined
+  target: param:gates.G6.val_budget.evidence
+status: pending
+content_hash: af31601ab44fab2c

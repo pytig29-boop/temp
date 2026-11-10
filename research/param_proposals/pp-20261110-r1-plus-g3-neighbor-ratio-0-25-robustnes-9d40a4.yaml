@@ -1,0 +1,20 @@
+# 파라미터 변경 제안 — 사람 승인 전에는 아무 효과 없음. 승인: python -m btc_quant.params approve <id>
+id: pp-20261110-r1-plus-g3-neighbor-ratio-0-25-robustnes-9d40a4
+created: '2026-11-10T12:29:39+00:00'
+created_by: agent (user decision in chat 2026-11-10)
+class: 2
+kind: criterion
+title: 'R1-plus: G3 neighbor ratio 0.25, robustness alpha t 1.5 (Q1)'
+evidence: research/reports/gate_review_calibration_20261110.md; research/reports/gate_review_calibration_addendum_20261110.md
+rationale: 'Small detection gain with unchanged synthetic false positives (R1+size: S2 37% -> 42%, FPR 1/232 both).'
+changes:
+- key: gates.G3.neighbor_median_ratio
+  from: 0.5
+  to: 0.25
+  target: param:gates.G3.neighbor_median_ratio
+- key: robustness.alpha_min_tstat
+  from: 2.0
+  to: 1.5
+  target: param:robustness.alpha_min_tstat
+status: pending
+content_hash: adb2c7333a9237ce

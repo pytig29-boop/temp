@@ -528,13 +528,22 @@ params:
 - key: gates.G3.neighbor_median_ratio
   class: 2
   source: yaml:config/gates.yaml#G3.neighbor_median_ratio
-  value: 0.5
+  value: 0.25
   rationale: 인접 조합 고원 비율
-  evidence: PLAN §5.2 · 합성 보정 research/reports/pipeline_calibration.md
-  version: 1
-  last_updated: '2026-11-09'
+  evidence: research/reports/gate_review_calibration_20261110.md; research/reports/gate_review_calibration_addendum_20261110.md
+  version: 2
+  last_updated: '2026-11-10'
   owner: human
-  history: []
+  history:
+  - version: 2
+    previous: 0.5
+    value: 0.25
+    date: '2026-11-10'
+    at: '2026-11-10T12:29:40+00:00'
+    by: human:user (explicit chat approval 2026-11-10)
+    proposal_id: pp-20261110-r1-plus-g3-neighbor-ratio-0-25-robustnes-9d40a4
+    reason: 'R1-plus: G3 neighbor ratio 0.25, robustness alpha t 1.5 (Q1)'
+    applies_from_campaign: 32
 - key: gates.G4.rolling_window_days
   class: 2
   source: yaml:config/gates.yaml#G4.rolling_window_days
@@ -698,39 +707,68 @@ params:
 - key: gates.G6.stress_mode
   class: 2
   source: yaml:config/gates.yaml#G6.stress_mode
-  value: sharpe
+  value: 'off'
   rationale: 'G6 stress 비용 조건: sharpe = stress Val Sharpe > min_stress_sharpe 요구(현재) | off = 계산·표시만 (R1-b)'
-  evidence: '옵션 추가(기본 = 기존 동작) · 합성 보정 research/reports/gate_review_calibration_20261110.md'
-  version: 1
+  evidence: research/reports/gate_review_calibration_20261110.md; research/reports/gate_review_calibration_addendum_20261110.md
+  version: 2
   last_updated: '2026-11-10'
   owner: human
-  history: []
+  history:
+  - version: 2
+    previous: sharpe
+    value: 'off'
+    date: '2026-11-10'
+    at: '2026-11-10T12:29:39+00:00'
+    by: human:user (explicit chat approval 2026-11-10)
+    proposal_id: pp-20261110-r1-g6-stress-sharpe-off-combined-dev-val-da13b2
+    reason: 'R1: G6 stress Sharpe off + combined Dev+Val evidence (Q1)'
+    applies_from_campaign: 32
 - key: gates.G6.drawdown_mode
   class: 2
   source: yaml:config/gates.yaml#G6.drawdown_mode
-  value: reject
-  rationale: 'G6 낙폭 조건: reject = 한도 초과 탈락(현재) | size = 크기 조절 position_scale = min(1, max_mdd/ValMDD, max_mc_mdd95/MCMDD95) ≥ min_position_scale (R1-a)'
-  evidence: '옵션 추가(기본 = 기존 동작) · 합성 보정 research/reports/gate_review_calibration_20261110.md'
-  version: 1
+  value: size
+  rationale: 'G6 낙폭 조건: reject = 한도 초과 탈락(현재) | size = 크기 조절 position_scale = min(1, max_mdd/ValMDD, max_mc_mdd95/MCMDD95)
+    ≥ min_position_scale (R1-a)'
+  evidence: research/reports/gate_review_calibration_20261110.md; research/reports/gate_review_calibration_addendum_20261110.md
+  version: 2
   last_updated: '2026-11-10'
   owner: human
-  history: []
+  history:
+  - version: 2
+    previous: reject
+    value: size
+    date: '2026-11-10'
+    at: '2026-11-10T12:29:39+00:00'
+    by: human:user (explicit chat approval 2026-11-10)
+    proposal_id: pp-20261110-r1-size-g6-drawdown-position-size-scalin-e4306b
+    reason: 'R1-size: G6 drawdown position-size scaling, floor 25% (Q2/Q3)'
+    applies_from_campaign: 32
 - key: gates.G6.val_budget.evidence
   class: 2
   source: yaml:config/gates.yaml#G6.val_budget.evidence
-  value: holm
-  rationale: 'Val 증거 규칙: holm(현재) | fixed(p ≤ fixed_p) | combined(Dev DSR z + Val z Stouffer, 결합 p ≤ combined_alpha 그리고 Val Sharpe > 0, R1-c). 사용 기록·상한·재사용 규칙은 같다'
-  evidence: '옵션 추가(기본 = 기존 동작) · 합성 보정 research/reports/gate_review_calibration_20261110.md'
-  version: 1
+  value: combined
+  rationale: 'Val 증거 규칙: holm(현재) | fixed(p ≤ fixed_p) | combined(Dev DSR z + Val z Stouffer, 결합 p ≤ combined_alpha
+    그리고 Val Sharpe > 0, R1-c). 사용 기록·상한·재사용 규칙은 같다'
+  evidence: research/reports/gate_review_calibration_20261110.md; research/reports/gate_review_calibration_addendum_20261110.md
+  version: 2
   last_updated: '2026-11-10'
   owner: human
-  history: []
+  history:
+  - version: 2
+    previous: holm
+    value: combined
+    date: '2026-11-10'
+    at: '2026-11-10T12:29:39+00:00'
+    by: human:user (explicit chat approval 2026-11-10)
+    proposal_id: pp-20261110-r1-g6-stress-sharpe-off-combined-dev-val-da13b2
+    reason: 'R1: G6 stress Sharpe off + combined Dev+Val evidence (Q1)'
+    applies_from_campaign: 32
 - key: gates.G6.val_budget.fixed_p
   class: 2
   source: yaml:config/gates.yaml#G6.val_budget.fixed_p
   value: 0.05
-  rationale: 'evidence=fixed 전용 p 문턱 (기본 모드에서는 쓰지 않음)'
-  evidence: '옵션 추가(기본 = 기존 동작) · 합성 보정 research/reports/gate_review_calibration_20261110.md'
+  rationale: evidence=fixed 전용 p 문턱 (기본 모드에서는 쓰지 않음)
+  evidence: 옵션 추가(기본 = 기존 동작) · 합성 보정 research/reports/gate_review_calibration_20261110.md
   version: 1
   last_updated: '2026-11-10'
   owner: human
@@ -739,8 +777,8 @@ params:
   class: 2
   source: yaml:config/gates.yaml#G6.val_budget.combined_alpha
   value: 0.05
-  rationale: 'evidence=combined 전용 결합 p 문턱 (기본 모드에서는 쓰지 않음)'
-  evidence: '옵션 추가(기본 = 기존 동작) · 합성 보정 research/reports/gate_review_calibration_20261110.md'
+  rationale: evidence=combined 전용 결합 p 문턱 (기본 모드에서는 쓰지 않음)
+  evidence: 옵션 추가(기본 = 기존 동작) · 합성 보정 research/reports/gate_review_calibration_20261110.md
   version: 1
   last_updated: '2026-11-10'
   owner: human
@@ -959,13 +997,22 @@ params:
 - key: robustness.alpha_min_tstat
   class: 2
   source: yaml:config/gates.yaml#robustness.alpha_min_tstat
-  value: 2.0
+  value: 1.5
   rationale: BTC 일간 수익 대비 알파 t ≥ 2 (Newey–West) — 단순 베타(보유) 노출과 구별되는 초과수익의 관례적 유의 수준
-  evidence: config/gates.yaml robustness (research/robustness.py 상수에서 이관, 같은 값)
-  version: 1
-  last_updated: '2026-11-09'
+  evidence: research/reports/gate_review_calibration_20261110.md; research/reports/gate_review_calibration_addendum_20261110.md
+  version: 2
+  last_updated: '2026-11-10'
   owner: human
-  history: []
+  history:
+  - version: 2
+    previous: 2.0
+    value: 1.5
+    date: '2026-11-10'
+    at: '2026-11-10T12:29:40+00:00'
+    by: human:user (explicit chat approval 2026-11-10)
+    proposal_id: pp-20261110-r1-plus-g3-neighbor-ratio-0-25-robustnes-9d40a4
+    reason: 'R1-plus: G3 neighbor ratio 0.25, robustness alpha t 1.5 (Q1)'
+    applies_from_campaign: 32
   note: 2026-11-09 코드 상수(research/robustness.py)에서 config/gates.yaml robustness 로 이관 — 값·버전 변경 없음
 - key: robustness.alpha_nw_lags
   class: 2
@@ -1238,11 +1285,20 @@ params:
   source: yaml:config/gates.yaml#G6.min_position_scale
   value: 0.25
   rationale: '크기 조절(drawdown_mode=size) 하한: 이보다 작게 줄여야 낙폭 한도를 지키면 탈락 — 사람이 감내할 최소 운용 크기 (사용자 결정 2026-11-10 Q2: 25%)'
-  evidence: 'gate_review_20261110 §5 · PLAN §7'
-  version: 1
+  evidence: research/reports/gate_review_calibration_20261110.md; research/reports/gate_review_calibration_addendum_20261110.md
+  version: 2
   last_updated: '2026-11-10'
   owner: human
-  history: []
+  history:
+  - version: 2
+    previous: 0.25
+    value: 0.25
+    date: '2026-11-10'
+    at: '2026-11-10T12:29:39+00:00'
+    by: human:user (explicit chat approval 2026-11-10)
+    proposal_id: pp-20261110-r1-size-g6-drawdown-position-size-scalin-e4306b
+    reason: 'R1-size: G6 drawdown position-size scaling, floor 25% (Q2/Q3)'
+    applies_from_campaign: 32
 - key: gates.G6.max_stress_mdd
   class: 3
   source: yaml:config/gates.yaml#G6.max_stress_mdd

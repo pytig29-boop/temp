@@ -14,7 +14,13 @@ fail — goes into the ledger, the lessons notebook and the report unchanged.
 - **Never peek at the lockbox** (2026-05-01 .. 2026-11-08) — not via files, Python, or reasoning about recent prices.
 - **Val is outcome codes only.** Never use Val numbers to choose Dev parameters, and never write Val metrics
   into reports' "what we learned", interpretations or hypotheses. Val usage is budgeted (ledger
-  `val_evaluations`, cumulative Holm) by the pipeline.
+  `val_evaluations`, cumulative Holm / combined evidence) by the pipeline.
+  From camp-000032 (PLAN D20–D22, user-approved): G6 Val evidence = combined Dev+Val evidence (Stouffer of the
+  Dev DSR z and the Val p, combined p ≤ 0.05 and Val Sharpe > 0) instead of a stand-alone Val Holm test; the
+  stress-cost Val Sharpe is reported only; drawdown limits size the position (scale ≥ 25%) instead of rejecting;
+  G3 neighbour ratio 0.25; robustness alpha t ≥ 1.5. Val usage records, cap and reuse rules are unchanged —
+  a spec that already failed Val can never pass on the same Val. Agents still see G6 as pass/fail only
+  (position_scale is Val-derived and withheld).
 - **A finished campaign is final.** Wider grid / extra filter / other exits = new campaign, same family.
 - **Pre-register before running** (screens and exploratory one-offs count as trials).
 - Data only via `DataAccess`; ledger only via `Ledger`; lessons only via `LessonBook` (never edit the JSONL).

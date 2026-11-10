@@ -1,0 +1,20 @@
+{
+  "id": "pp-20261110-r1-plus-g3-neighbor-ratio-0-25-robustnes-9d40a4",
+  "approved_by": "user (explicit chat approval 2026-11-10)",
+  "ts": "2026-11-10T12:29:40+00:00",
+  "choice": null,
+  "note": "사용자가 채팅에서 승인(관문 재검토 Q1·Q2 '추천대로 가자'); 비대화형 확인 사용",
+  "content_hash": "adb2c7333a9237ce",
+  "applied": [
+    {
+      "key": "gates.G3.neighbor_median_ratio",
+      "version": 2,
+      "applies_from_campaign": 32
+    },
+    {
+      "key": "robustness.alpha_min_tstat",
+      "version": 2,
+      "applies_from_campaign": 32
+    }
+  ]
+}

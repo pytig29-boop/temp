@@ -21,7 +21,8 @@ STRESS = {"sharpe": -0.3, "max_dd": 0.15}
 
 
 def cfg_with(**g6) -> dict:
-    c = copy.deepcopy(G.load_gate_config())
+    from btc_quant.params import gate_config_for_campaign
+    c = copy.deepcopy(gate_config_for_campaign("camp-000031"))       # 이전 기준 위에 지정한 옵션만
     vb = g6.pop("val_budget", None)
     c["G6"].update(g6)
     if vb:
@@ -30,24 +31,36 @@ def cfg_with(**g6) -> dict:
 
 
 # ------------------------------------------------------------------ 기본값 = 현재 동작
+def _pre_r1() -> dict:
+    """R1 승인(D20~D22, camp-000032 부터) 이전 캠페인의 관문 설정 = 옵션의 기본(이전 동작)."""
+    from btc_quant.params import gate_config_for_campaign
+    return gate_config_for_campaign("camp-000031")
+
+
 def test_defaults_are_current_behaviour():
-    c = G.load_gate_config()["G6"]
+    c = _pre_r1()["G6"]
     assert c["stress_mode"] == "sharpe" and c["drawdown_mode"] == "reject" and c["min_position_scale"] == 0.25
     assert c["val_budget"]["evidence"] == "holm"
     assert G.g6_stress_mode({}) == "sharpe" and G.g6_drawdown_mode({}) == "reject"
     assert G.val_evidence_mode({}) == "holm"
-    ok, d = G.check_g6(VAL, STRESS, 0.05)
+    ok, d = G.check_g6(VAL, STRESS, 0.05, _pre_r1())
     assert ok is False and d["ok_stress_sharpe"] is False and d["position_scale"] == 1.0
     assert d["drawdown_mode"] == "reject" and d["stress_mode"] == "sharpe"
-    ok, d = G.check_g6({**VAL, "max_dd": 0.30}, {**STRESS, "sharpe": 0.1}, 0.05)
+    ok, d = G.check_g6({**VAL, "max_dd": 0.30}, {**STRESS, "sharpe": 0.1}, 0.05, _pre_r1())
     assert ok is False and d["ok_mdd"] is False
+    # 코드 기본(키 없음)도 이전 동작
+    bare = copy.deepcopy(_pre_r1())
+    for k in ("stress_mode", "drawdown_mode"):
+        bare["G6"].pop(k)
+    assert G.check_g6(VAL, STRESS, 0.05, bare)[0] is False
     for bad in ({"stress_mode": "maybe"}, {"drawdown_mode": "shrink"}):
         with pytest.raises(ValueError):
             G.check_g6(VAL, STRESS, 0.05, cfg_with(**bad))
+    assert G.g6_stress_mode({"stress_mode": False}) == "off"     # YAML 1.1 의 따옴표 없는 off
     with pytest.raises(ValueError):
         G.val_evidence_mode({"evidence": "bayes"})
     # 오프라인 평가기의 현재 패키지도 같은 기본
-    pkg = GR.current_package()
+    pkg = GR.current_package(_pre_r1())
     assert pkg["val_mode"] == "holm" and pkg["g6_dd_mode"] == "reject" and pkg["g6_stress"] == 0.0
 
 
@@ -256,3 +269,27 @@ def test_forward_reads_sidecar_position_scale(planted):
     finally:
         p.unlink()
     assert ForwardStrategy.__dataclass_fields__["position_scale"].default == 1.0
+
+
+
+# ------------------------------------------------------------------ 승인 적용 (D20~D22): 다음 캠페인부터
+def test_r1_applies_prospectively_from_camp_32():
+    from btc_quant.params import gate_config_for_campaign, load_registry
+    old, new = gate_config_for_campaign("camp-000031"), gate_config_for_campaign("camp-000032")
+    assert (old["G6"]["stress_mode"], old["G6"]["drawdown_mode"], old["G6"]["val_budget"]["evidence"]) == \
+        ("sharpe", "reject", "holm")
+    assert (old["G3"]["neighbor_median_ratio"], old["robustness"]["alpha_min_tstat"]) == (0.5, 2.0)
+    assert (new["G6"]["stress_mode"], new["G6"]["drawdown_mode"], new["G6"]["val_budget"]["evidence"]) == \
+        ("off", "size", "combined")
+    assert new["G6"]["min_position_scale"] == 0.25 and new["G6"]["max_mdd"] == 0.20 and new["G6"]["max_mc_mdd95"] == 0.20
+    assert (new["G3"]["neighbor_median_ratio"], new["robustness"]["alpha_min_tstat"]) == (0.25, 1.5)
+    assert G.load_gate_config()["G6"]["stress_mode"] == "off"             # 파일 = 최신 값 (문자열로 저장)
+    reg = load_registry()
+    for key in ("gates.G6.stress_mode", "gates.G6.val_budget.evidence", "gates.G6.drawdown_mode",
+                "gates.G3.neighbor_median_ratio", "robustness.alpha_min_tstat"):
+        h = reg.get(key).history[-1]
+        assert h["applies_from_campaign"] == 32 and h["by"] == "human:user (explicit chat approval 2026-11-10)"
+    # 기존 캠페인은 옛 기준: 이미 Val 에서 떨어진 camp-000013/17 도 옛 설정
+    for cid in ("camp-000013", "camp-000017", "camp-000025"):
+        c = gate_config_for_campaign(cid)
+        assert c["G6"]["val_budget"]["evidence"] == "holm" and c["G6"]["drawdown_mode"] == "reject"
