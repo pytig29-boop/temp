@@ -167,7 +167,9 @@ def test_quick_mode_collect_evaluate_consistency_and_analyze(tmp_path):
         nul.update(kind="null", group="a_std_null", strength=0.0, seed=100 + i, id=f"n_{i}")
         many.append(nul)
     out = S.analyze(many, progress=lambda s: None)
-    assert set(out["packages"]) == {"current", "strict_optimised", "moderate", "aggressive"}
+    assert {"current", "sweep_range_best", "strict_optimised", "moderate", "aggressive", "current@끔",
+            "aggressive@끔"} <= set(out["packages"])
+    assert out["greedy_paths"] and S.compact_summary(out)["rate_format"]
     assert out["current"]["all"]["fpr"]["n"] == 4 and len(out["contribution"]["leave_one_out"]) == len(S.ATOMS)
     assert out["dsr_formula"]["by_position"] and out["stage_rates"]
     T = S.tables_markdown(out)

@@ -35,7 +35,6 @@ from __future__ import annotations
 
 import argparse
 import copy
-import itertools
 import json
 import math
 import os
@@ -177,7 +176,7 @@ def collect_campaign(env, cr, task: dict, grid: str) -> dict:
         g3 = p.g3(spec, float(row["sharpe_w"]))
         ok4, d4 = G.check_g4(row, cfg)
         g5 = p.g5(lh, stats)
-        g6, vres, vmet, mc = p.g6(spec, m1v, vs, ve, p.costs["primary"], p.costs["stress"], record=False,
+        g6, vres, _vmet, _mc = p.g6(spec, m1v, vs, ve, p.costs["primary"], p.costs["stress"], record=False,
                                   budget=False, dev_metrics=row)
         bt = inference.bootstrap_mean_test(vres.daily_returns.to_numpy(float), n_boot=int(vb["n_boot"]),
                                            seed=vb.get("seed", 0))
@@ -253,7 +252,7 @@ def collect_campaign(env, cr, task: dict, grid: str) -> dict:
     for i, c in enumerate(cands):
         c["is_star"] = bool(rep is not None and i == rep)
     return {
-        "grid": grid, "campaign_id": cr.campaign_id, "n_specs": int(len(prim)), "family": tpl.family,
+        "grid": grid, "campaign_id": cr.campaign_id, "n_specs": len(prim), "family": tpl.family,
         "k_eff": int(stats["k_eff_clusters"]), "var_trial_sr": _f(stats["var_trial_sr"]), "pbo": _f(stats.get("pbo")),
         "n_family_at_collect": int(stats["n_family_trials"]), "n_trials_dsr_at_collect": _f(stats["n_trials_dsr"]),
         "campaign_stats": {k: (stats.get(k) if isinstance(stats.get(k), str) else _f(stats.get(k)))
@@ -448,7 +447,7 @@ def _plant_drift(r, up, dn, sig, k_edge, lookback, hold5, base_price):
 try:  # numba 가 있으면 JIT (없어도 동작)
     from numba import njit as _njit
     _plant_drift = _njit(cache=True)(_plant_drift)
-except Exception:  # noqa: BLE001
+except Exception:  # noqa: BLE001, S110 — numba 가 없으면 순수 파이썬으로 동작
     pass
 
 
@@ -808,8 +807,8 @@ def consistency(records: list[dict], pkg: dict | None = None) -> dict:
 # ============================================================== 3단계: 실험 (작업 목록·실행)
 STRENGTHS = (1.0, 1.5, 2.0, 3.0)
 SEED0 = {"a_std_null": 21_000, "a_breakeven": 22_000, "a_low_null": 23_000, "a_vlow_null": 24_000,
-         "a_1m_null": 25_000, "a_regime_null": 26_001, "b_5m": 31_000, "b_1m_atr": 33_000, "b_5m_low": 35_000,
-         "b_5m_vlow": 37_000, "b_regime": 39_001, "c_null": 41_000, "c_planted": 42_000, "d_uni_null": 51_000,
+         "a_1m_null": 25_000, "a_regime_null": 26_001, "b_5m": 31_000, "b_1m_atr": 131_000, "b_5m_low": 231_000,
+         "b_5m_vlow": 331_000, "b_regime": 39_001, "c_null": 41_000, "c_planted": 42_000, "d_uni_null": 51_000,
          "d_uni_planted": 52_000}
 BASE_COUNTS = {"a_std_null": 40, "a_breakeven": 20, "a_low_null": 15, "a_vlow_null": 15, "a_1m_null": 20,
                "a_regime_null": 45, "b_planted": 14, "b_regime": 20, "c_null": 12, "c_planted": 12,
@@ -865,6 +864,54 @@ def edge_maps(raw_dir: Path, pool=None, quick: bool = False, progress=print, sce
     return out
 
 
+UNIVERSE_PILOT_KS = (0.0, 0.015, 0.02, 0.025, 0.03, 0.04)
+
+
+def _pilot_universe_one(args) -> tuple[float, int, float, float]:
+    """3자산 시장에서 S*(세 자산 모두 같은 스펙, 자산별 비용, 1/N 슬리브)의 포트폴리오 연 Sharpe 와 거래/일(합계)."""
+    from btc_quant.backtest import fast
+    from btc_quant.evaluation import metrics as M
+
+    from .campaign import get_sleeve_cost
+    k, seed, years = args
+    start = pd.Timestamp("2010-01-01", tz="UTC")
+    end = start + pd.Timedelta(days=round(365.25 * years))
+    dailies, n_tr = [], 0
+    for sym, df in gen_universe_markets(str(start.date()), str(end.date()), seed, k).items():
+        res = fast.run_fast(C.PLANTED_SPEC, C._engine_m1(df), get_sleeve_cost(C.PRIMARY_COST, sym),
+                            start + pd.Timedelta(days=3), end)
+        dailies.append(res.daily_returns)
+        n_tr += len(res.trades)
+    port = pd.concat(dailies, axis=1).fillna(0.0).mean(axis=1)
+    return k, seed, float(M.sharpe(port)), n_tr / max(1.0, (end - start).days)
+
+
+def universe_edge_map(raw_dir: Path, pool=None, seeds: int = 3, years: float = 4.0, ks=UNIVERSE_PILOT_KS,
+                      progress=print) -> dict:
+    """3자산 유니버스 시장의 k ↦ 포트폴리오 S* 참 Sharpe (자산별 현재 비용). raw_dir/_edge_universe.json."""
+    fp = Path(raw_dir) / "_edge_universe.json"
+    if fp.exists():
+        return json.loads(fp.read_text())
+    tasks = [(k, 90_000 + s_, years) for k in ks for s_ in range(seeds)]
+    progress(f"[edge] pilot universe: {len(ks)} k × {seeds} seeds × {years}y")
+    rows = list(pool.map(_pilot_universe_one, tasks)) if pool else [_pilot_universe_one(t) for t in tasks]
+    kk = np.array(ks, float)
+    sr = np.array([np.mean([r[2] for r in rows if r[0] == k]) for k in kk])
+    mono = np.maximum.accumulate(sr)
+    k_for = {}
+    for s_ in STRENGTHS:
+        if s_ > mono[-1]:
+            k_for[f"{s_:g}"] = float(kk[-1] + (s_ - mono[-1]) / ((mono[-1] - mono[-2]) / (kk[-1] - kk[-2])))
+        else:
+            k_for[f"{s_:g}"] = float(np.interp(s_, mono, kk))
+    e = {"ks": kk.tolist(), "sharpe_mean": sr.tolist(),
+         "trades_per_day": [float(np.mean([r[3] for r in rows if r[0] == k])) for k in kk],
+         "per_seed": [list(r) for r in rows], "pilot_years": years, "pilot_seeds": seeds, "k_for_strength": k_for,
+         "common_share": UNIVERSE_COMMON_SHARE}
+    _write_json(fp, e)
+    return e
+
+
 def _write_json(fp: Path, obj) -> None:
     fp = Path(fp)
     tmp = fp.with_suffix(fp.suffix + f".tmp{os.getpid()}")
@@ -877,7 +924,7 @@ def build_tasks(edges: dict, scale: float = 1.0, layout: C.Layout = C.FULL_LAYOU
                 sequence=CUM_SEQUENCE8) -> list[dict]:
     """우선순위 순서의 작업 목록: 일치 점검 시장(actual) → (a) 귀무 → (b) 심은 엣지 → (c) 누적 프로그램 → (d) 유니버스.
     seed 는 그룹별 고정 범위(같은 scale 을 다시 주면 같은 작업 id → 이어서 실행). TUNE/HOLD-OUT = seed 짝/홀."""
-    cnt = {k: int(round(v * scale)) for k, v in BASE_COUNTS.items()}
+    cnt = {k: round(v * scale) for k, v in BASE_COUNTS.items()}
     cnt.update(counts or {})
     act = dict(ACTUAL_COUNTS)
     act.update(actual_counts or {})
@@ -1019,6 +1066,10 @@ NULL_GROUPS = ("a_std_null", "a_breakeven", "a_low_null", "a_vlow_null", "a_1m_n
 NULL_LABEL = {"a_std_null": "표준 GARCH 귀무", "a_breakeven": "손익분기 귀무", "a_low_null": "저회전 격자 귀무",
               "a_vlow_null": "초저회전 격자 귀무", "a_1m_null": "1분·ATR 귀무", "a_regime_null": "국면 전환 귀무"}
 TARGET_STRENGTHS = (1.5, 2.0)
+# '어려운 귀무': 비용이 후보를 저절로 죽이지 않는 귀무(저회전·초저회전 격자, 손익분기). 표준·1분·국면 귀무의 상위 후보는
+# 비용 후 Sharpe 가 뚜렷이 음수라(하루 5~12회 × 왕복 4bp) 거의 모든 관문에 동시에 걸린다 → 합산 오탐은 쉬운 귀무가 지배한다.
+# 패키지 탐색의 오탐 제약은 '합산'과 '어려운 귀무' 둘 다에 건다.
+HARD_NULL_GROUPS = ("a_low_null", "a_vlow_null", "a_breakeven")
 
 
 def is_program(rec: dict) -> bool:
@@ -1056,17 +1107,20 @@ class Data:
         self.planted = [r for r in self.fresh if not is_null(r)]
         self.prog = [r for r in self.all if is_program(r)]
 
-    def subset(self, which: str) -> "Data":
+    def subset(self, which: str) -> Data:
         return self if which == "all" else Data([r for r in self.all + self.universe if half(r) == which])
 
 
 def package_metrics(d: Data, pkg: dict, cells: bool = True) -> dict:
     """패키지 하나의 오탐(새 원장 귀무; 종류별·하락 Val)과 검정력(시나리오 × 세기; 목표 = Sharpe 1.5–2 칸 평균)."""
-    fp = fp_bear = n_bear = 0
+    fp = fp_bear = n_bear = fp_hard = n_hard = 0
     by_g: dict[str, list[int]] = {}
     for r in d.null:
         v = evaluate_market(r, pkg, detail=False)["any_validated"]
         fp += v
+        if r["group"] in HARD_NULL_GROUPS:
+            fp_hard += v
+            n_hard += 1
         g = by_g.setdefault(r["group"], [0, 0])
         g[0] += v
         g[1] += 1
@@ -1083,7 +1137,7 @@ def package_metrics(d: Data, pkg: dict, cells: bool = True) -> dict:
     tgt = [pw[(sc, s)][0] / pw[(sc, s)][1] for sc in SCENARIOS for s in TARGET_STRENGTHS if pw.get((sc, s), [0, 0])[1]]
     if not tgt:                        # 목표 칸이 없는 자료(quick 점검 등): 있는 칸 전부의 평균
         tgt = [v[0] / v[1] for v in pw.values() if v[1]]
-    out = {"fpr": rate(fp, len(d.null)), "fpr_bear": rate(fp_bear, n_bear),
+    out = {"fpr": rate(fp, len(d.null)), "fpr_bear": rate(fp_bear, n_bear), "fpr_hard": rate(fp_hard, n_hard),
            "power_target": float(np.mean(tgt)) if tgt else 0.0,
            "power_target_pooled": rate(sum(pw[(sc, s)][0] for sc in SCENARIOS for s in TARGET_STRENGTHS if (sc, s) in pw),
                                        sum(pw[(sc, s)][1] for sc in SCENARIOS for s in TARGET_STRENGTHS if (sc, s) in pw))}
@@ -1149,11 +1203,11 @@ def gate_contribution(d: Data, pkg: dict) -> dict:
     logo, only = {}, {}
     for a in ATOMS:
         m = package_metrics(d, without_atoms(pkg, [a]), cells=True)
-        logo[a] = {"fpr": m["fpr"], "fpr_bear": m["fpr_bear"], "power_target": m["power_target"],
+        logo[a] = {"fpr": m["fpr"], "fpr_bear": m["fpr_bear"], "fpr_hard": m["fpr_hard"], "power_target": m["power_target"],
                    "d_fpr": m["fpr"]["p"] - base["fpr"]["p"], "d_power_target": m["power_target"] - base["power_target"],
                    **{f"power_s{s:g}": m[f"power_s{s:g}"] for s in STRENGTHS}}
         mo = package_metrics(d, only_atom(pkg, a), cells=False)
-        only[a] = {"fpr_market": mo["fpr"], "power_target": mo["power_target"]}
+        only[a] = {"fpr_market": mo["fpr"], "fpr_hard": mo["fpr_hard"], "power_target": mo["power_target"]}
     nullf, starf = [], []
     for r in d.null:
         for c in r["campaigns"][0]["cands"]:
@@ -1184,7 +1238,8 @@ def gate_contribution(d: Data, pkg: dict) -> dict:
         nfail_star[len(bad)] = nfail_star.get(len(bad), 0) + 1
         if len(bad) == 1:
             sole_star[bad[0]] += 1
-    return {"base": {"fpr": base["fpr"], "power_target": base["power_target"]}, "leave_one_out": logo, "only": only,
+    return {"base": {"fpr": base["fpr"], "fpr_hard": base["fpr_hard"], "power_target": base["power_target"]},
+            "leave_one_out": logo, "only": only,
             "stop_null_candidates": stop_null, "stop_true_edge_star": stop_star, "redundancy_null": red,
             "sole_stopper_null": sole, "n_failed_atoms_null": dict(sorted(nfail.items())),
             "sole_stopper_true_edge": sole_star, "n_failed_atoms_true_edge": dict(sorted(nfail_star.items())),
@@ -1229,7 +1284,8 @@ def run_sweeps(d: Data, pkg: dict, sweeps=None) -> list[dict]:
     for name, lab, ch in (sweeps or SWEEPS):
         m = package_metrics(d, with_changes(pkg, **ch), cells=True)
         out.append({"gate": name, "value": lab, "changes": ch, "is_current": all(pkg.get(k) == v for k, v in ch.items()),
-                    "fpr": m["fpr"], "fpr_bear": m["fpr_bear"], "power_target": m["power_target"],
+                    "fpr": m["fpr"], "fpr_bear": m["fpr_bear"], "fpr_hard": m["fpr_hard"],
+                    "power_target": m["power_target"],
                     **{f"power_s{s:g}": m[f"power_s{s:g}"] for s in STRENGTHS},
                     "power_by_scenario_target": {sc: _pool(m["power"], sc) for sc in SCENARIOS}})
     return out
@@ -1313,32 +1369,66 @@ SEARCH_OPTIONS: dict[str, list[dict]] = {
 }
 
 
-def _choice_pkg(base: dict, choice: dict[str, int]) -> dict:
+# 확장 탐색 공간: 훑기 범위 + '끔'(관문 제거)까지. 훑기 범위 안에서는 귀무 오탐이 0 에서 움직이지 않아(귀무 후보가 관문
+# 여러 개에 동시에 걸림) 오탐 제약이 묶이지 않는다 → 오탐 5/10/20% 를 실제로 '쓰는' 패키지는 이 공간에서 찾는다.
+SEARCH_OPTIONS_EXT: dict[str, list[dict]] = {
+    "G1": [{"g1_min_trades": v} for v in (300, 200, 150, 100)],
+    "G2": [{"g2_frac": v} for v in (0.05, 0.10, 0.20, None)],
+    "G3": [{"g3_ratio": v} for v in (0.5, 0.25, 0.0, None)],
+    "G4_roll": [{"g4_roll": v} for v in (0.6, 0.5, 0.4, None)],
+    "G4_recent": [{"g4_recent": v} for v in (0.0, -0.5, None)],
+    "G5_dsr": [{"g5_dsr": v} for v in (0.95, 0.90, 0.80, 0.50, None)],
+    "G5_pbo": [{"g5_pbo": v} for v in (0.3, 0.5, None)],
+    "G6_stress": [{"g6_stress": v} for v in (0.0, -1.0, -2.0, None)],
+    "Val": [ch for _, ch in VAL_VARIANTS],
+    "R_alpha": [{"rob_alpha_t": v} for v in (2.0, 1.5, 1.0, None)],
+    "R_latency": [{"rob_latency": v} for v in (0.5, 0.3, None)],
+    "R_regime": [{"rob_regime": v} for v in (0.7, 0.8, None)],
+    "R_cost": [{"rob_cost_mult": v} for v in (1.5, None)],
+    "R_outliers": [{"rob_outliers": v} for v in (0.0, None)],
+    "R_loyo": [{"rob_loyo": v} for v in (0.0, None)],
+}
+LOOSEST = {"Val": 7}                # 가장 느슨한 출발점의 Val 선택 = 고정 p ≤ 0.50 (확장 공간에서는 '증거 없음')
+
+
+def _choice_pkg(base: dict, choice: dict[str, int], options: dict | None = None) -> dict:
+    options = options or SEARCH_OPTIONS
     pkg = dict(base)
     for key, i in choice.items():
-        pkg.update(SEARCH_OPTIONS[key][i])
+        pkg.update(options[key][i])
     return pkg
+
+
+def _choice_changes(choice: dict[str, int], options: dict) -> dict:
+    ch = {}
+    for k, i in choice.items():
+        if i:
+            ch.update(options[k][i])
+    return ch
 
 
 def _n_changes(choice: dict[str, int]) -> int:
     return sum(1 for i in choice.values() if i != 0)
 
 
-def package_search(d: Data, base: dict, fpr_target: float, eps: float = 0.005, progress=None) -> dict:
-    """목표: Sharpe 1.5–2 칸(회전율 4종) 평균 검정력 최대, 제약: 새 원장 귀무 오탐 ≤ fpr_target. 단순한 패키지 선호.
+def package_search(d: Data, base: dict, fpr_target: float, eps: float = 0.02, progress=None,
+                   options: dict | None = None, cache: dict | None = None) -> dict:
+    """목표: Sharpe 1.5–2 칸(회전율 4종) 평균 검정력 최대, 제약: 새 원장 귀무 오탐 ≤ fpr_target — 합산 오탐과
+    '어려운 귀무'(HARD_NULL_GROUPS) 오탐 중 큰 쪽 기준. 단순한 패키지 선호.
     방법: (A) 현재에서 출발해 한 키 또는 두 키를 동시에 바꾸는 이동 중 가장 좋은 것을 반복(좌표 상승; 두 키 이동은 여러
     관문이 함께 막는 경우를 위해). (B) 가장 느슨한 선택에서 출발해 오탐 제약을 만족할 때까지 '검정력 손실이 가장 작은'
     조이기를 반복. 둘 중 목표값이 큰 쪽(같으면 변경 수가 적은 쪽) → (C) 가지치기: 현재값으로 되돌려도 목표값이 eps 넘게
     줄지 않는 변경은 되돌린다. 평가 기록(모든 패키지의 오탐·검정력)은 trade-off 곡선용으로 남긴다."""
-    keys = list(SEARCH_OPTIONS)
-    cache: dict[tuple, tuple] = {}
+    SEARCH = options or SEARCH_OPTIONS
+    keys = list(SEARCH)
+    cache = {} if cache is None else cache            # 같은 자료·같은 공간이면 목표 간에 공유
     log = progress or (lambda s: None)
 
     def ev(choice: dict[str, int]) -> tuple[float, float]:
         k = tuple(choice[x] for x in keys)
         if k not in cache:
-            m = package_metrics(d, _choice_pkg(base, choice), cells=False)
-            cache[k] = (m["fpr"]["p"] or 0.0, m["power_target"] or 0.0)
+            m = package_metrics(d, _choice_pkg(base, choice, SEARCH), cells=False)
+            cache[k] = (max(m["fpr"]["p"] or 0.0, m["fpr_hard"]["p"] or 0.0), m["power_target"] or 0.0)
         return cache[k]
 
     def better(a, b, na, nb) -> bool:      # a 가 b 보다 나은가 (목표값 → 변경 수 → 오탐)
@@ -1348,24 +1438,30 @@ def package_search(d: Data, base: dict, fpr_target: float, eps: float = 0.005, p
             return False
         return (na, a[0]) < (nb, b[0])
 
-    def ascend(cur: dict[str, int]) -> dict[str, int]:
+    path: list[dict] = []
+
+    def ascend(cur: dict[str, int], record: bool = False) -> dict[str, int]:
         cur = dict(cur)
         while True:
             best, best_v = None, ev(cur)
-            moves = [((k1, i1),) for k1 in keys for i1 in range(len(SEARCH_OPTIONS[k1])) if i1 != cur[k1]]
+            moves = [((k1, i1),) for k1 in keys for i1 in range(len(SEARCH[k1])) if i1 != cur[k1]]
             moves += [((k1, i1), (k2, i2)) for a_, k1 in enumerate(keys) for k2 in keys[a_ + 1:]
-                      for i1 in range(len(SEARCH_OPTIONS[k1])) if i1 != cur[k1]
-                      for i2 in range(len(SEARCH_OPTIONS[k2])) if i2 != cur[k2]]
+                      for i1 in range(len(SEARCH[k1])) if i1 != cur[k1]
+                      for i2 in range(len(SEARCH[k2])) if i2 != cur[k2]]
             for mv in moves:
                 c2 = dict(cur)
                 for k_, i_ in mv:
                     c2[k_] = i_
                 v = ev(c2)
-                if v[0] <= fpr_target + 1e-12 and v[1] > best_v[1] + eps:
-                    if best is None or better(v, ev(best), _n_changes(c2), _n_changes(best)):
-                        best = c2
+                if (v[0] <= fpr_target + 1e-12 and v[1] > best_v[1] + eps
+                        and (best is None or better(v, ev(best), _n_changes(c2), _n_changes(best)))):
+                    best = c2
             if best is None:
                 return cur
+            if record:
+                step = {k_: best[k_] for k_ in keys if best[k_] != cur[k_]}
+                path.append({"step_choice": step, "choice": dict(best), "tune_fpr": ev(best)[0],
+                             "tune_power": ev(best)[1]})
             cur = best
             log(f"  ascend → {ev(cur)} {_n_changes(cur)} changes")
 
@@ -1375,7 +1471,7 @@ def package_search(d: Data, base: dict, fpr_target: float, eps: float = 0.005, p
             v0 = ev(cur)
             best, score = None, None
             for k1 in keys:
-                for i1 in range(len(SEARCH_OPTIONS[k1])):
+                for i1 in range(len(SEARCH[k1])):
                     if i1 == cur[k1]:
                         continue
                     c2 = dict(cur)
@@ -1409,21 +1505,21 @@ def package_search(d: Data, base: dict, fpr_target: float, eps: float = 0.005, p
         return cur
 
     start = {k: 0 for k in keys}
-    a = ascend(start)
-    loosest = {k: len(SEARCH_OPTIONS[k]) - 1 for k in keys}
-    loosest["Val"] = 7                      # 고정 p ≤ 0.50
+    path.append({"step_choice": {}, "choice": dict(start), "tune_fpr": ev(start)[0], "tune_power": ev(start)[1]})
+    a = ascend(start, record=True)
+    loosest = {k: len(SEARCH[k]) - 1 for k in keys}
+    if SEARCH is SEARCH_OPTIONS:
+        loosest.update(LOOSEST)
     b = ascend(tighten(loosest))
     pick = a if not better(ev(b), ev(a), _n_changes(b), _n_changes(a)) else b
     pick = prune(pick)
-    changes = {}
-    for k in keys:
-        if pick[k] != 0:
-            changes.update(SEARCH_OPTIONS[k][pick[k]])
+    changes = _choice_changes(pick, SEARCH)
     evals = [{"choice": dict(zip(keys, k)), "fpr": v[0], "power_target": v[1],
               "n_changes": sum(1 for i in k if i != 0)} for k, v in cache.items()]
     return {"fpr_target": fpr_target, "choice": pick, "changes": changes, "n_changes": _n_changes(pick),
             "tune": {"fpr": ev(pick)[0], "power_target": ev(pick)[1]}, "start_ascend": {"choice": a, "value": ev(a)},
-            "start_loosest": {"choice": b, "value": ev(b)}, "n_evaluated": len(cache), "evaluations": evals}
+            "start_loosest": {"choice": b, "value": ev(b)}, "n_evaluated": len(cache), "evaluations": evals,
+            "path": path}
 
 
 def pareto(evals: list[dict]) -> list[dict]:
@@ -1502,6 +1598,11 @@ def describe_data(d: Data) -> dict:
     return out
 
 
+# 낙폭 한도(class ③: G6 Val 낙폭·MC 낙폭95) 설정 — 탐색의 '조건'. 20% = 현재.
+C3_SETTINGS: dict[str, dict] = {"20%": {}, "30%": {"g6_mdd": 0.30, "g6_mc": 0.30}, "40%": {"g6_mdd": 0.40, "g6_mc": 0.40},
+                                "끔": {"g6_mdd": None, "g6_mc": None}}
+
+
 def analyze(records: list[dict], fpr_targets=(0.05, 0.10, 0.20), progress=print, search: bool = True) -> dict:
     """4단계 전체. 반환 dict 는 작다(원시 레코드 없음). 패키지는 TUNE(짝수 seed)에서 고르고 HOLD-OUT(홀수 seed)·전체에서 보고."""
     cur = current_package()
@@ -1517,49 +1618,85 @@ def analyze(records: list[dict], fpr_targets=(0.05, 0.10, 0.20), progress=print,
     res["current"]["programs"] = program_metrics(d, cur)
     progress("[analyze] gate contribution")
     res["contribution"] = gate_contribution(d, cur)
+    c3off = with_changes(cur, g6_mdd=None, g6_mc=None)
+    res["contribution_c3off"] = gate_contribution(d, c3off)
     progress("[analyze] sweeps")
+    res["sweeps_c3off"] = run_sweeps(d, c3off)
     res["sweeps"] = run_sweeps(d, cur)
     res["sweeps_class3"] = run_sweeps(d, cur, CLASS3_SWEEPS)
     res["dsr_formula"] = dsr_formula_table(d, cur)
     packages: dict[str, dict] = {"current": {"changes": {}, "n_changes": 0}}
+    for lab, ch in C3_SETTINGS.items():
+        if ch:
+            packages[f"current@{lab}"] = {"changes": dict(ch), "n_changes": 0, "class3": lab}
     if search:
+        # (1) 훑기 범위 안에서의 최선 (낙폭 한도 = 현재; 오탐 제약 5% — 이 범위에서는 보통 묶이지 않는다)
+        progress("[analyze] package search (TUNE), sweep-range space")
+        s0 = package_search(tune, cur, min(fpr_targets), progress=progress)
+        ev0 = s0.pop("evaluations")
+        s0.pop("path", None)
+        packages["sweep_range_best"] = s0
+        # (2) 확장 공간('끔' 포함): 낙폭 한도(class ③) 설정별 × 오탐 목표별. class ③ 은 사람의 위험 선호이므로 탐색
+        # 대상이 아니라 '조건'이다 — 현재(20%)가 본 결과, 나머지는 정보.
         names = {0.05: "strict_optimised", 0.10: "moderate", 0.20: "aggressive"}
-        evals_all = []
-        for t in fpr_targets:
-            progress(f"[analyze] package search (TUNE) FPR ≤ {t:g}")
-            s = package_search(tune, cur, t, progress=progress)
-            evals_all += s.pop("evaluations")
-            packages[names.get(t, f"fpr{t:g}")] = s
-        # trade-off 곡선: TUNE 에서 평가한 모든 패키지의 비지배 점 → HOLD-OUT·전체에서 다시 평가
-        uniq = {tuple(sorted(e["choice"].items())): e for e in evals_all}
-        front = pareto(list(uniq.values()))
         curve = []
-        for e in front:
-            pkg = _choice_pkg(cur, e["choice"])
+        for e in pareto(ev0):
+            pkg = _choice_pkg(cur, e["choice"], SEARCH_OPTIONS)
             mh, ma = package_metrics(hold, pkg, cells=False), package_metrics(d, pkg, cells=False)
-            ch = {}
-            for k, i in e["choice"].items():
-                if i:
-                    ch.update(SEARCH_OPTIONS[k][i])
-            curve.append({"changes": ch, "n_changes": e["n_changes"], "tune_fpr": e["fpr"],
-                          "tune_power": e["power_target"], "hold_fpr": mh["fpr"], "hold_power": mh["power_target"],
-                          "all_fpr": ma["fpr"], "all_power": ma["power_target"]})
+            curve.append({"space": "sweep", "class3": "20%", "changes": _choice_changes(e["choice"], SEARCH_OPTIONS),
+                          "n_changes": e["n_changes"], "tune_fpr": e["fpr"], "tune_power": e["power_target"],
+                          "hold_fpr": mh["fpr"], "hold_power": mh["power_target"], "all_fpr": ma["fpr"],
+                          "all_power": ma["power_target"]})
+        for lab, ch in C3_SETTINGS.items():
+            base = with_changes(cur, **ch)
+            cache: dict = {}
+            evals_ext = []
+            for t in fpr_targets:
+                progress(f"[analyze] package search (TUNE), extended space, class3={lab}, FPR ≤ {t:g}")
+                sx = package_search(tune, base, t, progress=None, options=SEARCH_OPTIONS_EXT, cache=cache)
+                evals_ext = sx.pop("evaluations")
+                pth = sx.pop("path")
+                if t == max(fpr_targets):       # 단계별 경로 (한 번에 한두 키씩 — 가장 값진 변경부터)
+                    steps = []
+                    for st in pth:
+                        pkg = _choice_pkg(base, st["choice"], SEARCH_OPTIONS_EXT)
+                        mh, ma = package_metrics(hold, pkg, cells=False), package_metrics(d, pkg, cells=True)
+                        steps.append({"added": _choice_changes(st["step_choice"], SEARCH_OPTIONS_EXT),
+                                      "tune_fpr": st["tune_fpr"], "tune_power": st["tune_power"],
+                                      "hold_fpr": mh["fpr"], "hold_fpr_hard": mh["fpr_hard"],
+                                      "hold_power": mh["power_target_pooled"], "all_fpr": ma["fpr"],
+                                      "all_fpr_hard": ma["fpr_hard"], "all_power": ma["power_target_pooled"],
+                                      **{f"all_power_s{s_:g}": ma[f"power_s{s_:g}"] for s_ in STRENGTHS}})
+                    res.setdefault("greedy_paths", {})[lab] = steps
+                sx["changes"] = {**ch, **sx["changes"]}
+                sx["class3"] = lab
+                packages[names.get(t, f"fpr{t:g}") + ("" if not ch else f"@{lab}")] = sx
+            for e in pareto(evals_ext):
+                pkg = _choice_pkg(base, e["choice"], SEARCH_OPTIONS_EXT)
+                mh, ma = package_metrics(hold, pkg, cells=False), package_metrics(d, pkg, cells=False)
+                curve.append({"space": "extended", "class3": lab,
+                              "changes": _choice_changes(e["choice"], SEARCH_OPTIONS_EXT), "n_changes": e["n_changes"],
+                              "tune_fpr": e["fpr"], "tune_power": e["power_target"], "hold_fpr": mh["fpr"],
+                              "hold_power": mh["power_target"], "all_fpr": ma["fpr"], "all_power": ma["power_target"]})
         res["tradeoff_curve"] = curve
     for name, p_ in packages.items():
         pkg = with_changes(cur, **p_["changes"])
         p_["metrics"] = {w: package_metrics(x, pkg) for w, x in (("all", d), ("tune", tune), ("hold", hold))}
         p_["programs"] = program_metrics(d, pkg)
-        p_["class3_info"] = {lab: {k: v for k, v in package_metrics(d, with_changes(pkg, **ch), cells=True).items()
-                                   if k in ("fpr", "fpr_bear", "power_target", "power_s1", "power_s1.5", "power_s2",
-                                            "power_s3")}
-                             for _, lab, ch in CLASS3_SWEEPS[8:]}
-        p_["first_failed"] = first_failed_tables(d, pkg)
+        p_["class3_info"] = ({} if p_.get("class3", "20%") != "20%" else
+                             {lab: {k: v for k, v in package_metrics(d, with_changes(pkg, **ch), cells=True).items()
+                                    if k in ("fpr", "fpr_bear", "power_target", "power_s1", "power_s1.5", "power_s2",
+                                             "power_s3")}
+                              for _, lab, ch in CLASS3_SWEEPS[8:]})
+        p_["first_failed"] = {"star": first_failed_tables(d, pkg)["star"]}
+        for k_ in ("start_ascend", "start_loosest", "choice"):
+            p_.pop(k_, None)
     res["packages"] = packages
     progress("[analyze] stage rates")
     dev_pkgs = {"현재 Dev 관문": cur}
     for name, p_ in packages.items():
-        if name != "current":
-            dev_pkgs[f"{name} 의 Dev 관문"] = with_changes(cur, **p_["changes"])
+        if name in ("sweep_range_best", "strict_optimised", "aggressive@끔"):
+            dev_pkgs[f"{PKG_KO.get(name, name)} 의 Dev 관문"] = with_changes(cur, **p_["changes"])
     res["stage_rates"] = stage_rates(d, dev_pkgs, cur)
     if d.universe:
         du = Data([dict(r, scenario="5m") for r in d.universe])
@@ -1571,6 +1708,58 @@ def analyze(records: list[dict], fpr_targets=(0.05, 0.10, 0.20), progress=print,
     return res
 
 
+KEY_PACKAGES = ("current", "sweep_range_best", "strict_optimised", "moderate", "aggressive", "current@끔",
+                "strict_optimised@끔", "moderate@끔", "aggressive@끔")
+
+
+def compact_summary(res: dict) -> dict:
+    """요약 JSON 을 작게: 실수 4자리 반올림, 핵심 패키지 밖은 오탐·검정력 요약만, 큰 부속 표 제거."""
+    def rnd(o):
+        if isinstance(o, float):
+            return round(o, 4)
+        if isinstance(o, dict):
+            if set(o) == {"x", "n", "p", "lo", "hi"}:      # 비율 = [x, n] (신뢰구간은 Wilson 으로 다시 계산)
+                return [o["x"], o["n"]]
+            return {k: rnd(v) for k, v in o.items()}
+        if isinstance(o, (list, tuple)):
+            return [rnd(v) for v in o]
+        return o
+
+    def slim_metrics(m: dict, cells: bool) -> dict:
+        keep = ("fpr", "fpr_hard", "fpr_bear", "power_target", "power_target_pooled", "power_s1", "power_s1.5",
+                "power_s2", "power_s3") + (("fpr_by_group", "power") if cells else ())
+        return {k: m[k] for k in keep if k in m}
+
+    out = copy.deepcopy(res)
+    for name, p_ in (out.get("packages") or {}).items():
+        key = name in KEY_PACKAGES
+        p_["metrics"] = {w: slim_metrics(m, key and w != "tune") for w, m in p_["metrics"].items()}
+        if not key:
+            p_.pop("first_failed", None)
+            p_.pop("class3_info", None)
+        p_.pop("n_evaluated", None)
+    for w in ("tune", "hold"):
+        if w in out.get("current", {}):
+            out["current"][w] = slim_metrics(out["current"][w], True)
+    for key in ("contribution", "contribution_c3off"):
+        g = out.get(key)
+        if g:
+            g["redundancy_null"] = {a: {b: (None if v is None else round(v, 2)) for b, v in row.items()}
+                                    for a, row in g["redundancy_null"].items()}
+    for key in ("sweeps", "sweeps_class3", "sweeps_c3off"):
+        for r in out.get(key) or []:
+            r.pop("changes", None)
+    out.pop("sweeps_c3off", None)
+    out["tradeoff_curve"] = [e for e in out.get("tradeoff_curve") or [] if e.get("class3") in ("20%", "끔")]
+    out["stage_rates"] = {g: {d_: {"n": row["n"], "dev_survivors": row["dev_survivors"], "g6_checks": row["g6_checks"],
+                                   "robustness": row["robustness"],
+                                   "val": {lab: v["evidence_and_sharpe"] for lab, v in row["val"].items()},
+                                   "val_g6_and_robustness": {lab: v["g6_and_robustness"] for lab, v in row["val"].items()}}
+                              for d_, row in by.items()} for g, by in (out.get("stage_rates") or {}).items()}
+    out["rate_format"] = "[x, n] = x of n markets/candidates (Wilson 95% CI: calibration_study.wilson)"
+    return rnd(out)
+
+
 # ============================================================== 표 (마크다운)
 ATOM_KO = {"G1": "G1 표본(거래 수)", "G2": "G2 무작위 진입 귀무", "G3": "G3 이웃 고원", "G4_roll": "G4 롤링 양수 비율",
            "G4_recent": "G4 최근 12개월", "G5_dsr": "G5 DSR", "G5_pbo": "G5 PBO", "G6_sharpe": "G6 Val Sharpe>0",
@@ -1578,9 +1767,14 @@ ATOM_KO = {"G1": "G1 표본(거래 수)", "G2": "G2 무작위 진입 귀무", "G
            "G6_holm": "G6 Val Holm", "R_latency": "견고성 지연", "R_outliers": "견고성 상위 거래 제거",
            "R_loyo": "견고성 연도 제외", "R_cost": "견고성 비용×1.5", "R_regime": "견고성 국면 비중",
            "R_alpha": "견고성 알파 t"}
-PKG_KO = {"current": "현재", "strict_optimised": "엄격-최적 (오탐 ≤5%)", "moderate": "중도 (오탐 ≤10%)",
-          "aggressive": "적극 (오탐 ≤20%)"}
-KEY_KO = {"g1_min_trades": "G1 최소 거래", "g2_frac": "G2 귀무 상위 비율", "g3_ratio": "G3 이웃 비", "g4_roll": "G4 롤링",
+PKG_KO = {"current": "현재", "sweep_range_best": "훑기 범위 최선", "strict_optimised": "엄격-최적 (오탐 ≤5%)",
+          "moderate": "중도 (오탐 ≤10%)", "aggressive": "적극 (오탐 ≤20%)"}
+for _lab in ("30%", "40%", "끔"):
+    PKG_KO[f"current@{_lab}"] = f"현재 + 낙폭 한도 {_lab}"
+    for _n, _k in (("strict_optimised", "엄격-최적 (오탐 ≤5%)"), ("moderate", "중도 (오탐 ≤10%)"), ("aggressive", "적극 (오탐 ≤20%)")):
+        PKG_KO[f"{_n}@{_lab}"] = f"{_k} · 낙폭 한도 {_lab}"
+KEY_KO = {"rob_cost_mult": "견고성 비용 배수", "rob_outliers": "견고성 상위 거래 제거", "rob_loyo": "견고성 연도 제외",
+          "g1_min_trades": "G1 최소 거래", "g2_frac": "G2 귀무 상위 비율", "g3_ratio": "G3 이웃 비", "g4_roll": "G4 롤링",
           "g4_recent": "G4 최근 Sharpe 하한", "g5_dsr": "G5 DSR", "g5_pbo": "G5 PBO", "g6_stress": "G6 stress Sharpe 하한",
           "val_mode": "Val 증거 방식", "val_alpha": "Val α/p 문턱", "rob_alpha_t": "견고성 알파 t",
           "rob_latency": "견고성 지연 유지율", "rob_regime": "견고성 국면 비중", "g6_mdd": "G6 낙폭 상한",
@@ -1644,35 +1838,51 @@ def tables_markdown(res: dict) -> dict[str, str]:
     T["current_first_failed_null"] = _tbl(["첫 탈락(귀무 후보)", "후보 수"], [[k, v] for k, v in ff["null_candidates"].items()])
     T["current_first_failed_star"] = _tbl(["시나리오@Sharpe", "S* 대표의 결과 (개수)"],
                                           [[k, ", ".join(f"{a}:{b}" for a, b in v.items())] for k, v in ff["star"].items()])
-    g = res["contribution"]
-    T["logo"] = _tbl(["뺀 관문", "오탐", "Δ오탐", "검정력(1.5–2 칸 평균)", "Δ검정력", "S1", "S1.5", "S2", "S3"],
-                     [["(현재 — 아무것도 안 뺌)", fmt_rate(g["base"]["fpr"], False), "", _pc(g["base"]["power_target"]), "",
-                       *[fmt_rate(ca[f"power_s{s:g}"], False) for s in STRENGTHS]]]
-                     + [[ATOM_KO[a], fmt_rate(v["fpr"], False), f"{100 * v['d_fpr']:+.1f}%p", _pc(v["power_target"]),
-                         f"{100 * v['d_power_target']:+.1f}%p", *[fmt_rate(v[f"power_s{s:g}"], False) for s in STRENGTHS]]
-                        for a, v in g["leave_one_out"].items()])
-    T["only"] = _tbl(["관문", "이 관문만 켰을 때 오탐(시장)", "귀무 후보를 막는 비율", "참 엣지(S*≥1.5) 대표를 막는 비율",
-                      "귀무 후보를 혼자 막음(건)", "참 엣지를 혼자 막음(건)"],
-                     [[ATOM_KO[a], fmt_rate(g["only"][a]["fpr_market"], False), fmt_rate(g["stop_null_candidates"][a], False),
-                       fmt_rate(g["stop_true_edge_star"][a], False), g["sole_stopper_null"][a], g["sole_stopper_true_edge"][a]]
-                      for a in ATOMS])
-    T["n_failed"] = (f"귀무 후보 {g['n_null_candidates']}개가 실패한 원자 관문 수 분포: {g['n_failed_atoms_null']}. "
-                     f"참 엣지(S* ≥ 1.5) 대표 {g['n_true_edge_star']}개: {g['n_failed_atoms_true_edge']}.")
-    short = {a: a.replace("G6_", "V_") for a in ATOMS}
-    T["redundancy"] = _tbl(["A가 막은 귀무 후보 중 B도 막은 비율 → B", *[short[b] for b in ATOMS]],
-                           [[short[a], *["·" if a == b else ("—" if g["redundancy_null"][a][b] is None
-                                                             else f"{100 * g['redundancy_null'][a][b]:.0f}")
-                                         for b in ATOMS]] for a in ATOMS])
+    for suffix, g, ca_ in (("", res["contribution"], ca), ("_c3off", res.get("contribution_c3off"), None)):
+        if g is None:
+            continue
+        _contribution_tables(T, g, ca_, suffix)
 
     def sweep_tbl(rows: list[dict]) -> str:
-        return _tbl(["기준", "값", "오탐", "하락 Val 오탐", "검정력(1.5–2 칸 평균)", "S1", "S1.5", "S2", "S3",
+        return _tbl(["기준", "값", "오탐", "어려운 귀무 오탐", "하락 Val 오탐", "검정력(1.5–2 칸 평균)", "S1", "S1.5", "S2", "S3",
                      *[f"{SCEN_LABEL[sc].split(' ')[0]} 1.5–2" for sc in SCENARIOS]],
                     [[r["gate"], r["value"] + (" **(현재)**" if r["is_current"] else ""), fmt_rate(r["fpr"], False),
-                      fmt_rate(r["fpr_bear"], False), _pc(r["power_target"]),
+                      fmt_rate(r.get("fpr_hard"), False), fmt_rate(r["fpr_bear"], False), _pc(r["power_target"]),
                       *[fmt_rate(r[f"power_s{s:g}"], False) for s in STRENGTHS],
                       *[fmt_rate(r["power_by_scenario_target"][sc], False) for sc in SCENARIOS]] for r in rows])
     T["sweeps"] = sweep_tbl(res["sweeps"])
     T["sweeps_class3"] = sweep_tbl(res["sweeps_class3"])
+    if res.get("sweeps_c3off"):
+        T["sweeps_c3off"] = sweep_tbl(res["sweeps_c3off"])
+    _rest_tables(T, res, cur, power_grid)
+    return T
+
+
+def _contribution_tables(T: dict, g: dict, ca: dict | None, suffix: str) -> None:
+    T["logo" + suffix] = _tbl(["뺀 관문", "오탐", "Δ오탐", "어려운 귀무 오탐", "검정력(1.5–2 칸 평균)", "Δ검정력", "S1", "S1.5", "S2", "S3"],
+                     [["(기준 — 아무것도 안 뺌)", fmt_rate(g["base"]["fpr"], False), "", fmt_rate(g["base"].get("fpr_hard"), False),
+                       _pc(g["base"]["power_target"]), "",
+                       *[(fmt_rate(ca[f"power_s{s:g}"], False) if ca else "") for s in STRENGTHS]]]
+                     + [[ATOM_KO[a], fmt_rate(v["fpr"], False), f"{100 * v['d_fpr']:+.1f}%p", fmt_rate(v.get("fpr_hard"), False),
+                         _pc(v["power_target"]),
+                         f"{100 * v['d_power_target']:+.1f}%p", *[fmt_rate(v[f"power_s{s:g}"], False) for s in STRENGTHS]]
+                        for a, v in g["leave_one_out"].items()])
+    T["only" + suffix] = _tbl(["관문", "이 관문만 켰을 때 오탐(시장)", "이 관문만: 어려운 귀무 오탐", "귀무 후보를 막는 비율",
+                      "참 엣지(S*≥1.5) 대표를 막는 비율", "귀무 후보를 혼자 막음(건)", "참 엣지를 혼자 막음(건)"],
+                     [[ATOM_KO[a], fmt_rate(g["only"][a]["fpr_market"], False), fmt_rate(g["only"][a].get("fpr_hard"), False),
+                       fmt_rate(g["stop_null_candidates"][a], False),
+                       fmt_rate(g["stop_true_edge_star"][a], False), g["sole_stopper_null"][a], g["sole_stopper_true_edge"][a]]
+                      for a in ATOMS])
+    T["n_failed" + suffix] = (f"귀무 후보 {g['n_null_candidates']}개가 실패한 원자 관문 수 분포: {g['n_failed_atoms_null']}. "
+                     f"참 엣지(S* ≥ 1.5) 대표 {g['n_true_edge_star']}개: {g['n_failed_atoms_true_edge']}.")
+    short = {a: a.replace("G6_", "V_") for a in ATOMS}
+    T["redundancy" + suffix] = _tbl(["A가 막은 귀무 후보 중 B도 막은 비율 → B", *[short[b] for b in ATOMS]],
+                                    [[short[a], *["·" if a == b else ("—" if g["redundancy_null"][a][b] is None
+                                                                      else f"{100 * g['redundancy_null'][a][b]:.0f}")
+                                                  for b in ATOMS]] for a in ATOMS])
+
+
+def _rest_tables(T: dict, res: dict, cur: dict, power_grid) -> None:
     # 단계별 통과율
     sr = res["stage_rates"]
     vlabs = [lab for lab, _ in VAL_VARIANTS]
@@ -1692,14 +1902,19 @@ def tables_markdown(res: dict) -> dict[str, str]:
     T["stage_full"] = _tbl(["후보 집단", "Dev 관문", "Dev 생존자 수", *[f"G6 전체+견고성: {lab}" for lab in vlabs]], rows)
     # 패키지
     pk = res["packages"]
-    T["packages"] = _tbl(["패키지", "현재에서 바꾼 것", "TUNE 오탐", "TUNE 검정력", "HOLD-OUT 오탐", "HOLD-OUT 검정력",
-                          "전체 오탐", "전체 하락 Val 오탐", "전체 검정력(1.5–2 칸 평균)"],
-                         [[PKG_KO.get(n, n), _chg(v["changes"], cur), fmt_rate(v["metrics"]["tune"]["fpr"], False),
+    T["packages"] = _tbl(["패키지", "TUNE 오탐 (합산 / 어려운 귀무)", "TUNE 검정력", "HOLD-OUT 오탐", "HOLD-OUT 어려운 귀무 오탐",
+                          "HOLD-OUT 검정력", "전체 오탐", "전체 어려운 귀무 오탐", "전체 하락 Val 오탐", "전체 검정력(1.5–2)"],
+                         [[PKG_KO.get(n, n), fmt_rate(v["metrics"]["tune"]["fpr"], False) + " / "
+                           + fmt_rate(v["metrics"]["tune"]["fpr_hard"], False),
                            _pc(v["metrics"]["tune"]["power_target"]), fmt_rate(v["metrics"]["hold"]["fpr"]),
-                           _pc(v["metrics"]["hold"]["power_target"]) + " " + fmt_rate(v["metrics"]["hold"]["power_target_pooled"]),
-                           fmt_rate(v["metrics"]["all"]["fpr"]), fmt_rate(v["metrics"]["all"]["fpr_bear"]),
-                           _pc(v["metrics"]["all"]["power_target"]) + " " + fmt_rate(v["metrics"]["all"]["power_target_pooled"])]
+                           fmt_rate(v["metrics"]["hold"]["fpr_hard"]),
+                           fmt_rate(v["metrics"]["hold"]["power_target_pooled"]),
+                           fmt_rate(v["metrics"]["all"]["fpr"]), fmt_rate(v["metrics"]["all"]["fpr_hard"]),
+                           fmt_rate(v["metrics"]["all"]["fpr_bear"], False),
+                           fmt_rate(v["metrics"]["all"]["power_target_pooled"])]
                           for n, v in pk.items()])
+    T["packages_changes"] = _tbl(["패키지", "변경 수", "현재에서 바꾼 것"],
+                                 [[PKG_KO.get(n, n), len(v["changes"]), _chg(v["changes"], cur)] for n, v in pk.items()])
     for n, v in pk.items():
         T[f"package_power_{n}"] = power_grid(v["metrics"]["all"])
         T[f"package_power_hold_{n}"] = power_grid(v["metrics"]["hold"])
@@ -1717,6 +1932,8 @@ def tables_markdown(res: dict) -> dict[str, str]:
                                    for n, v in pk.items()])
     rows = []
     for n, v in pk.items():
+        if not v.get("class3_info"):
+            continue
         rows.append([PKG_KO.get(n, n), "낙폭 한도 그대로(20%)", fmt_rate(v["metrics"]["all"]["fpr"], False),
                      _pc(v["metrics"]["all"]["power_target"]),
                      *[fmt_rate(v["metrics"]["all"][f"power_s{s:g}"], False) for s in STRENGTHS]])
@@ -1725,11 +1942,21 @@ def tables_markdown(res: dict) -> dict[str, str]:
                          *[fmt_rate(m[f"power_s{s:g}"], False) for s in STRENGTHS]])
     T["packages_class3"] = _tbl(["패키지", "낙폭 한도(③, 정보)", "오탐", "검정력(1.5–2 칸 평균)", "S1", "S1.5", "S2", "S3"], rows)
     if res.get("tradeoff_curve"):
-        T["tradeoff"] = _tbl(["변경 수", "바꾼 것", "TUNE 오탐", "TUNE 검정력", "HOLD-OUT 오탐", "HOLD-OUT 검정력", "전체 오탐",
-                              "전체 검정력"],
-                             [[e["n_changes"], _chg(e["changes"], cur), _pc(e["tune_fpr"], 1), _pc(e["tune_power"]),
+        T["tradeoff"] = _tbl(["탐색 공간", "낙폭 한도(③)", "변경 수", "바꾼 것", "TUNE 오탐", "TUNE 검정력", "HOLD-OUT 오탐", "HOLD-OUT 검정력",
+                              "전체 오탐", "전체 검정력"],
+                             [[e["space"], e.get("class3", ""), e["n_changes"], _chg(e["changes"], cur), _pc(e["tune_fpr"], 1), _pc(e["tune_power"]),
                                fmt_rate(e["hold_fpr"], False), _pc(e["hold_power"]), fmt_rate(e["all_fpr"], False),
                                _pc(e["all_power"])] for e in res["tradeoff_curve"]])
+    for lab, steps in (res.get("greedy_paths") or {}).items():
+        T[f"greedy_path_{lab}"] = _tbl(
+            ["단계", "이 단계에서 추가로 바꾼 것", "TUNE 오탐(합산·어려운 귀무 중 큰 쪽)", "TUNE 검정력", "HOLD-OUT 오탐",
+             "HOLD-OUT 어려운 귀무", "HOLD-OUT 검정력(1.5–2)", "전체 오탐", "전체 어려운 귀무", "전체 검정력(1.5–2)", "S1", "S1.5",
+             "S2", "S3"],
+            [[i, _chg(st["added"], with_changes(cur, **C3_SETTINGS[lab])) if st["added"] else f"(출발: 현재, 낙폭 한도 {lab})",
+              _pc(st["tune_fpr"], 1), _pc(st["tune_power"]), fmt_rate(st["hold_fpr"], False),
+              fmt_rate(st["hold_fpr_hard"], False), fmt_rate(st["hold_power"], False), fmt_rate(st["all_fpr"], False),
+              fmt_rate(st["all_fpr_hard"], False), fmt_rate(st["all_power"], False),
+              *[fmt_rate(st[f"all_power_s{s_:g}"], False) for s_ in STRENGTHS]] for i, st in enumerate(steps)])
     df = res["dsr_formula"]
     T["dsr_formula"] = _tbl(["캠페인 순서", "격자(스펙 수)", "K 중앙값", "현재 N 중앙값", "대안 N(ΣK) 중앙값",
                              "귀무 후보 DSR 통과: 현재", "대안", "심은 프로그램 후보 DSR 통과: 현재", "대안",
@@ -1744,7 +1971,6 @@ def tables_markdown(res: dict) -> dict[str, str]:
                                        fmt_rate(m["planted_program_any"])]
                                       for lab, m in (("현재 N = max(K, N_family·K/N_campaign)", df["program_current"]),
                                                      ("대안 N = Σ K", df["program_alt"]))])
-    return T
 
 
 # ============================================================== CLI
@@ -1758,6 +1984,13 @@ def _cmd_run(a) -> int:
     finally:
         if pool:
             pool.shutdown()
+    if a.universe or (raw / "_edge_universe.json").exists():
+        pool2 = ProcessPoolExecutor(max_workers=a.jobs, mp_context=get_context("spawn")) if a.jobs > 1 else None
+        try:
+            edges["universe"] = universe_edge_map(raw, pool2, progress=lambda s: print(s, flush=True))
+        finally:
+            if pool2:
+                pool2.shutdown()
     print(f"[edge] done {time.time() - t0:.0f}s: " + json.dumps(
         {k: (v.get("k_for_strength") or v.get("k_for")) for k, v in edges.items()}), flush=True)
     counts = json.loads(a.counts) if a.counts else None
@@ -1781,7 +2014,9 @@ def _cmd_analyze(a) -> int:
     recs = load_records(a.raw)
     print(f"[analyze] {len(recs)} records from {a.raw}", flush=True)
     res = analyze(recs, progress=lambda s: print(s, flush=True), search=not a.no_search)
-    _write_json(Path(a.out), res)
+    _write_json(Path(a.out), compact_summary(res))
+    if a.full:
+        _write_json(Path(a.full), res)
     if a.tables:
         T = tables_markdown(res)
         Path(a.tables).write_text("\n\n".join(f"### {k}\n\n{v}" for k, v in T.items()), encoding="utf-8")
@@ -1802,12 +2037,14 @@ def main(argv=None) -> int:
     r.add_argument("--tmp", default="")
     r.add_argument("--max-minutes", type=float, default=0.0)
     r.add_argument("--no-reference", action="store_true")
+    r.add_argument("--universe", action="store_true", help="3자산 유니버스 파일럿 (d 그룹에 필요)")
     r.set_defaults(fn=_cmd_run)
     an = sub.add_parser("analyze", help="원시 JSON → 요약 JSON + 표")
     an.add_argument("--raw", required=True)
     an.add_argument("--out", required=True)
     an.add_argument("--tables", default="")
     an.add_argument("--no-search", action="store_true")
+    an.add_argument("--full", default="", help="압축하지 않은 전체 결과 JSON (선택)")
     an.set_defaults(fn=_cmd_analyze)
     a = ap.parse_args(argv)
     return a.fn(a)
