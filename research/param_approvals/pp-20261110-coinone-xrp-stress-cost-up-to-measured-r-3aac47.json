@@ -1,0 +1,14 @@
+{
+  "id": "pp-20261110-coinone-xrp-stress-cost-up-to-measured-r-3aac47",
+  "approved_by": "user (explicit chat approval 2026-11-10)",
+  "ts": "2026-11-10T11:56:13+00:00",
+  "choice": null,
+  "note": "사용자가 채팅에서 승인(Q7, XRP 스트레스 비용 상향); 비대화형 확인 사용",
+  "content_hash": "b675ff2fc871f390",
+  "applied": [
+    {
+      "name": "coinone_stress@XRP-KRW",
+      "version": 2
+    }
+  ]
+}

@@ -1,5 +1,7 @@
 # 합성 국면 보정 — 노출 인식 관문 변형 (PLAN D14 초안)
 
+> **회계 주석 (2026-11-10 추가, 코드로 확인)**: 이 리포트의 수치는 **실현 기준(realized) 일간 수익**으로 계산됐다. 근거: (1) 실행 시점이 평가 기준(MTM) 승인(D18, 커밋 e6cc86b, 2026-11-10 06:58 UTC)보다 앞서고, (2) `calibration_study` 의 임시 저장소에는 `config/splits.yaml` 만 있어 `config_root` 가 코드 저장소로 떨어지고 임시 원장의 캠페인 번호(camp-000001…)가 D18 적용 시점(camp-000025)보다 작아 `gate_config_for_campaign` 이 realized 를 준다. 현재 기준(MTM) 수치는 `research/reports/gate_review_calibration_20261110.md` 를 본다.
+
 생성 2026-11-10 (UTC 00:54–01:10 주 연구, 01:10–01:35 G6 단계 진단) · 관문 설정 v1 · params `bc8fb6b2bc0e` ·
 비용 코인원 v2 / 업비트 v1 · 코드 `src/btc_quant/research/calibration_study.py` (`--regime`, `--g6-stage`)
 

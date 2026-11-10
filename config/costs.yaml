@@ -183,7 +183,7 @@ models:
     venue: coinone
     role: stress
     symbol: XRP-KRW
-    current: 1
+    current: 2
     versions:
     - version: 1
       fee_rate: 0.0
@@ -199,6 +199,19 @@ models:
       proposal_id: pp-20261110-per-asset-cost-models-xrp-krw-eth-krw-d1-3e9607
       provisional: true
       derived_from: coinone_stress
+    - version: 2
+      fee_rate: 0.0
+      spread_bps: 6.7
+      slip_bps: 8.53
+      tick: 0.0
+      created: '2026-11-10'
+      created_at: '2026-11-10T11:56:13+00:00'
+      direction: stricter
+      applied_by: human:user (explicit chat approval 2026-11-10)
+      source: coinone XRP stress cost up to measured rule (Q7)
+      evidence: research/reports/params_costs_xrp_stress_20261110.md
+      proposal_id: pp-20261110-coinone-xrp-stress-cost-up-to-measured-r-3aac47
+      provisional: true
   coinone_base@ETH-KRW:
     venue: coinone
     role: base

@@ -1,0 +1,36 @@
+# 파라미터 변경 제안 — 사람 승인 전에는 아무 효과 없음. 승인: python -m btc_quant.params approve <id>
+id: pp-20261110-coinone-xrp-stress-cost-up-to-measured-r-3aac47
+created: '2026-11-10T11:56:13+00:00'
+created_by: agent (user decision in chat 2026-11-10, Q7)
+class: 1
+kind: cost_models
+title: coinone XRP stress cost up to measured rule (Q7)
+provisional: true
+evidence: research/reports/params_costs_xrp_stress_20261110.md
+rationale: 'WS order books 2026-11-10 04:45-11:05 UTC (Coinone XRP 14,359 snapshots): stress rule p99 x 1.5 (provisional
+  hour-block bootstrap upper bound) = 11.88 bp one way = 23.8 bp round trip vs current 14.0. Stricter direction.
+  Spread kept 6.7 bp (1 KRW tick), slippage adjusted. Upbit XRP stress already stricter (14.7 > 13.93 bp one way):
+  unchanged.'
+changes:
+- target: costs:coinone_stress@XRP-KRW
+  name: coinone_stress@XRP-KRW
+  from:
+    fee_rate: 0.0
+    spread_bps: 6.7
+    slip_bps: 3.65
+    tick: 0.0
+    side_bps: 7.0
+    round_trip_bps: 14.0
+  to:
+    fee_rate: 0.0
+    spread_bps: 6.7
+    slip_bps: 8.53
+    tick: 0.0
+    side_bps: 11.88
+    round_trip_bps: 23.76
+  direction: stricter
+  venue: coinone
+  role: stress
+  symbol: XRP-KRW
+status: pending
+content_hash: b675ff2fc871f390

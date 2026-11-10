@@ -15,7 +15,7 @@ from btc_quant.research import campaign as C
 
 ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_RT = {   # 왕복 bp (사용자 지정 코인원 + 보수 도출 업비트)
-    "coinone_base@XRP-KRW": 8.0, "coinone_conservative@XRP-KRW": 10.0, "coinone_stress@XRP-KRW": 14.0,
+    "coinone_base@XRP-KRW": 8.0, "coinone_conservative@XRP-KRW": 10.0, "coinone_stress@XRP-KRW": 23.76,   # v2 (Q7, 2026-11-10)
     "coinone_base@ETH-KRW": 5.0, "coinone_conservative@ETH-KRW": 8.0, "coinone_stress@ETH-KRW": 14.0,
     "upbit_base@XRP-KRW": 18.7, "upbit_conservative@XRP-KRW": 22.7, "upbit_stress@XRP-KRW": 39.4,
     "upbit_base@ETH-KRW": 15.5, "upbit_conservative@ETH-KRW": 19.5, "upbit_stress@ETH-KRW": 36.4,
@@ -30,7 +30,8 @@ def test_registry_values_and_validation():
         assert K.round_trip_bps(m) == pytest.approx(rt, abs=1e-9), name
         assert doc["models"][name]["symbol"] == name.split("@")[1]
         rec = doc["models"][name]["versions"][-1]
-        assert rec["proposal_id"].startswith("pp-20261110-per-asset-cost-models")
+        assert rec["proposal_id"].startswith("pp-20261110-per-asset-cost-models") or (
+            name == "coinone_stress@XRP-KRW" and rec["proposal_id"].startswith("pp-20261110-coinone-xrp-stress"))
         assert rec["applied_by"] == "human:user (explicit chat approval 2026-11-10)"
     # 코인원: 2·(spread/2 + slip) = 왕복 (수수료 0)
     for name in [n for n in EXPECTED_RT if n.startswith("coinone")]:

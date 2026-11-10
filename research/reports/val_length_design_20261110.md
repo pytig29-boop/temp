@@ -1,5 +1,7 @@
 # Val 길이 설계 노트 — 다음 롤링에서 Val 6개월 → 12개월?
 
+> **회계 주석 (2026-11-10 추가, 코드로 확인)**: 이 리포트의 수치는 **실현 기준(realized) 일간 수익**으로 계산됐다. 근거: (1) 실행 시점이 평가 기준(MTM) 승인(D18, 커밋 e6cc86b, 2026-11-10 06:58 UTC)보다 앞서고, (2) `calibration_study` 의 임시 저장소에는 `config/splits.yaml` 만 있어 `config_root` 가 코드 저장소로 떨어지고 임시 원장의 캠페인 번호(camp-000001…)가 D18 적용 시점(camp-000025)보다 작아 `gate_config_for_campaign` 이 realized 를 준다. 현재 기준(MTM) 수치는 `research/reports/gate_review_calibration_20261110.md` 를 본다.
+
 작성 2026-11-10 · claude (AI) · 사람 검토용 설계 노트 (결정 아님) · 관문 설정 v1 · 비용 코인원 v2
 · 코드 `src/btc_quant/research/calibration_study.py` (`--val-months`, `--val-end`, `--full-low`, `--full-vlow`, `--markets`,
 `--strengths` — 모두 기본 꺼짐, 이번에 추가)
