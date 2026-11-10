@@ -1028,6 +1028,7 @@ class Pipeline:
                          int(max(stats.get("n_trials_dsr") or 1, 1)), prof=self.mh_cfg, seed=self.null_seed0)
         return ev["gates"]
 
+    def robustness_check(self, spec: StrategySpec) -> dict:
         """Dev 데이터·primary 비용으로 견고성 묶음. 업비트 aux 스펙은 거래소 재현 skipped."""
         from .robustness import CHECKS, robustness_suite, robustness_suite_universe
         if self.multi:
