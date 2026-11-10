@@ -196,6 +196,22 @@ Draft → Candidate → Validated → Challenger(페이퍼) → Promotion Review
 - Active 1개 + Challenger 최대 3개를 같은 실시간 데이터로 동시 페이퍼 운용.
 - 교체 시 이전 버전 보존 → 즉시 롤백.
 
+### 6.1 단계별 승격 (D23, 2026-11-10 사용자 결정 Q4) — 레지스트리 상태와 별도인 '실제 자본' 단계
+
+| 단계 | 진입 조건 | 실제 자본 (명목 상한 = 총자본 × 비중 × position_scale) | 누가 |
+|---|---|---|---|
+| T0 연구 | draft/candidate | 0 | 관문 코드 |
+| T1 페이퍼 | validated 이후(Dev 관문 + 견고성 + G6) | 0 (페이퍼만) | 관문 코드 |
+| T2 소액 실전 | T1 + 상태 review/active(G8 페이퍼 ≥ 3주·30거래·체결 품질) + 잠금 구간 판정(G7, 재설계 결정 대기) | **10%** (`risk_prefs.tier_capital.T2`) | **사람** `btc-quant-admin promote-tier <id> <v> T2` |
+| T3 증액 | T2 + 누적 전진 증거(사전 등록 순차 검정) | **30% → 100%** 중 선택 (`tier_capital.T3`) | **사람** `promote-tier … T3 --fraction F` |
+
+- 기록: `strategies/tiers.yaml`(현재 단계·비중, 사람 전용 경로) + 원장 transitions(`event: tier`, `tier:T1 → tier:T2`).
+- **자동 강등**: 리스크 관리자의 사람-해제 정지(최대 낙폭·수수료 변경·성능 저하)가 나면 T2/T3 → T1 (actor=risk).
+  레지스트리에서 rejected/retired 로 빠지면 단계는 T0 로 본다.
+- 강제 장치: `registry.tiers.live_notional_cap`·`check_order_notional` — 실거래 실행기가 주문 전에 호출해야 한다.
+  **실거래 주문 실행기(M10)는 아직 없다**(별도 승인 과제). 페이퍼는 단계·비중·실효 비중을 meta 에 기록만 한다.
+- 연구 모드 hook 이 `promote-tier`/`demote-tier`·`TierBook.promote` 호출·`strategies/tiers.yaml` 쓰기를 막고, MCP 에 승격 도구가 없다.
+
 ---
 
 ## 7. 리스크 한도 — 공식으로 고정 (D5)

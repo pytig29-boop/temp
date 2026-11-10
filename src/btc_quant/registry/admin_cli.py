@@ -5,6 +5,8 @@
   python -m btc_quant.registry.admin_cli rollback
   python -m btc_quant.registry.admin_cli reject <id> <version> --reason "..."
   python -m btc_quant.registry.admin_cli status
+  python -m btc_quant.registry.admin_cli promote-tier <id> <version> T2|T3 [--fraction F]   (PLAN D23)
+  python -m btc_quant.registry.admin_cli demote-tier <id> <version> [--to T1|T2] --reason "..."
 
 승인성 명령은 대화형 터미널에서 대상 이름을 직접 타이핑해야 진행된다(속도 방지턱).
 AI 사용 차단의 실제 장치는 hook 이다.
@@ -88,6 +90,39 @@ def cmd_reject(args) -> int:
     return 0
 
 
+def cmd_promote_tier(args) -> int:
+    from .tiers import TierBook, allowed_fractions, tier_capital
+    reg = StrategyRegistry(root=args.root)
+    tb = TierBook(reg)
+    k = key_of(args.id, args.version)
+    cur = tb.get(args.id, args.version)
+    frac = args.fraction if args.fraction is not None else allowed_fractions(args.tier, args.root)[0]
+    _confirm(f"{k} {args.tier}",
+             f"Promote {k} from {cur['tier']} ({cur['state']}) to {args.tier}: REAL capital fraction {frac:g} of total "
+             f"(× position_scale from risk.yaml); tier_capital = {tier_capital(args.root)}")
+    rec = tb.promote(args.id, args.version, args.tier, _actor(args), capital_fraction=frac, note=args.note or "",
+                     root=args.root)
+    print(json.dumps(rec, ensure_ascii=False))
+    return 0
+
+
+def cmd_demote_tier(args) -> int:
+    from .tiers import TierBook
+    reg = StrategyRegistry(root=args.root)
+    k = key_of(args.id, args.version)
+    _confirm(k, f"Demote {k} to {args.to} (reason: {args.reason})")
+    rec = TierBook(reg).demote(args.id, args.version, args.reason, actor=_actor(args), to=args.to)
+    print(json.dumps(rec, ensure_ascii=False) if rec else f"{k} already at or below {args.to}")
+    return 0
+
+
+def _tiers(reg) -> dict:
+    from .tiers import PAPER_STATES, TierBook
+    tb = TierBook(reg)
+    return {key_of(x["id"], x["version"]): tb.get(x["id"], x["version"])
+            for s in PAPER_STATES for x in reg.list(s)}
+
+
 def cmd_status(args) -> int:
     reg = StrategyRegistry(root=args.root)
     da = DataAccess(root=args.root)
@@ -98,6 +133,7 @@ def cmd_status(args) -> int:
         "pending_activation_approvals": sorted(p.stem for p in reg.approvals_dir.glob("*.yaml"))
         if reg.approvals_dir.exists() else [],
         "trials_total": led.trials_count(),
+        "tiers": _tiers(reg),
     }
     print(json.dumps(out, indent=2, ensure_ascii=False))
     return 0
@@ -130,6 +166,21 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("version", type=int)
     p.add_argument("--reason", required=True)
     p.set_defaults(func=cmd_reject)
+
+    p = sub.add_parser("promote-tier", help="HUMAN-ONLY: T1→T2 (small live) or T2→T3 (scale up), PLAN D23")
+    p.add_argument("id")
+    p.add_argument("version", type=int)
+    p.add_argument("tier", choices=["T2", "T3"])
+    p.add_argument("--fraction", type=float, default=None, help="capital fraction (one of risk_prefs.tier_capital)")
+    p.add_argument("--note", default=None)
+    p.set_defaults(func=cmd_promote_tier)
+
+    p = sub.add_parser("demote-tier", help="T3/T2 → T2/T1")
+    p.add_argument("id")
+    p.add_argument("version", type=int)
+    p.add_argument("--to", choices=["T1", "T2"], default="T1")
+    p.add_argument("--reason", required=True)
+    p.set_defaults(func=cmd_demote_tier)
 
     p = sub.add_parser("status", help="show registry and lockbox status")
     p.set_defaults(func=cmd_status)

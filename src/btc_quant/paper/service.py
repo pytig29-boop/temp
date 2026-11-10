@@ -103,6 +103,8 @@ class StrategySlot:
     source: str = ""
     sleeve_limits: dict = field(default_factory=dict)   # 다자산: {심볼: RiskLimits} (없으면 limits)
     position_scale: float = 1.0     # risk.yaml position_scale (G6 크기 조절, R1; 없으면 1.0)
+    tier: str = "T1"                # 단계별 승격 (PLAN D23): 레지스트리 전략은 TierBook, 스펙 파일 슬롯은 T1(페이퍼)
+    capital_fraction: float = 0.0   # 실제 자본 비중 (T2/T3 만 > 0). 실제 명목 상한 = 총자본 × 이 값 × position_scale
 
     @property
     def multi_asset(self) -> bool:
@@ -193,10 +195,19 @@ def slots_from_registry(root: str | Path | None = None, grade: str = "B") -> lis
         log.warning("%d challengers; using first %d", len(chal), MAX_CHALLENGERS)
     entries = [e for e in entries if e[0] == "active"] + chal[:MAX_CHALLENGERS]
     out = []
+    tb = None
+    try:
+        from btc_quant.registry.tiers import TierBook
+        tb = TierBook(reg)
+    except (OSError, NameError):
+        tb = None
     for role, p in entries:
         g, lim = load_risk_meta(sidecar_path(p), grade, DEFAULT_LIMITS)
-        out.append(StrategySlot(StrategySpec.from_yaml(p), role, g, lim, str(p),
-                                load_sleeve_limits(sidecar_path(p), lim), load_position_scale(sidecar_path(p))))
+        spec = StrategySpec.from_yaml(p)
+        t = tb.get(spec.id, spec.version) if tb is not None else {"tier": "T1", "capital_fraction": 0.0}
+        out.append(StrategySlot(spec, role, g, lim, str(p), load_sleeve_limits(sidecar_path(p), lim),
+                                load_position_scale(sidecar_path(p)), str(t["tier"]),
+                                float(t.get("capital_fraction", 0.0))))
     return out
 
 
@@ -347,6 +358,17 @@ class PaperService:
         self.collector.add_listener(self.on_event)
 
     # ------------------------------------------------------------------ 구성
+    def _demoter(self, s: StrategySlot):
+        def demote(halt: dict) -> None:
+            from btc_quant.registry.strategies import StrategyRegistry
+            from btc_quant.registry.tiers import TierBook
+            rec = TierBook(StrategyRegistry(self.cfg.registry_root)).demote(
+                s.spec.id, s.spec.version, f"risk halt {halt.get('code')}: {halt.get('reason')}", actor="risk")
+            if rec:
+                log.warning("%s: tier %s → %s (%s)", s.key, rec["previous"], rec["tier"], halt.get("code"))
+                s.tier, s.capital_fraction = rec["tier"], rec["capital_fraction"]
+        return demote
+
     def _make_trader(self, s: StrategySlot, symbol: str | None = None, group: SleeveGroup | None = None,
                      n_sleeves: int = 1) -> PaperTrader:
         """symbol 이 있으면 다자산 스펙의 슬리브 트레이더 (키 `<key>@<SYM>`, 명목/N, 슬리브 한도, 포트폴리오 묶음)."""
@@ -377,8 +399,11 @@ class PaperService:
             raise ValueError(f"limit_fill must be 'bar' or 'queue', got {self.cfg.limit_fill!r}")
         restored = tr.load_state()
         (out / "spec.yaml").write_text(s.spec.to_yaml(), encoding="utf-8")
+        if s.tier in ("T2", "T3") and s.role != "spec":      # 사람-해제 정지 → 자동 강등 (PLAN D23)
+            risk.on_human_halt = self._demoter(s)
         meta = {"key": key, "role": s.role, "grade": s.grade, "source": s.source, "cost": cost.name,
-                "position_scale": s.position_scale,
+                "position_scale": s.position_scale, "tier": s.tier, "capital_fraction": s.capital_fraction,
+                "effective_capital_fraction": s.capital_fraction * s.position_scale,
                 "limits": {f.name: getattr(limits, f.name) for f in fields(RiskLimits)},
                 "timeframe": s.spec.timeframe, "lookback_bars": lb, "aux": list(spec_aux(s.spec)),
                 "restored": restored,

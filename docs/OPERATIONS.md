@@ -315,6 +315,21 @@ limits:             # evaluation.gates.risk_limits_from_validation 결과를 그
 
 ---
 
+## 11b. 단계별 승격 운영 (PLAN §6.1, D23)
+
+1. **T1 → T2 (소액 실전)** — 사람이 직접, 대화형 터미널에서:
+   ```bash
+   uv run btc-quant-admin status                       # tiers: 전략별 단계·비중
+   uv run btc-quant-admin --by <이름> promote-tier <id> <version> T2     # '<id>_v<ver> T2' 를 타이핑해 확인
+   ```
+   조건: 상태 review/active(G8 통과), 위험 사이드카(`*.risk.yaml`)의 `position_scale` 확인, 잠금 구간 판정(G7 재설계 결정 후).
+   비중은 `config/params.yaml settings.risk_prefs.tier_capital.T2`(0.10)만 허용.
+2. **T2 → T3 (증액)** — `promote-tier <id> <v> T3 --fraction 0.3` → 이후 `--fraction 1.0`. 줄이는 것은 `demote-tier`.
+3. **강등** — 자동: 리스크 HUMAN 정지 시 T1 로(원장 transitions `actor: risk`). 수동:
+   `btc-quant-admin --by <이름> demote-tier <id> <v> --to T1 --reason "…"`.
+4. 실제 주문 금액 상한 = 총자본 × capital_fraction × position_scale. **실거래 실행기는 아직 없다** — 만들 때 주문 전
+   `registry.tiers.check_order_notional` 를 반드시 호출한다(별도 승인 과제).
+
 ## 12. 전진 인큐베이션 일일 실행 (`btc_quant.research.forward`, 관찰 목록 포함)
 
 매일 한 번, 마지막으로 완료된 UTC 날짜까지 Forward 구간(2026-11-09~)을 평가한다. 멱등이라 여러 번 돌려도

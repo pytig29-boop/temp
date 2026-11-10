@@ -128,6 +128,8 @@ class RiskManager:
         self.flatten_on_human_halt = flatten_on_human_halt
         self.s = state or RiskState()
         self._events: list[dict] = []
+        # 사람-해제 정지(HUMAN 수준)가 새로 날 때 호출 (halt dict). 단계별 승격(PLAN D23)의 자동 강등에 쓴다.
+        self.on_human_halt = None
 
     # ---- 경계 처리 -------------------------------------------------------------------------
     def _roll(self, now: datetime) -> None:
@@ -155,6 +157,11 @@ class RiskManager:
         self.s.halts[code] = h.to_dict()
         self._events.append({"type": "halt", "strategy": self.strategy_id, **h.to_dict(),
                              "level_name": HaltLevel(level).name})
+        if int(level) == int(HaltLevel.HUMAN) and self.on_human_halt is not None:
+            try:
+                self.on_human_halt(h.to_dict())
+            except Exception as e:  # noqa: BLE001 — 강등 기록 실패가 정지 자체를 막으면 안 된다
+                self._events.append({"type": "tier_demotion_error", "strategy": self.strategy_id, "error": str(e)})
 
     def _flag(self, now: datetime, code: str, reason: str) -> None:
         if code in self.s.flags:

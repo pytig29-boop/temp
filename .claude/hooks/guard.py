@@ -73,6 +73,7 @@ READ_TOOLS = {"Read", "Grep", "Glob"}
 # ---------------------------------------------------------------------------
 PROTECTED_WRITE = [
     (r"strategies/(active|review|retired)(/|$)", "approved/retired strategies are changed only by registry code + human approval"),
+    (r"strategies/tiers\.yaml$", "promotion tiers (real-capital stages, PLAN D23) are changed only by the human admin CLI"),
     (r"config/gates\.ya?ml", "gate thresholds are fixed (PLAN §5.2)"),
     (r"config/splits\.ya?ml", "data splits are human-only (PLAN §2.1)"),
     (r"config/risk[^/\s'\"]*\.ya?ml", "risk formulas are fixed (PLAN §7)"),
@@ -118,6 +119,10 @@ ADMIN_RES = [
     re.compile(r"btc_quant[./]params\b[^;&|\n]*?\s(approve|reject)\b"),
     re.compile(r"btc_quant\.params(?:\.\w+)?\s+import\s+[^;\n]*\b(approve|reject|add_versions?|record_change)\b"),
     re.compile(r"\b(add_versions?|record_change|approve_proposal)\s*\("),
+    # 단계별 승격 (PLAN D23): 실제 자본 투입 단계 변경은 사람 전용
+    re.compile(r"\b(promote[-_]tier|demote[-_]tier)\b"),
+    re.compile(r"\bTierBook\b[^\n]*\.(promote|demote)\s*\("),
+    re.compile(r"\.promote\s*\("),
 ]
 
 WRITE_VERB_RE = re.compile(

@@ -24,6 +24,11 @@ settings:
   risk_prefs:
     capital_fraction: null
     max_exposure_per_sleeve: 1.0
+    tier_capital:
+      T2: 0.1
+      T3:
+      - 0.3
+      - 1.0
 uncatalogued_ok:
 - version
 - primary_metric.annualization
@@ -1518,6 +1523,21 @@ params:
   version: 1
   last_updated: '2026-11-09'
   owner: human
+  history: []
+- key: risk_prefs.tier_capital
+  class: 3
+  source: params:risk_prefs.tier_capital
+  value:
+    T2: 0.1
+    T3:
+    - 0.3
+    - 1.0
+  rationale: 단계별 승격(PLAN D23) 실제 자본 비중 — T2 소액 실전 = 총자본의 10%, T3 증액 = 30% → 100% 중 사람이 고름. 실제 명목 상한 = 총자본 × 이 비중 × position_scale
+  evidence: 사용자 결정 (채팅 2026-11-10, 관문 재검토 Q4 '추천대로') — research/reports/gate_review_20261110.md §6.2
+  version: 1
+  last_updated: '2026-11-10'
+  owner: human
+  added_by: user (explicit chat approval 2026-11-10)
   history: []
 - key: risk_prefs.max_exposure_per_sleeve
   class: 3
