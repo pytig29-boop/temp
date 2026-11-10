@@ -238,7 +238,7 @@ class ServiceConfig:
     notional: float = DEFAULT_NOTIONAL
     grace_seconds: float = 2.0
     warmup_days: float = DEFAULT_WARMUP_DAYS
-    max_warmup_days: float = MAX_WARMUP_DAYS
+    max_warmup_days: float | None = None    # None = 결정 주기별 상한 (bars.max_warmup_days_for)
     warmup_delay: float = 4.0               # M0 이후 REST 조회까지 대기(마지막 캔들 확정)
     first_trade_timeout: float = 120.0
     heartbeat_seconds: float = 10.0

@@ -324,4 +324,16 @@ def test_forward_warmup_scales_for_long_bars():
     assert spec_warmup_days(mk("1h", don), 14) == 14            # 290봉 ≈ 12일 < 14일
     assert spec_warmup_days(mk("4h", don), 14) == 49            # 290봉 × 4h ≈ 48.3일
     ema = BlockRef("ema_slope", {"span": 96, "min_slope_bp": 2.0})
-    assert spec_warmup_days(mk("4h", ema), 14) == 120           # 상한 (MAX_WARMUP_DAYS)
+    assert spec_warmup_days(mk("4h", ema), 14) == 238           # 1,425봉 × 4h (4h 상한 420일 안 — Phase 5)
+    assert spec_warmup_days(mk("1h", ema), 14) == 60            # 1h 는 기존 120일 상한 안 (1,425봉 ≈ 59.4일)
+
+
+def test_4h_warmup_cap_reproduces_trend_ema_180():
+    """Phase 5 (managed_hold): 4h EMA(180) 의 초기값 잔존 가중 ≤ 1e-12 — 페이퍼·전진이 백테스트와 같은 상태."""
+    from btc_quant.paper.bars import MAX_WARMUP_DAYS, max_warmup_days_for, required_lookback_bars
+    assert max_warmup_days_for(240) == 420.0 and max_warmup_days_for(60) == MAX_WARMUP_DAYS == 120.0
+    for span in (90, 180):
+        s = StrategySpec("x", BlockRef("trend_ema_4h", {"span": span, "band_bp": 0.0}), ExitSpec(50.0, 1e5, 2592000),
+                         timeframe="4h")
+        n = required_lookback_bars(s)
+        assert (1 - 2 / (span + 1)) ** n <= 1e-12, (span, n)

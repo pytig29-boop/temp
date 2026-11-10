@@ -29,7 +29,7 @@
   (G6 Val 과 같은 한계). 일정 기간이 지나면 사라진다.
 - **긴 결정 주기(15m/1h/4h)**: 14일은 4h 봉 84개뿐이라 지표가 덜 데워진다. 결정 주기 ≥ 15분인 스펙은
   워밍업 = max(G8.forward_warmup_days, ⌈페이퍼 `required_lookback_bars(spec)` × B / 1440⌉일) (상한
-  `paper.bars.MAX_WARMUP_DAYS` = 120일)로 늘리고 그동안 status=warming_up 을 낸다(`spec_warmup_days`).
+  `paper.bars.max_warmup_days_for`: 4h 420일, 그 밖 120일)로 늘리고 그동안 status=warming_up 을 낸다(`spec_warmup_days`).
   예: 4h donchian_breakout(288) → 290봉 ≈ 49일. 1m/5m 스펙은 기존 그대로(설정 일수).
 
 관찰 목록 (forward watchlist, 사용자 결정 2026-11-10)
@@ -467,7 +467,7 @@ class RestWarmup:
 
 def spec_warmup_days(spec, base_days: int) -> int:
     """Forward 워밍업 일수. 결정 주기 ≤ 5분은 base_days 그대로(기존 동작). 15m/1h/4h 는 지표에 필요한 봉 수
-    (`paper.bars.required_lookback_bars`, 120일 상한)를 일수로 환산해 base_days 와 큰 쪽."""
+    (`paper.bars.required_lookback_bars`, 4h 420일·그 밖 120일 상한)를 일수로 환산해 base_days 와 큰 쪽."""
     tf = int(spec.tf_min)
     if tf <= 5:
         return int(base_days)
@@ -478,7 +478,7 @@ def spec_warmup_days(spec, base_days: int) -> int:
 
 def rest_warmup_window(spec) -> tuple[int, int]:
     """(결정 주기 lookback 봉 수, 1분봉 워밍업 분) — 페이퍼 서비스와 같은 계산
-    (`required_lookback_bars(spec)` 기본 3일·상한 120일, `window_minutes`)."""
+    (`required_lookback_bars(spec)` 기본 3일·상한 4h 420일/그 밖 120일, `window_minutes`)."""
     from btc_quant.paper.bars import required_lookback_bars, window_minutes
     lb = required_lookback_bars(spec)
     return lb, window_minutes(lb, spec.tf_min)

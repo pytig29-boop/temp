@@ -788,6 +788,26 @@ params:
   last_updated: '2026-11-10'
   owner: human
   history: []
+- key: gates.G7.evidence
+  class: 2
+  source: yaml:config/gates.yaml#G7.evidence
+  value: holm
+  rationale: '잠금 판정 방식: holm(현재) | no_contradiction(잠금 Sharpe > 0) | combined(Dev+Val+잠금 결합 증거). 개봉 기록·상한 동일'
+  evidence: '옵션 추가(기본 = 기존 동작) · 합성 보정 research/reports/g7_design_20261110.md'
+  version: 1
+  last_updated: '2026-11-10'
+  owner: human
+  history: []
+- key: gates.G7.combined_alpha
+  class: 2
+  source: yaml:config/gates.yaml#G7.combined_alpha
+  value: 0.05
+  rationale: 'G7.evidence=combined 전용 결합 p 문턱'
+  evidence: '옵션 추가(기본 = 기존 동작) · 합성 보정 research/reports/g7_design_20261110.md'
+  version: 1
+  last_updated: '2026-11-10'
+  owner: human
+  history: []
 - key: gates.selection.method
   class: 2
   source: yaml:config/gates.yaml#selection.method

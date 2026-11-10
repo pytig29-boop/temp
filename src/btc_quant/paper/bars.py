@@ -39,6 +39,14 @@ NS_PER_MIN = 60_000_000_000
 BARS_PER_DAY_5M = 288
 DEFAULT_WARMUP_DAYS = 3.0
 MAX_WARMUP_DAYS = 120.0
+# 4h 결정 주기 상한 (Phase 5, managed_hold): 4h EMA(180) 정확 재현(잔존 가중 ≤ EMA_TOL)에 ≈ 2,490봉 = 415일이 필요하다.
+# 120일 상한(720봉)에서는 잔존 가중 ≈ 3.5e-4 라 EMA 바로 근처 비교가 백테스트와 드물게 달라질 수 있었다.
+MAX_WARMUP_DAYS_4H = 420.0
+
+
+def max_warmup_days_for(tf_min: int) -> float:
+    """결정 주기별 워밍업 상한(일): 4h 이상 420일, 그 밖 120일 (기존 동작)."""
+    return MAX_WARMUP_DAYS_4H if int(tf_min) >= 240 else MAX_WARMUP_DAYS
 EMA_TOL = 1e-12          # EMA 초기값의 잔존 가중치 상한 → 비교 결과가 뒤집힐 확률 사실상 0
 WICK_WINDOW = 15         # quality.clean_wicks 기본 창
 
@@ -138,9 +146,12 @@ def check_live_ready(spec: StrategySpec, registry: Registry = REGISTRY,
 
 def required_lookback_bars(spec: StrategySpec, registry: Registry = REGISTRY,
                            default_days: float = DEFAULT_WARMUP_DAYS,
-                           max_days: float = MAX_WARMUP_DAYS) -> int:
-    """후행 창 평가에 필요한 결정 주기 봉 수 = max(기본 일수, 블록별 요구치, ATR 창), max_days 로 상한."""
+                           max_days: float | None = None) -> int:
+    """후행 창 평가에 필요한 결정 주기 봉 수 = max(기본 일수, 블록별 요구치, ATR 창), max_days 로 상한
+    (None = 결정 주기별 기본 `max_warmup_days_for`: 4h 420일, 그 밖 120일)."""
     tf = spec.tf_min
+    if max_days is None:
+        max_days = max_warmup_days_for(tf)
     day = _bars_per_day(tf)
     need = int(default_days * day)
     for ref in spec_blocks(spec):

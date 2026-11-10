@@ -336,12 +336,46 @@ def check_g6(val_metrics: dict, stress, mc_mdd95: float,
     return bool(ok), d
 
 
-def check_g7(p_value: float, prior_p_values=(), cfg: dict | None = None) -> tuple[bool, dict]:
-    """G7 잠금: 잠금 구간 일평균 수익 > 0 의 p 값이 순차 Holm(α=0.10, 상한 10) 통과.
-    p_value 는 inference.bootstrap_mean_test 결과. 정의는 inference.lockbox_holm_decision."""
+G7_EVIDENCE_MODES = ("holm", "no_contradiction", "combined")
+
+
+def check_g7(p_value: float, prior_p_values=(), cfg: dict | None = None, *, lockbox_sharpe: float | None = None,
+             z_dev: float | None = None, p_val: float | None = None) -> tuple[bool, dict]:
+    """G7 잠금. 개봉 기록·상한(cap)은 모든 방식에서 같다(Holm 결정은 항상 계산·기록).
+    evidence (gates.yaml G7.evidence, 기본 holm = 현재 동작):
+      holm             — 잠금 구간 일평균 수익 > 0 의 p 가 순차 Holm(α 0.10, 상한 10) 통과 (inference.lockbox_holm_decision)
+      no_contradiction — 잠금 Sharpe > 0 ('모순 없음'; 단계별 승격 T2 의 조건, 합성 근거 g7_design_20261110)
+      combined         — Dev DSR z + Val z + 잠금 z 의 Stouffer (z_dev+z_val+z_lb)/√3 의 p ≤ combined_alpha 그리고 잠금 Sharpe > 0
+    p_value 는 inference.bootstrap_mean_test 결과."""
     c = _cfg(cfg, "G7")
     d = inference.lockbox_holm_decision(p_value, prior_p_values, c["alpha"], c["cap"],
                                         c["holm_mode"])
+    mode = str(c.get("evidence", "holm"))
+    if mode not in G7_EVIDENCE_MODES:
+        raise ValueError(f"G7.evidence must be one of {G7_EVIDENCE_MODES}, got {mode!r}")
+    d["evidence"] = mode
+    d["holm_passed"] = bool(d["passed"])
+    if mode == "holm":
+        return d["passed"], d
+    if d.get("exhausted") or (int(d.get("k", 0) or 0) > int(c["cap"])):
+        d["passed"] = False
+        return False, d
+    if lockbox_sharpe is None:
+        raise ValueError(f"G7.evidence={mode} needs lockbox_sharpe")
+    sr_ok = float(lockbox_sharpe) > 0
+    if mode == "no_contradiction":
+        d["passed"] = sr_ok
+    else:
+        if z_dev is None or p_val is None:
+            raise ValueError("G7.evidence=combined needs z_dev and p_val")
+        from statistics import NormalDist
+        nd = NormalDist()
+        zz = [float(z_dev)] + [nd.inv_cdf(min(max(1.0 - float(p), 1e-9), 1 - 1e-9)) for p in (p_val, p_value)]
+        z = sum(zz) / math.sqrt(3.0)
+        pc = 1.0 - nd.cdf(z)
+        d.update(z=z, p_combined=pc, combined_alpha=float(c.get("combined_alpha", 0.05)))
+        d["passed"] = bool(pc <= float(c.get("combined_alpha", 0.05)) and sr_ok)
+    d["lockbox_sharpe"] = float(lockbox_sharpe)
     return d["passed"], d
 
 

@@ -1,0 +1,20 @@
+# 파라미터 변경 제안 — 사람 승인 전에는 아무 효과 없음. 승인: python -m btc_quant.params approve <id>
+id: pp-20261110-g7-lockbox-evidence-no-contradiction-loc-5653eb
+created: '2026-11-10T13:32:28+00:00'
+created_by: agent (Phase 4 synthetic study; awaiting user decision)
+class: 2
+kind: criterion
+title: 'G7 lockbox evidence: no_contradiction (lockbox Sharpe > 0) for T2 promotion'
+evidence: research/reports/g7_design_20261110.md
+rationale: 'Synthetic (225 markets, lockbox 6 months): under R1 no null market reached G7 (0/150 validated). Current
+  Holm drops 17/52 validated true candidates (Sharpe-2 end detection 72% -> 40%); no_contradiction and combined
+  keep 52/52. Analytic end-to-end false positives ~0.04% (holm) vs ~0.2% (no_contradiction); T2 adds 10% capital
+  cap, paper G8 and automatic demotion. Openings ledger, cap 10 and human-approved openings unchanged. Options:
+  holm (keep) | no_contradiction (recommended) | combined.'
+changes:
+- key: gates.G7.evidence
+  from: holm
+  to: no_contradiction
+  target: param:gates.G7.evidence
+status: pending
+content_hash: be7b64b87bde9341

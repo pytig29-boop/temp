@@ -112,7 +112,7 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--notional", type=float, default=300_000.0, help="초기 자산 = 호가 대입 금액(KRW)")
     r.add_argument("--grace", type=float, default=2.0, help="분 마감 유예(초)")
     r.add_argument("--warmup-days", type=float, default=3.0)
-    r.add_argument("--max-warmup-days", type=float, default=120.0)
+    r.add_argument("--max-warmup-days", type=float, default=None, help="기본: 4h 420일, 그 밖 120일")
     r.add_argument("--record", action="store_true", help="수집 원천 데이터도 data/raw 에 기록")
     r.add_argument("--no-upbit", action="store_true", help="업비트 참조가 미사용")
     r.add_argument("--limit-fill", default="bar", choices=["bar", "queue"],

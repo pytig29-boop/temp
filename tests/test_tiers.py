@@ -142,3 +142,28 @@ def test_guard_blocks_tier_changes(tmp_path, cmd):
 def test_guard_blocks_tiers_file_write(tmp_path):
     assert denied(run("Write", {"file_path": str(tmp_path / "strategies" / "tiers.yaml"), "content": "x"},
                       tmp_path=tmp_path))
+
+
+# ------------------------------------------------------------------ G7 판정 방식 옵션 (기본 holm = 현재 동작)
+def test_g7_evidence_modes():
+    import copy
+
+    from btc_quant.evaluation import gates as G
+    base = G.load_gate_config()
+    assert base["G7"]["evidence"] == "holm"
+    assert G.check_g7(0.08)[0] and not G.check_g7(0.2)[0]                       # 기존 동작
+    c = copy.deepcopy(base)
+    c["G7"]["evidence"] = "no_contradiction"
+    ok, d = G.check_g7(0.4, cfg=c, lockbox_sharpe=0.3)
+    assert ok and d["holm_passed"] is False and d["evidence"] == "no_contradiction"
+    assert not G.check_g7(0.01, cfg=c, lockbox_sharpe=-0.1)[0]
+    with pytest.raises(ValueError):
+        G.check_g7(0.4, cfg=c)
+    c["G7"]["evidence"] = "combined"
+    ok, d = G.check_g7(0.4, cfg=c, lockbox_sharpe=0.2, z_dev=3.0, p_val=0.1)    # (3 + 1.28 + 0.25)/√3 ≈ 2.6
+    assert ok and d["p_combined"] < 0.05
+    assert not G.check_g7(0.4, cfg=c, lockbox_sharpe=0.2, z_dev=0.5, p_val=0.4)[0]
+    assert not G.check_g7(0.01, cfg=c, lockbox_sharpe=-0.2, z_dev=3.0, p_val=0.1)[0]
+    c["G7"]["evidence"] = "vibes"
+    with pytest.raises(ValueError):
+        G.check_g7(0.1, cfg=c)
