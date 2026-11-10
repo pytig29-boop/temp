@@ -30,6 +30,14 @@ PLAN §5.1 ①~③. 관문(④~⑥)은 `pipeline.py`, 리포트는 `report.py`.
   슬리브(1/N) 일간 수익의 평균 = 포트폴리오 일간 수익으로 모든 지표·관문을 계산한다. 거래 수는 자산 합계.
   스펙 하나 = 원장 시도 1회(유니버스는 파라미터가 아님). 자산별 결과는 결과표 `asset.<SYM>.*` 열과 원장
   metrics.per_asset 에 보고만 한다. B&H 기준 = 동일 비중 N자산 매수보유.
+
+주문 집행 (`execution`, docs/ENGINE_SPEC.md "지정가 집행", 2026-11-10)
+- 생략 = 시장가(기존). 지정가 격자: `execution: {entry: limit, offset_bp: [3, 5] | offset_atr: [0.3, 0.5],
+  tif_bars: [1] (선택, 목록), take_profit: market | limit (단일 값)}` — 오프셋 값·tif 값마다 집행 변형 1개
+  (격자 곱에 포함 → 예산·시도 수에 그대로 반영). 스펙 `execution` 에 들어가므로 logic_hash 가 갈린다.
+- 신호 캐시(`SignalCache.prepared`)는 `fast.prepare` 를 직접 쓰므로 집행을 **반드시** `simulate_*(execution=…)` 로
+  넘긴다(이 모듈·pipeline·nulls·robustness 모두). 지정가 체결 규칙 = `backtest.types.LIMIT_FILL_DEFAULT`
+  (시장 측정치 class ①; manifest `fill_model` 에 기록).
 """
 from __future__ import annotations
 
@@ -48,7 +56,7 @@ import pandas as pd
 import yaml
 
 from btc_quant.backtest import fast
-from btc_quant.backtest.types import CostModel
+from btc_quant.backtest.types import LIMIT_FILL_DEFAULT, CostModel
 from btc_quant.data.quality import prepare_venue_m1
 from btc_quant.evaluation import metrics as M
 from btc_quant.registry.ledger import Ledger, repo_root, utcnow
@@ -57,8 +65,9 @@ from btc_quant.registry.splits import DataAccess
 from btc_quant.registry.strategies import StrategyRegistry
 from btc_quant.strategy.blocks import REGISTRY, Context, Registry
 from btc_quant.strategy.features import to_tf
-from btc_quant.strategy.spec import (DEFAULT_ATR_BARS, DEFAULT_TIMEFRAME, DEFAULT_UNIVERSE, MAX_FILTERS,
-                                     TIMEFRAMES, BlockRef, ExitSpec, StrategySpec, tf_minutes, tf_name)
+from btc_quant.strategy.spec import (DEFAULT_ATR_BARS, DEFAULT_TIF_BARS, DEFAULT_TIMEFRAME, DEFAULT_UNIVERSE,
+                                     ENTRY_MODES, MARKET, MAX_FILTERS, TIMEFRAMES, TP_MODES, BlockRef,
+                                     ExecutionSpec, ExitSpec, StrategySpec, tf_minutes, tf_name)
 
 from . import universe as U
 
@@ -272,6 +281,7 @@ class CampaignTemplate:
     requires_screen_pass: bool = False     # True: 원장의 어떤 선별에서든 통과한 구성만 허용
     power: dict = field(default_factory=dict)   # {target_sharpe: float} (선택)
     universe: tuple[str, ...] = DEFAULT_UNIVERSE   # 자산 유니버스 (D15) — 기본 [data.symbol]
+    execution: dict = field(default_factory=dict)   # 집행 격자 (정규화된 dict; 빈 dict = 시장가)
 
     @property
     def tf_min(self) -> int:
@@ -300,7 +310,8 @@ class CampaignTemplate:
         if not isinstance(d, dict):
             raise CampaignError("template must be a mapping")
         allowed = {"name", "hypothesis", "data", "entry", "filters", "exits", "costs", "budget",
-                   "family", "segment", "timeframe", "from_screen", "requires_screen_pass", "power", "universe"}
+                   "family", "segment", "timeframe", "from_screen", "requires_screen_pass", "power", "universe",
+                   "execution"}
         extra = set(d) - allowed
         if extra:
             raise CampaignError(f"unknown template keys {sorted(extra)}")
@@ -325,6 +336,7 @@ class CampaignTemplate:
             raise CampaignError(f"timeframe must be one of {list(TIMEFRAMES)} (decision interval, D10)")
         tf_min = tf_minutes(tf)
         universe = template_universe(d)
+        execution = _execution_grid(d.get("execution"))
         entry = _block_grid(d.get("entry"), "entry", registry)
         fsets_raw = d.get("filters", [[]])
         if not isinstance(fsets_raw, list) or not fsets_raw:
@@ -407,7 +419,7 @@ class CampaignTemplate:
                   family=str(d.get("family") or entry.block), segment=segment, raw=d,
                   decision_tf=tf, exit_mode=mode, atr_bars=int(atr_bars),
                   from_screen=from_screen.strip() if from_screen else None, requires_screen_pass=rsp,
-                  power=power, universe=universe)
+                  power=power, universe=universe, execution=execution)
         tpl.validate_specs(registry)
         return tpl
 
@@ -417,7 +429,29 @@ class CampaignTemplate:
         n_entry = math.prod(len(v) for v in self.entry.grid.values())
         n_f = sum(math.prod(math.prod(len(v) for v in f.grid.values()) for f in fs)
                   for fs in self.filter_sets)
-        return n_entry * n_f * n_exit
+        return n_entry * n_f * n_exit * len(self.execution_combos())
+
+    # ---------------------------------------------------------- 집행
+    def execution_combos(self) -> list[ExecutionSpec]:
+        """집행 변형 (격자 순서 = 오프셋 → tif). 집행 격자가 없으면 [시장가]."""
+        e = self.execution
+        if not e:
+            return [MARKET]
+        if e["entry"] == "market":
+            return [ExecutionSpec(take_profit=e["take_profit"])]
+        key = "offset_atr" if "offset_atr" in e else "offset_bp"
+        return [ExecutionSpec(entry="limit", take_profit=e["take_profit"], tif_bars=int(t), **{key: float(o)})
+                for o in e[key] for t in e["tif_bars"]]
+
+    @property
+    def needs_atr_window(self) -> bool:
+        """신호 캐시가 ATR 비율 배열을 준비해야 하는가 (ATR 청산 또는 ATR 오프셋 지정가)."""
+        return self.exit_mode == "atr" or "offset_atr" in (self.execution or {})
+
+    @property
+    def prep_atr_bars(self) -> int | None:
+        """SignalCache/prepare 의 ATR 창 (ATR 청산 창, 고정 % 청산 + ATR 오프셋이면 기본 14)."""
+        return self.atr_bars if self.needs_atr_window else None
 
     def exit_combos(self) -> list[tuple[float, float, int]]:
         """(sl, tp, max_hold_min) — sl/tp 는 고정 % 모드에서 %, ATR 모드에서 ATR 배수."""
@@ -450,23 +484,27 @@ class CampaignTemplate:
         return out
 
     def make_spec(self, entry: BlockRef, filters: tuple[BlockRef, ...], sl: float, tp: float,
-                  hold: int) -> StrategySpec:
-        """sl/tp: 고정 % 모드는 %, ATR 모드는 ATR 배수. 결정 주기 = 템플릿 timeframe."""
+                  hold: int, execution: ExecutionSpec | None = None) -> StrategySpec:
+        """sl/tp: 고정 % 모드는 %, ATR 모드는 ATR 배수. 결정 주기 = 템플릿 timeframe. execution: 집행 변형 (None = 시장가)."""
         ex = self.make_exit(sl, tp, hold)
-        tmp = StrategySpec("x", entry, ex, tuple(filters), timeframe=self.decision_tf, universe=self.universe)
+        xe = execution or MARKET
+        tmp = StrategySpec("x", entry, ex, tuple(filters), timeframe=self.decision_tf, universe=self.universe,
+                           execution=xe)
         return StrategySpec(f"{self.name}_{tmp.logic_hash()[:10]}", entry, ex, tuple(filters),
-                            timeframe=self.decision_tf, universe=self.universe)
+                            timeframe=self.decision_tf, universe=self.universe, execution=xe)
 
     def enumerate(self) -> list[StrategySpec]:
         exits = self.exit_combos()
-        return [self.make_spec(e, fs, *x) for e, fs, _ in self.signal_combos() for x in exits]
+        return [self.make_spec(e, fs, *x, execution=xe) for e, fs, _ in self.signal_combos()
+                for xe in self.execution_combos() for x in exits]
 
     def validate_specs(self, registry: Registry = REGISTRY) -> None:
         """구조(필터 세트)마다 대표 스펙 하나로 StrategySpec.validate (모든 스펙의 파라미터 수가 같음)."""
         x = tuple(self.exits[k][0] for k in self.exit_keys)
         e = BlockRef(self.entry.block, self.entry.combos()[0])
+        xe = max(self.execution_combos(), key=lambda q: q.n_params())   # 파라미터 수 최대 변형으로 검증
         for fs in self.filter_sets:
-            spec = self.make_spec(e, tuple(BlockRef(f.block, f.combos()[0]) for f in fs), *x)
+            spec = self.make_spec(e, tuple(BlockRef(f.block, f.combos()[0]) for f in fs), *x, execution=xe)
             try:
                 spec.validate(registry)
             except (ValueError, KeyError) as err:
@@ -502,7 +540,46 @@ class CampaignTemplate:
             rec["screen_gate"] = {"from_screen": self.from_screen, "requires_screen_pass": self.requires_screen_pass}
         if not U.is_default(self.universe):
             rec["universe"] = list(self.universe)
+        if self.execution:
+            rec["execution"] = dict(self.execution)
         return rec
+
+
+def _execution_grid(d) -> dict:
+    """템플릿 `execution` → 정규화 dict ({} = 시장가). 모르는 키·잘못된 값은 CampaignError (조용히 무시하지 않는다)."""
+    if d is None:
+        return {}
+    if not isinstance(d, dict):
+        raise CampaignError("execution must be a mapping {entry, offset_bp|offset_atr, tif_bars, take_profit}")
+    unknown = set(d) - {"entry", "offset_bp", "offset_atr", "tif_bars", "take_profit"}
+    if unknown:
+        raise CampaignError(f"execution: unknown keys {sorted(unknown)}")
+    entry = str(d.get("entry", "market"))
+    tpm = str(d.get("take_profit", "market"))
+    if entry not in ENTRY_MODES:
+        raise CampaignError(f"execution.entry must be one of {ENTRY_MODES} (a single value, not a grid)")
+    if tpm not in TP_MODES:
+        raise CampaignError(f"execution.take_profit must be one of {TP_MODES} (a single value, not a grid)")
+    out: dict = {"entry": entry, "take_profit": tpm}
+    if entry == "market":
+        if any(k in d for k in ("offset_bp", "offset_atr", "tif_bars")):
+            raise CampaignError("execution.offset_bp/offset_atr/tif_bars are only valid with entry: limit")
+        return out if tpm != "market" else {}
+    if ("offset_bp" in d) == ("offset_atr" in d):
+        raise CampaignError("execution (limit entry) needs exactly one of offset_bp / offset_atr (a list)")
+    key = "offset_bp" if "offset_bp" in d else "offset_atr"
+    vals = _value_list(d[key] if isinstance(d[key], list) else [d[key]], f"execution.{key}")
+    for v in vals:
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or v < 0 or (key == "offset_atr" and v == 0):
+            raise CampaignError(f"execution.{key} values must be numbers ≥ 0 (offset_atr > 0)")
+    tifs = d.get("tif_bars", [DEFAULT_TIF_BARS])
+    tifs = _value_list(tifs if isinstance(tifs, list) else [tifs], "execution.tif_bars")
+    for t in tifs:
+        if isinstance(t, bool) or not isinstance(t, int) or t < 1:
+            raise CampaignError("execution.tif_bars values must be positive integers")
+    out[key] = [float(v) for v in vals]
+    out["tif_bars"] = [int(t) for t in tifs]
+    return out
 
 
 def template_universe(d: dict) -> tuple[str, ...]:
@@ -823,8 +900,17 @@ def register_campaign(env: ResearchEnv, tpl: CampaignTemplate, snapshot: str, pe
              + (f", screen-gated ({tpl.from_screen or 'any screen'})" if tpl.screen_gated else "")
              + (f", universe {list(tpl.universe)} (pooled, equal sleeves; 1 trial per spec)"
                 if not U.is_default(tpl.universe) else "")
+             + (f", execution {tpl.execution}" if tpl.execution else "")
              + f"; evaluated on dev with {tpl.costs['primary']} (primary) and {tpl.costs['grade']} (grade)")
     return hyp_id, camp_id
+
+
+def execution_columns(tpl: CampaignTemplate, xe: ExecutionSpec) -> dict:
+    """결과표의 집행 열 (집행 격자가 있는 템플릿만): exec.offset_bp|exec.offset_atr, exec.tif_bars."""
+    if not tpl.execution or tpl.execution.get("entry") != "limit":
+        return {}
+    key = "offset_atr" if "offset_atr" in tpl.execution else "offset_bp"
+    return {f"exec.{key}": getattr(xe, key), "exec.tif_bars": xe.tif_bars}
 
 
 def exit_columns(tpl: CampaignTemplate, sl, tp, hold) -> dict:
@@ -866,7 +952,7 @@ def run_campaign(template: CampaignTemplate | str | Path, root: str | Path | Non
         m1s[sym] = load_segment(env, tpl.segment, tpl.exchange, sym, tpl.timeframe)
         auxs[sym] = load_aux_m1(env, tpl, segment=tpl.segment, symbol=sym)
     caches = {sym: SignalCache(m1s[sym], aux_context(auxs[sym], tpl.tf_min), tf_min=tpl.tf_min,
-                               atr_bars=tpl.sim_atr_bars) for sym in syms}
+                               atr_bars=tpl.prep_atr_bars) for sym in syms}
     m1, aux_m1 = m1s[syms[0]], auxs[syms[0]]
     eval_costs = [tpl.costs["primary"], tpl.costs["grade"]]
     cost_by_name = {c: get_cost(c, config_root(env)) for c in eval_costs}
@@ -878,12 +964,19 @@ def run_campaign(template: CampaignTemplate | str | Path, root: str | Path | Non
     bh = None                   # 매수보유 일간 수익 (정보 전용; 모든 스펙에 같은 일자) — 다자산: 동일 비중 B&H
     bench_const: dict = {}
     combos = tpl.signal_combos()
-    for ci, (entry, filters, set_idx) in enumerate(combos):
-        ps = {sym: caches[sym].prepared(entry, filters) for sym in syms}
+    xcombos = tpl.execution_combos()
+    loop = [(entry, filters, set_idx, xe) for entry, filters, set_idx in combos for xe in xcombos]
+    for ci, (entry, filters, set_idx, xe) in enumerate(loop):
+        if ci == 0 or loop[ci - 1][:3] != (entry, filters, set_idx):
+            ps = {sym: caches[sym].prepared(entry, filters) for sym in syms}
+        xarg = None if xe.is_default else xe        # 시장가 = 기존 호출 그대로
         for cost_name in eval_costs:
             cost = cost_by_name[cost_name]
-            trs = {sym: fast.simulate_many(ps[sym], exits, sleeve_costs[sym][cost_name], start, end,
-                                           atr_bars=tpl.sim_atr_bars) for sym in syms}
+            trs = {sym: (fast.simulate_many(ps[sym], exits, sleeve_costs[sym][cost_name], start, end,
+                                            atr_bars=tpl.sim_atr_bars) if xarg is None else
+                         fast.simulate_many(ps[sym], exits, sleeve_costs[sym][cost_name], start, end,
+                                            atr_bars=tpl.sim_atr_bars, execution=xarg, fill=LIMIT_FILL_DEFAULT))
+                   for sym in syms}
             if cost_name == tpl.costs["primary"]:
                 mats = []
                 for sym in syms:
@@ -891,7 +984,7 @@ def run_campaign(template: CampaignTemplate | str | Path, root: str | Path | Non
                     mats.append(m_)
                 mat = U.combine_matrix(mats)
             for xi, (sl, tp, hold) in enumerate(exits):
-                spec = tpl.make_spec(entry, filters, sl, tp, hold)
+                spec = tpl.make_spec(entry, filters, sl, tp, hold, execution=xe)
                 lh = spec.logic_hash()
                 specs[lh] = spec
                 sleeves = {sym: fast.to_result(ps[sym], trs[sym][xi], sleeve_costs[sym][cost_name], start, end,
@@ -914,11 +1007,11 @@ def run_campaign(template: CampaignTemplate | str | Path, root: str | Path | Non
                              "filters": "+".join(f.block for f in filters) or "-",
                              **{f"entry.{k}": v for k, v in entry.params.items()},
                              **{f"{f.block}.{k}": v for f in filters for k, v in f.params.items()},
-                             **exit_columns(tpl, sl, tp, hold),
+                             **exit_columns(tpl, sl, tp, hold), **execution_columns(tpl, xe),
                              "spec_json": json.dumps(spec.to_dict(), sort_keys=True),
                              **{k: v for k, v in met.items() if k != "per_asset"}, **pa_cols, "cost": cost_name})
                 items.append((spec, cost_name, _metrics_record(met)))
-        log(f"  signals {ci + 1}/{len(combos)} done ({len(rows)} runs, {time.time() - t0:.1f}s)")
+        log(f"  signals {ci + 1}/{len(loop)} done ({len(rows)} runs, {time.time() - t0:.1f}s)")
     env.ledger.record_runs(camp_id, items, period, snap, commit, tpl.family,   # 모든 실행 기록
                            **run_param_fields(pver))
 
@@ -941,6 +1034,11 @@ def run_campaign(template: CampaignTemplate | str | Path, root: str | Path | Non
         "benchmark": {"kind": "BTC buy & hold (same venue 1m close, no cost)", **bench_const},
         "params": pver, "params_version": pver.get("params_version"), "cost_versions": pver.get("cost_versions"),
     }
+    if tpl.execution:                       # 지정가 집행 격자 (시장가 템플릿은 매니페스트가 이전과 같다)
+        manifest["execution"] = {"grid": dict(tpl.execution), "n_variants": len(xcombos),
+                                 "fill_model": {k: getattr(LIMIT_FILL_DEFAULT, k) for k in
+                                                ("name", "through_ticks", "tick", "through_bp", "fill_prob",
+                                                 "min_volume", "seed", "tick_from_data")}}
     if not U.is_default(tpl.universe):      # 기본 유니버스는 매니페스트도 이전과 같다
         manifest["universe"] = syms
         manifest["sleeves"] = {"weight": 1.0 / len(syms), "accounting": "equal fixed sleeves; portfolio daily "

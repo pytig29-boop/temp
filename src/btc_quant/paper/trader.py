@@ -15,6 +15,14 @@
 기록: <out_dir>/{decisions,fills,trades,risk}.jsonl, state.json(엔진·자산 상태), risk.json(RiskManager).
 시각은 모두 UTC ISO. 결정·리스크 판단의 `now` 는 봉 논리 시각(재생 시 결정적)이다.
 
+지정가 집행(`spec.execution`, docs/ENGINE_SPEC.md "지정가 집행"·"페이퍼 훅"): 엔진에 같은 집행·체결 규칙
+(`LIMIT_FILL_DEFAULT`)을 넘기고, 1분봉마다 거래량과 호가 단위(그 UTC 일자의 실시간 1분봉 종가에서 `signals.infer_ticks`
+— 백테스트와 같은 추정)를 준다. 걸린 진입 지정가(`engine.order`)·익절 지정가(`position.tp_order`)·지정가 진입 여부
+(`position.maker`)는 상태에 저장(STATE_VERSION 2; 버전 1 상태도 읽음). 지정가 체결은 체결가 = 지정가라 호가 대입 비교를
+건너뛴다(`maker: true`). 리스크 강제 청산·정지 시 걸린 진입 지정가를 취소한다. `engine.fill_oracle` 에
+`backtest.queue.QueueFillOracle` 을 꽂으면(서비스 `limit_fill="queue"`) 1분봉 규칙 대신 실시간 체결·호가 대기열 재현으로
+체결을 판정한다 — 서비스가 수신 체결·호가를 `add_trade/add_book` 으로 넣는다. 기본은 1분봉 규칙(= 백테스트와 같은 판정).
+
 다자산 스펙(PLAN D15): 서비스가 자산(슬리브)마다 트레이더 하나(초기 자산 = 명목 금액/N, 슬리브 리스크 한도)를 만들고
 같은 `SleeveGroup`(포트폴리오 리스크 한도 = 슬리브 자산 합계 기준)에 묶는다. 슬리브는 자기 한도와 포트폴리오 한도를
 모두 통과해야 진입하고, 포트폴리오 사람 정지(누적 낙폭 등)·청산 스위치는 모든 슬리브를 청산한다. 엔진 의미론은
@@ -35,8 +43,9 @@ from typing import Any
 import pandas as pd
 
 from btc_quant.backtest.reference import FillEvent, Position, ReferenceEngine, is_boundary
-from btc_quant.backtest.signals import atr_series
-from btc_quant.backtest.types import COINONE_CONSERVATIVE, CostModel
+from btc_quant.backtest.reference import RestingOrder
+from btc_quant.backtest.signals import atr_series, infer_ticks
+from btc_quant.backtest.types import COINONE_CONSERVATIVE, LIMIT_FILL_DEFAULT, CostModel
 from btc_quant.live.risk import RiskManager
 from btc_quant.strategy.blocks import REGISTRY
 from btc_quant.strategy.blocks.base import Context, Registry
@@ -50,7 +59,8 @@ from .fills import DEFAULT_NOTIONAL, BookFill, compare_to_model, walk_book
 log = logging.getLogger("btc_quant.paper.trader")
 
 ONE_MIN = pd.Timedelta(minutes=1)
-STATE_VERSION = 1
+STATE_VERSION = 2            # 2: 지정가 주문 상태(engine.order, position.tp_order/maker) 추가 — 1 도 읽는다
+READABLE_STATE_VERSIONS = (1, 2)
 
 
 def strategy_key(spec: StrategySpec) -> str:
@@ -121,6 +131,20 @@ def evaluate_signals(spec: StrategySpec, m1_window: pd.DataFrame, bar: pd.Timest
                entry_ok=bool(entry and all(filt) and complete), exit_sig=ex, atr=atr,
                close=float(bars["close"].loc[bar]))
     return out
+
+
+def _order_dict(o: RestingOrder | None) -> dict | None:
+    if o is None:
+        return None
+    return {"id": o.id, "kind": o.kind, "side": o.side, "price": o.price, "trigger": o.trigger,
+            "placed": _iso(o.placed), "expires": _iso(o.expires), "draw_ok": bool(o.draw_ok), "atr_frac": o.atr_frac}
+
+
+def _order_from(d: dict | None) -> RestingOrder | None:
+    if not d:
+        return None
+    return RestingOrder(str(d["id"]), str(d["kind"]), str(d["side"]), float(d["price"]), float(d["trigger"]),
+                        _ts(d["placed"]), _ts(d.get("expires")), bool(d.get("draw_ok", True)), d.get("atr_frac"))
 
 
 class SleeveGroup:
@@ -199,8 +223,15 @@ class PaperTrader:
         self.step = pd.Timedelta(minutes=self.tf)
         self.lookback_bars = int(lookback_bars) if lookback_bars else required_lookback_bars(spec, registry)
         self.window_min = window_minutes(self.lookback_bars, self.tf)
-        self.engine = ReferenceEngine.from_exit(spec.exit, cost, start=start, end=None,
-                                                timeframe=spec.timeframe)
+        self.limit = not spec.execution.is_default      # 지정가 집행 (ENGINE_SPEC "페이퍼 훅")
+        if self.limit:
+            self.engine = ReferenceEngine.from_exit(spec.exit, cost, start=start, end=None,
+                                                    timeframe=spec.timeframe, execution=spec.execution,
+                                                    fill=LIMIT_FILL_DEFAULT)
+        else:
+            self.engine = ReferenceEngine.from_exit(spec.exit, cost, start=start, end=None,
+                                                    timeframe=spec.timeframe)
+        self._tick_cache: tuple[int, float] | None = None   # (UTC 일, 호가 단위)
         self.initial_equity = float(initial_equity)
         self.equity = float(initial_equity)          # 실현 자산 (청산마다 복리)
         self.qty = 0.0                               # 보유 수량 (BTC)
@@ -306,14 +337,21 @@ class PaperTrader:
         events: list[dict] = []
         t_close = ts + ONE_MIN
 
-        # 1) 강제 청산 (리스크) — 이 봉 시가
+        # 1) 강제 청산 (리스크) — 이 봉 시가. 걸린 진입 지정가도 취소
+        if self.pending_flatten and self.engine.order is not None:
+            self._cancel_order(ts, self.pending_flatten)
         if self.pending_flatten and self.engine.position is not None:
             ev = self.engine._close(ts, bar.open, "flatten", at_open=True)
             events += self._on_fill(ev, bar, book, live)
         self.pending_flatten = None
 
-        # 2) 엔진
-        for ev in self.engine.on_bar_1m(ts, bar.open, bar.high, bar.low, bar.close, bar.filled):
+        # 2) 엔진 (지정가 집행이면 거래량·호가 단위도)
+        if self.limit:
+            evs = self.engine.on_bar_1m(ts, bar.open, bar.high, bar.low, bar.close, bar.filled,
+                                        float(bar.volume), self._tick(hist, ts))
+        else:
+            evs = self.engine.on_bar_1m(ts, bar.open, bar.high, bar.low, bar.close, bar.filled)
+        for ev in evs:
             events += self._on_fill(ev, bar, book, live)
 
         # 3) 리스크 갱신 (봉 마감 시각 기준)
@@ -328,6 +366,8 @@ class PaperTrader:
         flat, why = self.risk.should_flatten(_dt(t_close))
         if not flat and self.group is not None:
             flat, why = self.group.should_flatten(_dt(t_close))
+        if flat and self.engine.order is not None:      # 걸린 진입 지정가는 즉시 취소
+            self._cancel_order(t_close, why)
         if flat and self.engine.position is not None:
             self.pending_flatten = why
             self._log("risk", {"type": "flatten_pending", "ts": t_close, "reason": why})
@@ -346,6 +386,22 @@ class PaperTrader:
         if self.persist:
             self.save_state()
         return events
+
+    def _tick(self, hist: M1History, ts: pd.Timestamp) -> float:
+        """봉 ts 의 호가 단위: 그 UTC 일자(+ 직전 일) 실시간 1분봉 종가로 `signals.infer_ticks` (백테스트와 같은 함수)."""
+        m = ts_minute(ts)
+        day = m // 1440
+        if self._tick_cache is not None and self._tick_cache[0] == day and self._tick_cache[1] > 0:
+            return self._tick_cache[1]
+        fr = hist.frame((day - 1) * 1440, m)
+        tk = float(infer_ticks(fr)[-1]) if len(fr) else 0.0
+        self._tick_cache = (day, tk)
+        return tk
+
+    def _cancel_order(self, ts: pd.Timestamp, why: str) -> None:
+        od = self.engine.order
+        self.engine.order = None
+        self._log("fills", {"type": "order_cancel", "ts": ts, "order": _order_dict(od), "reason": why})
 
     def _decide(self, t: pd.Timestamp, hist: M1History, book: dict | None, live: bool) -> None:
         bar = t - self.step
@@ -380,9 +436,12 @@ class PaperTrader:
             sl, tp = ev.sl, ev.tp        # 같은 봉에서 청산까지 되면 engine.position 은 이미 None
             expiry = ev.ts + pd.Timedelta(minutes=int(self.spec.exit.max_hold_min))
             notional = self.equity
+            maker = self.spec.execution.limit_entry          # 지정가 체결 = 지정가 (호가 대입 비교 없음)
             bf = (walk_book(self.book_open, "buy", notional=notional, now=self.book_open_wall)
-                  if self.book_open else None)
+                  if self.book_open and not maker else None)
             cmp = compare_to_model(bf, ev.fill_price, ev.ref_price, self.cost, self.conservative)
+            if maker:
+                cmp["maker"] = True
             self.entry_cmp = cmp
             self.exit_capture = None
             self.qty = notional / ev.fill_price
@@ -405,8 +464,13 @@ class PaperTrader:
             src, book, at = "bar_close", book_now, now
         else:
             src, book, at = "bar_open", self.book_open, self.book_open_wall
+        maker_x = ev.reason == "tp" and self.spec.execution.limit_tp
+        if maker_x:
+            src, book = "limit_order", None
         bf = walk_book(book, "sell", qty=self.qty, now=at) if book and self.qty > 0 else None
         cmp = compare_to_model(bf, ev.fill_price, ev.ref_price, self.cost, self.conservative)
+        if maker_x:
+            cmp["maker"] = True
         eq_before = self.equity
         self.equity = eq_before * (1 + trade["net_ret"]) if trade else eq_before
         book_net = None
@@ -441,7 +505,8 @@ class PaperTrader:
         if e.position is not None:
             p = e.position
             pos = {"entry_time": _iso(p.entry_time), "ref": p.ref, "entry_price": p.entry_price,
-                   "sl": p.sl, "tp": p.tp, "expiry": _iso(p.expiry), "atr_frac": p.atr_frac}
+                   "sl": p.sl, "tp": p.tp, "expiry": _iso(p.expiry), "atr_frac": p.atr_frac,
+                   "maker": bool(p.maker), "tp_order": _order_dict(p.tp_order)}
         dec = None
         if e.decision is not None:
             dec = {"ts": _iso(e.decision.ts), "entry_ok": e.decision.entry_ok,
@@ -453,6 +518,7 @@ class PaperTrader:
             "initial_equity": self.initial_equity, "equity": self.equity, "qty": self.qty,
             "last_ts": _iso(self.last_ts), "start": _iso(e.start),
             "position": pos, "cooldown_until": _iso(e.cooldown_until), "decision": dec,
+            "order": _order_dict(e.order), "execution": self.spec.execution.to_dict(),
             "pending_flatten": self.pending_flatten, "entry_cmp": self.entry_cmp,
             "n_trades": self.n_trades, "n_decisions": self.n_decisions,
             "timeframe": self.spec.timeframe, "lookback_bars": self.lookback_bars, "saved_at": time.time(),
@@ -473,7 +539,7 @@ class PaperTrader:
         if p is None or not p.exists():
             return False
         d = json.loads(p.read_text())
-        if d.get("version") != STATE_VERSION:
+        if d.get("version") not in READABLE_STATE_VERSIONS:
             raise ValueError(f"unsupported paper state version {d.get('version')}")
         if d.get("logic_hash") != self.spec.logic_hash():
             log.warning("%s: saved state logic_hash %s != spec %s — starting fresh", self.key,
@@ -489,7 +555,9 @@ class PaperTrader:
         pos = d.get("position")
         e.position = None if pos is None else Position(
             _ts(pos["entry_time"]), float(pos["ref"]), float(pos["entry_price"]), float(pos["sl"]),
-            float(pos["tp"]), _ts(pos["expiry"]), pos.get("atr_frac"))
+            float(pos["tp"]), _ts(pos["expiry"]), pos.get("atr_frac"), bool(pos.get("maker", False)),
+            _order_from(pos.get("tp_order")))
+        e.order = _order_from(d.get("order"))
         dec = d.get("decision")
         if dec is not None:
             e.on_decision(_ts(dec["ts"]), dec["entry_ok"], dec["exit_sig"], dec.get("atr"))

@@ -69,6 +69,10 @@
   `robustness.robustness_suite_universe`). B&H 기준 = 동일 비중 N자산. 리스크 한도 = 포트폴리오(§7 공식) + 슬리브별
   (`sleeve_limits`, 같은 공식을 슬리브 Val 수익에). 원장·DSR·검정력 의미는 그대로(스펙 하나 = 시도 1회).
   자산별 Dev 지표는 후보 `per_asset` 에 보고만 한다. 기본 유니버스 [BTC-KRW] 는 이전과 같은 경로·같은 결과.
+- 주문 집행(`spec.execution`, 지정가 — docs/ENGINE_SPEC.md "지정가 집행"): 모든 Dev 재실행·G2 귀무(같은 집행·같은
+  체결 규칙 `LIMIT_FILL_DEFAULT` 로 무작위 진입 시각에 지정가)·G3 인접(집행 격자 한 칸 이동 포함)·기여도·견고성·G6
+  (run_fast/run_reference 가 스펙 집행을 따름)이 스펙의 집행 그대로. 신호 캐시는 fast.prepare 를 직접 쓰므로 집행을
+  `simulate_*(execution=…)` 로 명시해 넘긴다(시장가 스펙은 기존 호출 그대로).
 """
 from __future__ import annotations
 
@@ -84,6 +88,7 @@ import pandas as pd
 
 from btc_quant.backtest import fast
 from btc_quant.backtest.reference import run_reference
+from btc_quant.backtest.types import LIMIT_FILL_DEFAULT
 from btc_quant.evaluation import gates as G
 from btc_quant.evaluation import inference, montecarlo, selection
 from btc_quant.evaluation import metrics as M
@@ -283,24 +288,41 @@ def neighbor_specs(cr: CampaignResult, spec: StrategySpec) -> list[tuple[str, St
         return [grid[j] for j in (i - 1, i + 1) if 0 <= j < len(grid)]
 
     xs = tpl.exit_values(spec.exit)        # 고정 %: sl_pct/tp_pct/max_hold_min, ATR: sl_atr/tp_atr/max_hold_min
+    xe = spec.execution                    # 집행은 그대로 (지정가 스펙의 인접도 같은 집행)
     # 진입 파라미터
     for k, v in spec.entry.params.items():
         for nv in steps(tpl.entry.grid[k], v):
             e = BlockRef(spec.entry.block, {**spec.entry.params, k: nv})
-            out.append((f"entry.{k}={nv}", tpl.make_spec(e, spec.filters, *xs.values())))
+            out.append((f"entry.{k}={nv}", tpl.make_spec(e, spec.filters, *xs.values(), execution=xe)))
     # 필터 파라미터
     for fi, (f, fg) in enumerate(zip(spec.filters, fset)):
         for k, v in f.params.items():
             for nv in steps(fg.grid[k], v):
                 fl = list(spec.filters)
                 fl[fi] = BlockRef(f.block, {**f.params, k: nv})
-                out.append((f"{f.block}.{k}={nv}", tpl.make_spec(spec.entry, tuple(fl), *xs.values())))
+                out.append((f"{f.block}.{k}={nv}", tpl.make_spec(spec.entry, tuple(fl), *xs.values(), execution=xe)))
     # 청산 파라미터
     for k, v in xs.items():
         for nv in steps(tpl.exits[k], v):
             nx = {**xs, k: nv}
-            out.append((f"{k}={nv}", tpl.make_spec(spec.entry, spec.filters, *nx.values())))
+            out.append((f"{k}={nv}", tpl.make_spec(spec.entry, spec.filters, *nx.values(), execution=xe)))
+    # 집행 파라미터 (지정가 격자: 오프셋·tif 한 칸)
+    g = tpl.execution or {}
+    if xe.limit_entry and g.get("entry") == "limit":
+        import dataclasses
+        key = "offset_atr" if "offset_atr" in g else "offset_bp"
+        for k, grid in ((key, g[key]), ("tif_bars", g["tif_bars"])):
+            for nv in steps(grid, getattr(xe, k)):
+                nxe = dataclasses.replace(xe, **{k: nv})
+                out.append((f"exec.{k}={nv}", tpl.make_spec(spec.entry, spec.filters, *xs.values(), execution=nxe)))
     return out
+
+
+def _exec_kw(spec: StrategySpec) -> dict:
+    """귀무 등에 넘길 집행 인자 (시장가 스펙은 빈 dict = 기존 호출 그대로)."""
+    if spec.execution.is_default:
+        return {}
+    return {"execution": spec.execution, "fill": LIMIT_FILL_DEFAULT}
 
 
 def _trades_match(a: pd.DataFrame, b: pd.DataFrame) -> bool:
@@ -361,7 +383,7 @@ class Pipeline:
         self._m1 = None
         self._cache = None
         self._caches: dict[str, SignalCache] | None = None
-        self.syms = list(tpl.universe)
+        self.syms = list(getattr(tpl, "universe", None) or U.DEFAULT_UNIVERSE)
         self.multi = len(self.syms) > 1
         self._ctx_val: Context | dict | None = None
         ea4 = (G.exposure_aware_cfg(self.cfg).get("G4") or {})
@@ -376,7 +398,7 @@ class Pipeline:
             tpl = self.cr.template
             self._m1 = load_segment(self.env, "dev", tpl.exchange, tpl.symbol, tpl.timeframe)
             ctx = aux_context(load_aux_m1(self.env, tpl, segment="dev"), tpl.tf_min)
-            self._cache = SignalCache(self._m1, ctx, tf_min=tpl.tf_min, atr_bars=tpl.sim_atr_bars)
+            self._cache = SignalCache(self._m1, ctx, tf_min=tpl.tf_min, atr_bars=tpl.prep_atr_bars)
         return self._cache
 
     @property
@@ -390,7 +412,7 @@ class Pipeline:
                     continue
                 m1 = load_segment(self.env, "dev", tpl.exchange, sym, tpl.timeframe)
                 ctx = aux_context(load_aux_m1(self.env, tpl, segment="dev", symbol=sym), tpl.tf_min)
-                out[sym] = SignalCache(m1, ctx, tf_min=tpl.tf_min, atr_bars=tpl.sim_atr_bars)
+                out[sym] = SignalCache(m1, ctx, tf_min=tpl.tf_min, atr_bars=tpl.prep_atr_bars)
             self._caches = {sym: out[sym] for sym in self.syms}
         return self._caches
 
@@ -402,8 +424,13 @@ class Pipeline:
             p = c.prepared(spec.entry, spec.filters)
             _, _, si, ei = p.bounds(self.start, self.end)
             cost = get_sleeve_cost(cost_name, sym) if self.multi else get_cost(cost_name)
-            tr = fast.simulate_prepared(p, ex.sl, ex.tp, ex.max_hold_min,
-                                        cost, si, ei, ex.atr_bars if ex.is_atr else None)
+            if spec.execution.is_default:          # 시장가 = 기존 호출 그대로
+                tr = fast.simulate_prepared(p, ex.sl, ex.tp, ex.max_hold_min,
+                                            cost, si, ei, ex.atr_bars if ex.is_atr else None)
+            else:
+                tr = fast.simulate_prepared(p, ex.sl, ex.tp, ex.max_hold_min, cost, si, ei,
+                                            ex.atr_bars if ex.is_atr else None, execution=spec.execution,
+                                            fill=LIMIT_FILL_DEFAULT)
             out[sym] = fast.to_result(p, tr, cost, self.start, self.end, spec.id, spec.logic_hash())
         return out
 
@@ -528,7 +555,8 @@ class Pipeline:
                                ex.sl, ex.tp, ex.max_hold_min, get_cost(cost_name),
                                self.start, self.end, self.n_null, self.null_seed0, HALF_LIFE_DAYS,
                                calibration=self.null_calibration, target_trades=int(observed["n_trades"]),
-                               tf_min=spec.tf_min, atr_bars=ex.atr_bars if ex.is_atr else None, bars=c.bars)
+                               tf_min=spec.tf_min, atr_bars=ex.atr_bars if ex.is_atr else None, bars=c.bars,
+                               **_exec_kw(spec))
         ok, d = G.check_g2(observed, nd["sharpe_w"], self.cfg)
         enough = self.n_null >= self.cfg["G2"]["null_runs"]
         d.update({k: nd.get(k) for k in ("p", "p_signal_rate", "calibration", "calibration_probe_trades",
@@ -548,7 +576,7 @@ class Pipeline:
         nd = null_distribution_universe(sleeves, ex.sl, ex.tp, ex.max_hold_min, get_cost(cost_name),
                                         self.start, self.end, self.n_null, self.null_seed0, HALF_LIFE_DAYS,
                                         calibration=self.null_calibration, tf_min=spec.tf_min,
-                                        atr_bars=ex.atr_bars if ex.is_atr else None)
+                                        atr_bars=ex.atr_bars if ex.is_atr else None, **_exec_kw(spec))
         ok, d = G.check_g2(observed, nd["sharpe_w"], self.cfg)
         enough = self.n_null >= self.cfg["G2"]["null_runs"]
         d.update({k: nd.get(k) for k in ("p", "p_signal_rate", "calibration", "calibration_probe_trades",
@@ -598,7 +626,7 @@ class Pipeline:
             for i, f in enumerate(spec.filters):
                 rest = spec.filters[:i] + spec.filters[i + 1:]
                 ex = spec.exit
-                drop = tpl.make_spec(spec.entry, rest, ex.sl, ex.tp, ex.max_hold_min)
+                drop = tpl.make_spec(spec.entry, rest, ex.sl, ex.tp, ex.max_hold_min, execution=spec.execution)
                 lh = drop.logic_hash()
                 if lh not in self.prim.index:
                     to_run[lh] = drop
@@ -651,7 +679,7 @@ class Pipeline:
                 sp = self.cr.specs[slh]
                 keep = tuple(f for f in sp.filters if f not in removable)
                 ex = sp.exit
-                ns = tpl.make_spec(sp.entry, keep, ex.sl, ex.tp, ex.max_hold_min)
+                ns = tpl.make_spec(sp.entry, keep, ex.sl, ex.tp, ex.max_hold_min, execution=sp.execution)
                 simplified = {"spec": ns.to_dict(), "logic_hash": ns.logic_hash(),
                               "note": "NEW spec — not swapped in; test it in a follow-up campaign"}
             out[slh] = {"filters": rows, "simplified": simplified, "ablation_campaign": abl_camp,
@@ -864,7 +892,7 @@ class Pipeline:
                     f"{[x['cluster_size'] for x in sel['selected']]}" if "n_clusters" in sel else "") + ")")
         stats = self.campaign_stats()
         out = {"campaign_id": cr.campaign_id, "hypothesis_id": cr.hypothesis_id, "top_k": self.top_k,
-               **({"universe": list(self.syms)} if not U.is_default(tpl.universe) else {}),
+               **({"universe": list(self.syms)} if not U.is_default(self.syms) else {}),
                "selection": sel, "timeframe": tpl.decision_tf,
                "exits": {"mode": tpl.exit_mode, **({"atr_bars": tpl.atr_bars} if tpl.exit_mode == "atr" else {})},
                "aux": list(tpl.aux), "power": (cr.manifest.get("power") or None),

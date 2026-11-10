@@ -226,6 +226,10 @@ class ServiceConfig:
     ref_max_age: float = 60.0               # 참조가(업비트)가 이보다 오래되면 괴리 판정에 쓰지 않음
     registry_root: Path | None = None
     rescan_seconds: float = 600.0
+    # 지정가 집행 스펙의 체결 판정 (ENGINE_SPEC "페이퍼 훅"): "bar" = 1분봉 관통 규칙(백테스트와 같음),
+    # "queue" = 실시간 체결·호가 대기열 재현(`backtest.queue.QueueFillOracle`)
+    limit_fill: str = "bar"
+    limit_latency_s: float = 1.0
 
     @property
     def out(self) -> Path:
@@ -352,12 +356,18 @@ class PaperService:
         tr = PaperTrader(s.spec, cost, risk, s.grade, key=key, out_dir=out,
                          initial_equity=self.cfg.notional / max(int(n_sleeves), 1),
                          lookback_bars=lb, clock=self.clock, aux_hist=aux, group=group, symbol=symbol)
+        if tr.limit and self.cfg.limit_fill == "queue":
+            from btc_quant.backtest.queue import QueueFillOracle
+            tr.engine.fill_oracle = QueueFillOracle(latency_s=self.cfg.limit_latency_s, notional=tr.initial_equity)
+        elif self.cfg.limit_fill not in ("bar", "queue"):
+            raise ValueError(f"limit_fill must be 'bar' or 'queue', got {self.cfg.limit_fill!r}")
         restored = tr.load_state()
         (out / "spec.yaml").write_text(s.spec.to_yaml(), encoding="utf-8")
         meta = {"key": key, "role": s.role, "grade": s.grade, "source": s.source, "cost": cost.name,
                 "limits": {f.name: getattr(limits, f.name) for f in fields(RiskLimits)},
                 "timeframe": s.spec.timeframe, "lookback_bars": lb, "aux": list(spec_aux(s.spec)),
-                "restored": restored}
+                "restored": restored,
+                **({"execution": s.spec.execution.to_dict(), "limit_fill": self.cfg.limit_fill} if tr.limit else {})}
         if symbol is not None:
             meta.update(symbol=symbol, strategy_key=s.key, universe=slot_symbols(s.spec), n_sleeves=int(n_sleeves),
                         sleeve_weight=1.0 / max(int(n_sleeves), 1),
@@ -422,6 +432,7 @@ class PaperService:
                 self.books[sym] = row
                 if sym == self.primary:
                     self.book = row
+                self._oracle_feed(sym, "book", row)
             elif ex == "upbit" and kind == "trades":
                 self.refs[sym] = (float(row["price"]), now)
                 if sym == self.primary:
@@ -433,6 +444,7 @@ class PaperService:
                 if self.first_trade_wall is None:
                     self._start_bars(int(now // 60) + 1, now)
                 self.builders[sym].on_trade(row["ts_exchange"], row["price"], row["qty"])
+                self._oracle_feed(sym, "trade", row)
                 rp, rr = self.refs[sym]
                 ref = rp if rr is not None and now - rr <= self.cfg.ref_max_age else None
                 dt = datetime.fromtimestamp(now, timezone.utc)
@@ -449,6 +461,20 @@ class PaperService:
         except Exception:
             self.errors += 1
             log.exception("on_event failed (%s/%s)", ex, kind)
+
+    def _oracle_feed(self, sym: str, kind: str, row: dict) -> None:
+        """지정가 대기열 재현 오라클(limit_fill="queue")에 체결·호가를 시간순으로 넣는다 (그 심볼의 트레이더만)."""
+        for key, tr in self.traders.items():
+            orc = getattr(tr.engine, "fill_oracle", None)
+            if orc is None or self.trader_sym[key] != sym:
+                continue
+            if kind == "trade":
+                orc.add_trade(int(row["ts_exchange"]) * 1_000_000, float(row["price"]), float(row["qty"]),
+                              "buy" if row.get("side", "buy") == "buy" else "sell")
+            else:
+                import numpy as np
+                orc.add_book(int(row["ts"]) * 1_000_000 if row.get("ts") else int(row["ts_recv"] * 1e9),
+                             {k: np.asarray(row[k], float) for k in ("bid_px", "bid_qty", "ask_px", "ask_qty")})
 
     def _start_bars(self, minute: int, now: float) -> None:
         self.first_trade_wall = now

@@ -40,7 +40,7 @@ def cmd_run(a) -> int:
         runtime_dir=Path(a.runtime), out_root=Path(a.out) if a.out else None, cost=a.cost,
         notional=a.notional, grace_seconds=a.grace, warmup_days=a.warmup_days,
         max_warmup_days=a.max_warmup_days, record=a.record, exchanges=exchanges,
-        registry_root=Path(a.registry_root) if a.registry_root else None)
+        registry_root=Path(a.registry_root) if a.registry_root else None, limit_fill=a.limit_fill)
     svc = service.PaperService(slots, cfg, notifier=notify.from_env())
     summary = asyncio.run(svc.run(duration=a.duration or None))
     print(json.dumps(summary, ensure_ascii=False, indent=1, default=str))
@@ -115,6 +115,8 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--max-warmup-days", type=float, default=120.0)
     r.add_argument("--record", action="store_true", help="수집 원천 데이터도 data/raw 에 기록")
     r.add_argument("--no-upbit", action="store_true", help="업비트 참조가 미사용")
+    r.add_argument("--limit-fill", default="bar", choices=["bar", "queue"],
+                   help="지정가 집행 스펙의 체결 판정: bar(1분봉 관통 규칙, 백테스트와 같음) | queue(실시간 대기열 재현)")
     r.add_argument("--wait-for-strategies", action="store_true",
                    help="레지스트리에 전략이 없으면 종료하지 않고 대기 (컨테이너용)")
     r.add_argument("--rescan", type=float, default=60.0, help="대기 중 레지스트리 재확인 주기(초)")

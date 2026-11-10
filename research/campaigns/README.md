@@ -149,6 +149,18 @@ data: {exchange: coinone, timeframe: 1m, aux: [upbit]}   # data.symbol 은 생�
 - 선별 게이트는 같은 유니버스로 풀링한 선별만 인정(docs/SIGNAL_STUDY.md §9b). MCP `screen_signals` /
   `create_and_run_campaign` / `power_check` 는 `universe` 인자도 받는다.
 
+### 주문 집행 격자 (`execution`, 지정가 — docs/ENGINE_SPEC.md "지정가 집행", 2026-11-10)
+```yaml
+execution: {entry: limit, offset_bp: [3, 5], tif_bars: [1, 3], take_profit: limit}   # 또는 offset_atr: [0.3, 0.5]
+# entry: market|limit, take_profit: market|limit 는 단일 값. 오프셋·tif 는 목록(격자) → 변형 수만큼 스펙 수가 곱해진다
+# 생략 = 시장가 (기존과 같은 스펙·해시·결과). {take_profit: limit} 만 주면 시장가 진입 + 지정가 익절 1변형.
+```
+- 스펙 `execution` 에 들어가 logic_hash 가 갈리고, 파라미터 수(MAX_PARAMS)에 오프셋 +1(tif ≠ 1 이면 +1)이 더해진다.
+- 캠페인·파이프라인은 신호 캐시(`fast.prepare` 직접 사용)에 집행을 명시해 넘긴다 — Dev 결과·G2 귀무(같은 지정가 규칙)·
+  G3 인접(오프셋·tif 한 칸 이동 포함)·기여도·견고성·G6 모두 같은 집행. 체결 규칙은 `LIMIT_FILL_DEFAULT`(manifest `execution.fill_model`).
+- 결과표 열 `exec.offset_bp|exec.offset_atr`, `exec.tif_bars`. 잘못된 키·값은 원장 쓰기 전에 거부.
+- 신호 선별 템플릿은 집행을 지원하지 않는다(키 거부) — 선별은 청산·집행 없는 이벤트 스터디.
+
 ## 무엇이 어디에 저장되나
 
 `research/campaigns/<campaign_id>/` (campaign_id = 원장 id, 예: `camp-000001`)

@@ -33,6 +33,9 @@
 수치 기준은 config/gates.yaml 의 `robustness:` (class ② 증거 기준, config/params.yaml 에 등급·근거 수록)에서
 읽는다. 아래 모듈 상수는 같은 값의 대체값(설정에 항목이 없을 때)이다. 파이프라인은 캠페인 시점 관문 설정
 (`gate_config_for_campaign`)의 `robustness` 를 `thresholds=` 로 넘긴다.
+지정가 집행 스펙(`spec.execution`)은 `fast.prepare_spec` 이 Prepared.execution 에 담아 모든 재실행(지연·비용 배수·
+거래소 재현)이 같은 집행으로 돈다. 지연 시나리오에서 지정가는 지연된 결정 시점 시가 기준으로 다시 걸리고, 사후 재가격되는
+청산(SL/TP/만기)은 시장가(테이커 비용)로 처리한다 — 지정가 익절도 지연 시 시장가로 보수 처리.
 엔진 호출은 공개 API(`fast.prepare_spec`, `fast.prepare`, `fast.simulate_prepared`,
 `fast.daily_returns_matrix`)만 쓴다. 청산은 `spec.exit` 의 고정 % 또는 ATR 배수 SL/TP + 최대보유
 (ATR 모드: `Candidate.atr_bars`; 지연 시나리오는 결정 봉 ATR 절대값을 지연 진입가 기준 비율로 다시 계산).
@@ -181,6 +184,9 @@ class _Engine:
             p = replace(p, cand=self._shift_positions(p.cand, delay), exit_dec=ex)
             if c.atr_bars is not None:
                 p = replace(p, atr_frac={c.atr_bars: self._shift_frac(p.frac(c.atr_bars), delay)})
+            elif p.execution is not None and p.execution.offset_mode == "atr":
+                # 고정 % 청산 + ATR 오프셋 지정가: 오프셋 ATR 창도 지연 진입 행으로 옮긴다 (지정가 = 새 기준가 기준)
+                p = replace(p, atr_frac={k: self._shift_frac(v, delay) for k, v in p.atr_frac.items()})
         tr = fast.simulate_prepared(p, c.sl_pct, c.tp_pct, c.max_hold_min, cost, self.si, self.ei,
                                     c.atr_bars)
         if delay and len(tr.reason):
@@ -218,6 +224,11 @@ class _Engine:
         xf = x_ref * (1 - cost.side_cost)
         net = (xf * (1 - cost.fee_rate)) / (tr.entry_price * (1 + cost.fee_rate)) - 1
         hold = tr.hold_min + np.where(move, d, 0)
+        if tr.exit_maker is not None:          # 지연 재가격된 지정가 익절 = 시장가 체결로 처리 (보수)
+            xm = np.where(move, False, np.asarray(tr.exit_maker, bool))
+            xf = np.where(xm, x_ref, xf)
+            net = (xf * (1 - cost.fee_rate)) / (tr.entry_price * (1 + cost.fee_rate)) - 1
+            tr = tr._replace(exit_maker=xm)
         return tr._replace(exit_idx=x_idx, exit_ref=x_ref, exit_price=xf, net_ret=net,
                            gross_ret=x_ref / tr.entry_ref - 1, hold_min=hold)
 

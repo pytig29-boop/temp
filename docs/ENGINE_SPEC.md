@@ -199,17 +199,23 @@ execution:            # 생략 = 시장가 (기존)
   판정한다. 페이퍼는 수신하는 체결마다 `oracle.add_trade(t_ns, price, qty, taker_side)`, 호가 스냅샷마다
   `oracle.add_book(t_ns, book_dict)` 를 시간순으로 넣고, 1분봉이 닫히면 평소처럼 `on_bar_1m` 을 부른다(엔진이 주문마다
   오라클에 "1분봉 ts 동안 체결됐나"를 묻는다). 체결가 = 지정가, 비용 = 수수료만.
-- 페이퍼 트레이더(`paper/trader.py`)는 아직 이 훅을 쓰지 않는다(다중 자산 작업 중인 파일). 필요한 변경:
-  (1) 엔진 생성에 `execution=spec.execution`, `fill=LIMIT_FILL_DEFAULT`; (2) 서비스의 체결·호가 수신 루프에서
-  `add_trade/add_book`; (3) `on_bar_1m(..., bar.volume, venue_tick)`; (4) `_on_fill` 이 `FillEvent.fill_price` 를
-  쓰고 지정가 체결은 호가 대입(walk_book) 비교를 건너뜀; (5) 상태 저장에 `engine.order`·`position.tp_order` 추가
-  (STATE_VERSION 올림); (6) 리스크 강제 청산 시 걸린 진입 주문 취소(`engine.order = None`).
+- 페이퍼 트레이더(`paper/trader.py`, 2026-11-10 반영): (1) 엔진 생성에 `execution=spec.execution`,
+  `fill=LIMIT_FILL_DEFAULT`; (2) 서비스 `limit_fill="queue"`(CLI `--limit-fill queue`)면 `QueueFillOracle` 을 꽂고 수신
+  체결·호가를 `add_trade/add_book` 으로 넣는다(기본 "bar" = 1분봉 관통 규칙 = 백테스트와 같은 판정);
+  (3) `on_bar_1m(..., bar.volume, tick)` — tick = 그 UTC 일자(+ 직전 일) 실시간 1분봉 종가에서 `infer_ticks`;
+  (4) `_on_fill` 은 지정가 체결에서 호가 대입 비교를 건너뛰고 `maker: true` 로 기록; (5) 상태(STATE_VERSION 2, 1 도 읽음)에
+  `engine.order`·`position.tp_order`·`position.maker`; (6) 리스크 강제 청산·사람 정지 시 걸린 진입 지정가 취소
+  (`fills.jsonl` `order_cancel`).
 
 ### 연구 파이프라인과의 관계
 - `fast.prepare_spec` 은 `Prepared.execution` 에 스펙의 집행을 담고 `simulate_prepared / simulate_exit /
-  simulate_many` 는 인자 `execution=` 이 없으면 그것을 따른다. 캠페인 템플릿·`research.campaign.SignalCache` 처럼
-  `prepare(...)` 를 직접 쓰는 경로는 `execution` 이 없으므로 **시장가로 평가된다** — 지정가 스펙을 캠페인에서
-  쓰려면 그 경로가 `execution=spec.execution`(또는 템플릿의 집행 변형)을 넘겨야 한다(research 쪽 변경 필요).
+  simulate_many` 는 인자 `execution=` 이 없으면 그것을 따른다. `prepare(...)` 를 직접 쓰는 연구 경로(캠페인
+  `SignalCache`, G2 귀무 `nulls.RandomEntryNull`, 파이프라인 Dev 재실행)는 집행을 **명시적으로**
+  `simulate_*(execution=…, fill=LIMIT_FILL_DEFAULT)` 로 넘긴다(2026-11-10 반영 — 캠페인 템플릿 `execution` 격자,
+  G2 귀무 = 무작위 진입 시각에 같은 지정가 규칙, G3 인접 = 오프셋·tif 격자 한 칸 포함, 기여도·견고성·G6 = 스펙 집행
+  그대로). 집행을 지원하지 않는 템플릿(신호 선별)은 `execution` 키를 거부한다(조용히 시장가로 평가하지 않음).
+  견고성 지연 시나리오: 지정가는 지연된 결정 시점 시가 기준으로 다시 걸고(ATR 오프셋 배열도 지연 행으로 이동),
+  사후 재가격되는 청산(SL/TP/만기)은 시장가로 처리(지정가 익절도 지연 시 테이커 비용 — 보수).
 - 차등 테스트: `tests/test_engine_limit.py` (1m/5m/15m/1h × %/ATR × bp/ATR 오프셋 × 시장가/지정가 익절 × 고정/추정
   tick × fill_prob/min_volume, 240 사례, 비트 단위 일치) + 시나리오.
 
