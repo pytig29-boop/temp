@@ -161,6 +161,26 @@ execution: {entry: limit, offset_bp: [3, 5], tif_bars: [1, 3], take_profit: limi
 - 결과표 열 `exec.offset_bp|exec.offset_atr`, `exec.tif_bars`. 잘못된 키·값은 원장 쓰기 전에 거부.
 - 신호 선별 템플릿은 집행을 지원하지 않는다(키 거부) — 선별은 청산·집행 없는 이벤트 스터디.
 
+### 부분 사이징·분할 매수 사다리 (`sizing`, `ladder` — docs/ENGINE_SPEC.md "부분 사이징·분할 매수", PLAN D16, 2026-11-10)
+
+```yaml
+sizing: {entry_fraction: [0.5]}            # 0 < f ≤ 1, 값 ≤ 3개 (목록이 2개 이상이면 파라미터 +1)
+# 또는 (함께 쓸 수 없음)
+ladder:
+  tranches: [3, 4]                          # 2~5, 값 ≤ 2개 — 분할 크기 = max_exposure / N (동일·고정, 비중 격자 없음)
+  step_bp: [100, 150]                       # 또는 step_atr: [0.5, 1.0] — 값 ≤ 3개
+  order: market                             # market(시장가 트리거) | limit — 단일 값
+  exit: per_tranche                         # per_tranche | average — 단일 값(목록이면 격자 모드 = 파라미터 +1)
+  max_exposure: 1.0                         # 단일 값 ≤ class ③ 상한 risk_prefs.max_exposure_per_sleeve (기본 1.0)
+```
+- 변형마다 격자 곱에 포함(예산·시도 수 반영), 스펙 `sizing`/`ladder` 에 들어가 logic_hash 가 갈린다. 손절은 청산 격자의 sl
+  (사다리에서는 마지막 단 아래 공동 손절폭).
+- 파라미터 수 = 스펙 n_params(사다리 +2) + 격자 모드 수 ≤ MAX_PARAMS(8) — 넘으면 원장 쓰기 전에 거부(MAX_PARAMS 는 올리지 않는다).
+- 결과표 열 `ladder.tranches`, `ladder.step_bp|ladder.step_atr`, `ladder.exit` 또는 `sizing.entry_fraction`, 그리고 `n_positions`
+  (사다리 수)·꼬리 위험(`worst_day`, `cvar5_daily`, `max_inventory` …). manifest `position`.
+- G1 = 독립 포지션 수, G2 귀무 = 같은 사다리 구조 + 무작위 첫 진입(포지션 수 맞춤), G3 인접 = 분할 수·간격 한 칸(격자 모드면 다른
+  청산 방식 포함), 견고성 `tail`(기본 정보 전용).
+
 ## 무엇이 어디에 저장되나
 
 `research/campaigns/<campaign_id>/` (campaign_id = 원장 id, 예: `camp-000001`)

@@ -404,8 +404,9 @@ class PaperService:
             if t == "exit":
                 st = self._day_stats.setdefault(key, {"trades": 0, "net": 1.0})
                 st["trades"] += 1
-                if e.get("net_ret") is not None:
-                    st["net"] *= 1 + e["net_ret"]
+                r = e.get("equity_ret", e.get("net_ret"))     # 사다리·부분 사이징: 슬리브 자산 대비 (D16)
+                if r is not None:
+                    st["net"] *= 1 + r
             if not e.get("live", True):
                 continue
             if t == "entry":
@@ -789,8 +790,11 @@ def status_report(out_root: Path, now: float | None = None) -> dict:
         meta = _read_json(d / "meta.json") or {}
         trades = read_jsonl(d / "trades.jsonl")
         net = 1.0
-        for t in trades:
-            net *= 1 + float(t.get("net_ret") or 0.0)
+        for t in trades:      # 슬리브 자산 대비 (사다리·부분 사이징이면 equity_after/equity_before; 기본 = net_ret)
+            if t.get("weight") is not None and t.get("equity_before"):
+                net *= float(t["equity_after"]) / float(t["equity_before"])
+            else:
+                net *= 1 + float(t.get("net_ret") or 0.0)
         out["strategies"][d.name] = {
             "role": meta.get("role"), "grade": st.get("grade"), "cost": (st.get("cost") or {}).get("name"),
             "equity": st.get("equity"), "return": (st.get("equity", 0) / st["initial_equity"] - 1)

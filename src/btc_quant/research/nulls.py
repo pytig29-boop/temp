@@ -22,6 +22,10 @@
   그 위치의 결정 봉 시각 s 에 대해 해시만 계산 → 후보 인덱스 → `fast.simulate_prepared`.
 - 통계량: primary 비용 일간 수익의 **가중 Sharpe**(반감기 365일, `metrics.weighted_sharpe` 와 같은 식,
   행렬로 벡터화).
+- **부분 사이징·분할 매수 사다리** (`sizing`/`ladder`, 2026-11-10): 귀무도 후보와 같은 사이징·같은 사다리 구조(분할 수·간격·
+  주문·청산 방식·max_exposure)로 실행한다 — 무작위인 것은 **첫 분할(진입) 시각**뿐. 거래 수 맞춤의 단위는 독립 포지션
+  (사다리) 수(`TradeArrays.n_positions`; 기본 전략은 거래 수와 같다). 같은 사이징이므로 Sharpe 축척이 같아
+  entry_fraction 을 줄여 귀무를 이기는 일은 없다(가중 Sharpe 는 크기에 거의 불변).
 """
 from __future__ import annotations
 
@@ -70,15 +74,19 @@ class RandomEntryNull:
 
     def __init__(self, m1: pd.DataFrame, bars_index: pd.DatetimeIndex, filter_ok: np.ndarray,
                  tf_min: int = 5, atr_bars: int | None = None, bars: pd.DataFrame | None = None,
-                 execution=None, fill=None):
+                 execution=None, fill=None, sizing=None, ladder=None):
         """execution/fill: 후보 스펙의 지정가 집행 (None = 시장가). 무작위 진입 시각에 같은 지정가 규칙을 적용한다
-        (ATR 오프셋 + 고정 % 청산이면 오프셋 ATR 창 14 를 함께 준비)."""
+        (ATR 오프셋 + 고정 % 청산이면 오프셋 ATR 창 14 를 함께 준비). sizing/ladder: 후보와 같은 사이징·사다리 구조."""
         base = pd.Series(np.asarray(filter_ok, bool), index=bars_index)
         self.atr_bars = atr_bars
         self.execution = None if (execution is None or execution.is_default) else execution
         self.fill = fill
+        self.sizing = None if (sizing is None or sizing.is_default) else sizing
+        self.ladder = ladder
         prep_atr = atr_bars
-        if self.execution is not None and self.execution.offset_mode == "atr" and atr_bars is None:
+        need_aux_atr = ((self.execution is not None and self.execution.offset_mode == "atr")
+                        or (ladder is not None and ladder.step_mode == "atr"))
+        if need_aux_atr and atr_bars is None:
             from btc_quant.strategy.spec import DEFAULT_ATR_BARS
             prep_atr = DEFAULT_ATR_BARS
         # cand = 필터 통과 결정 위치. ATR 청산이면 같은 결정 행 ATR 비율(후보 스펙과 동일 배열)
@@ -103,10 +111,11 @@ class RandomEntryNull:
     def simulate(self, p: float, seed: int, sl: float, tp: float, hold: int, cost: CostModel,
                  si: int, ei: int) -> fast.TradeArrays:
         pr = replace(self.prepared, cand=self.candidates(p, seed))
-        if self.execution is None:
+        if self.execution is None and self.sizing is None and self.ladder is None:
             return fast.simulate_prepared(pr, sl, tp, hold, cost, si, ei, self.atr_bars)
+        from btc_quant.backtest.types import LIMIT_FILL_DEFAULT
         return fast.simulate_prepared(pr, sl, tp, hold, cost, si, ei, self.atr_bars, execution=self.execution,
-                                      fill=self.fill)
+                                      fill=self.fill or LIMIT_FILL_DEFAULT, sizing=self.sizing, ladder=self.ladder)
 
 
 def calibrate_p_to_trades(gen: RandomEntryNull, p0: float, target_trades: int, sl: float, tp: float,
@@ -119,7 +128,7 @@ def calibrate_p_to_trades(gen: RandomEntryNull, p0: float, target_trades: int, s
     def med(p):
         if p <= 0:
             return 0.0
-        return float(np.median([len(gen.simulate(p, seed0 + k, sl, tp, hold, cost, si, ei).net_ret)
+        return float(np.median([gen.simulate(p, seed0 + k, sl, tp, hold, cost, si, ei).n_positions
                                 for k in range(n_probe)]))
 
     if target_trades <= 0 or p0 <= 0:
@@ -162,7 +171,8 @@ def null_distribution(m1: pd.DataFrame, bars_index: pd.DatetimeIndex, entry: np.
                       start, end, n_seeds: int = 1000, seed0: int = 0,
                       half_life_days: float = 365, calibration: str = "trade_count",
                       target_trades: int | None = None, tf_min: int = 5, atr_bars: int | None = None,
-                      bars: pd.DataFrame | None = None, execution=None, fill=None) -> dict:
+                      bars: pd.DataFrame | None = None, execution=None, fill=None, sizing=None,
+                      ladder=None) -> dict:
     """귀무 가중 Sharpe 분포. 반환: sharpe_w(np.ndarray), n_trades(np.ndarray), p, seeds 등.
 
     calibration="signal_rate": p = 필터 통과 봉 중 진입 신호 비율 (calibrated_rate).
@@ -172,7 +182,7 @@ def null_distribution(m1: pd.DataFrame, bars_index: pd.DatetimeIndex, entry: np.
       것만으로 귀무를 이기는 편향이 생긴다(무작위 보행 합성 데이터에서 확인).
     """
     cal = calibrated_rate(entry, filter_ok, bars_index, start, end, tf_min)
-    gen = RandomEntryNull(m1, bars_index, filter_ok, tf_min, atr_bars, bars, execution, fill)
+    gen = RandomEntryNull(m1, bars_index, filter_ok, tf_min, atr_bars, bars, execution, fill, sizing, ladder)
     pr = gen.prepared
     _, _, si, ei = pr.bounds(start, end)
     info = {"p_signal_rate": cal["p"], "calibration": calibration}
@@ -193,7 +203,7 @@ def null_distribution(m1: pd.DataFrame, bars_index: pd.DatetimeIndex, entry: np.
         trs = [gen.simulate(p, sd, sl, tp, hold, cost, si, ei) for sd in seeds]
         days, mat = fast.daily_returns_matrix(pr, trs, start, end)
         srs[c0:c0 + len(trs)] = weighted_sharpe_rows(mat, days, half_life_days)
-        ntr[c0:c0 + len(trs)] = [len(t.net_ret) for t in trs]
+        ntr[c0:c0 + len(trs)] = [t.n_positions for t in trs]
     return {"sharpe_w": srs, "n_trades": ntr, **cal, **info, "p": p, "n_seeds": int(n_seeds),
             "tf_min": int(tf_min), "atr_bars": atr_bars,
             "seed0": int(seed0),
@@ -205,7 +215,8 @@ def null_distribution(m1: pd.DataFrame, bars_index: pd.DatetimeIndex, entry: np.
 def null_distribution_universe(sleeves: list[dict], sl: float, tp: float, hold: int, cost: CostModel,
                                start, end, n_seeds: int = 1000, seed0: int = 0, half_life_days: float = 365,
                                calibration: str = "trade_count", tf_min: int = 5,
-                               atr_bars: int | None = None, execution=None, fill=None) -> dict:
+                               atr_bars: int | None = None, execution=None, fill=None, sizing=None,
+                               ladder=None) -> dict:
     """다자산 유니버스(PLAN D15) G2 귀무: **자산마다** 같은 필터·청산 + random_entry, p 는 자산별로 보정
     (그 자산의 신호 비율 → 그 자산 후보 거래 수에 맞춤). seed 마다 슬리브 일간 수익을 평균(포트폴리오, 후보와
     같은 회계)해 가중 Sharpe 를 계산한다.
@@ -220,7 +231,8 @@ def null_distribution_universe(sleeves: list[dict], sl: float, tp: float, hold: 
         sv = sleeves[0]
         return null_distribution(sv["m1"], sv["bars_index"], sv["entry"], sv["filter_ok"], sl, tp, hold, cost,
                                  start, end, n_seeds, seed0, half_life_days, calibration,
-                                 sv.get("target_trades"), tf_min, atr_bars, sv.get("bars"), execution, fill)
+                                 sv.get("target_trades"), tf_min, atr_bars, sv.get("bars"), execution, fill,
+                                 sizing, ladder)
     gens, ps, per, scost = [], [], {}, []
     for sv in sleeves:
         sym = sv["symbol"]
@@ -228,7 +240,7 @@ def null_distribution_universe(sleeves: list[dict], sl: float, tp: float, hold: 
         scost.append(cost_s)
         cal = calibrated_rate(sv["entry"], sv["filter_ok"], sv["bars_index"], start, end, tf_min)
         gen = RandomEntryNull(sv["m1"], sv["bars_index"], sv["filter_ok"], tf_min, atr_bars, sv.get("bars"),
-                              execution, fill)
+                              execution, fill, sizing, ladder)
         _, _, si, ei = gen.prepared.bounds(start, end)
         info = {"p_signal_rate": cal["p"], "n_entry_bars": cal["n_entry_bars"], "n_filter_bars": cal["n_filter_bars"]}
         p = cal["p"]
@@ -253,7 +265,7 @@ def null_distribution_universe(sleeves: list[dict], sl: float, tp: float, hold: 
             trs = [gen.simulate(p, sd, sl, tp, hold, cs, si, ei) for sd in seeds]
             days, mat = fast.daily_returns_matrix(gen.prepared, trs, start, end)
             acc = mat if acc is None else acc + mat
-            ntr[c0:c0 + len(seeds)] += np.array([len(t.net_ret) for t in trs], dtype=np.int64)
+            ntr[c0:c0 + len(seeds)] += np.array([t.n_positions for t in trs], dtype=np.int64)
         srs[c0:c0 + len(seeds)] = weighted_sharpe_rows(acc / len(gens), days, half_life_days)
 
     def by(k):

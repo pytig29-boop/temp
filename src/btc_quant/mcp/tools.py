@@ -83,7 +83,11 @@ RUN_METRIC_KEYS = ("n_days", "n_trades", "recent_n_trades", "sharpe", "sharpe_w"
                    "rolling_frac_positive_active", "downside_dev", "excess_return_vs_bh", "sharpe_minus_bh",
                    "bh_matched_total_return", "excess_return_vs_matched_bh", "up_capture", "down_capture",
                    "up_regime_return", "down_regime_return", "up_regime_capture", "down_regime_capture",
-                   "worst_bh_dd_strategy_return")
+                   "worst_bh_dd_strategy_return",
+                   # 부분 사이징·분할 매수 사다리 (독립 포지션 수) + 꼬리 위험 (정보 전용 — metrics.tail_metrics)
+                   "n_positions", "recent_n_positions", "worst_day", "worst_week", "cvar5_daily", "skew",
+                   "max_inventory", "max_inventory_minutes", "max_inventory_episodes", "bear_total_return",
+                   "bear_sharpe", "bear_max_dd", "bear_n_days")
 # 후보 Dev B&H 비교 (get_campaign_report candidates[].benchmark_dev) — 전략 값과 같은 Dev 기간 B&H 값
 BENCHMARK_DEV_KEYS = ("total_return", "sharpe", "max_dd", "bh_total_return", "bh_sharpe", "bh_max_dd",
                       "exposure_time", "exposure_days", "bh_matched_total_return", "excess_return_vs_bh",
@@ -99,6 +103,18 @@ REVIEW_VERDICT_RE = re.compile(r"VERDICT:\s*\**\s*SURVIVES\b")
 BLOCK_FILE_RE = re.compile(r"^[a-z][a-z0-9_]*\.py$")
 EXPERIMENTAL_REL = Path("src") / "btc_quant" / "strategy" / "blocks" / "experimental"
 LOCKBOX_REQUESTS_REL = Path("research") / "lockbox_requests"
+
+
+def _tail_summary(c: dict) -> dict | None:
+    """꼬리 위험 (Dev, 정보 전용): 지표 + 견고성 'tail' 검사(MTM 기준; tail_enabled=false 면 판정에 쓰이지 않음)."""
+    m = c.get("metrics") or {}
+    out = {k: m.get(k) for k in ("worst_day", "worst_week", "cvar5_daily", "skew", "max_inventory",
+                                  "max_inventory_minutes", "bear_total_return", "bear_sharpe", "bear_max_dd",
+                                  "worst_bh_dd_strategy_return", "n_positions") if k in m}
+    rb = (c.get("robustness") or {}).get("checks") or {}
+    if isinstance(rb.get("tail"), dict):
+        out["tail_check"] = _scalars(rb["tail"])
+    return out or None
 
 
 class ToolFailure(Exception):
@@ -602,6 +618,7 @@ class ResearchTools:
                 "criterion": abl.get("criterion"), "filters": [_scalars(f) for f in abl.get("filters") or []],
                 "simplified_logic_hash": (abl.get("simplified") or {}).get("logic_hash")},
             "registry_state": reg.get("state") or reg.get("skipped"),
+            "tail_risk_dev": _tail_summary(c),
         }
 
     @tool

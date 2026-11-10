@@ -502,9 +502,16 @@ def _norm_exec(e) -> str:
     return repr(sorted((k, sorted(v) if isinstance(v, list) else v) for k, v in e.items()))
 
 
+def _norm_grid(e) -> str:
+    """사이징·사다리 격자 비교 키 (없음 = 'none')."""
+    e = dict(e or {})
+    return "none" if not e else repr(sorted((k, sorted(v) if isinstance(v, list) else v) for k, v in e.items()))
+
+
 def compare_grids(a: dict, b: dict) -> str | None:
     """두 캠페인 격자(CampaignTemplate.to_record 형식) 비교 → 'exact' | 'same_blocks' | 'same_entry' | None.
-    유니버스(D15)·주문 집행(지정가 격자)이 다르면 같은 격자여도 'exact' 가 아니라 'same_blocks' (다른 전략 = 다른 시도)."""
+    유니버스(D15)·주문 집행(지정가 격자)·사이징·사다리(D16)가 다르면 같은 격자여도 'exact' 가 아니라 'same_blocks'
+    (다른 전략 = 다른 시도)."""
     ea, eb = (a.get("entry") or {}), (b.get("entry") or {})
     if not ea.get("block") or ea.get("block") != eb.get("block"):
         return None
@@ -520,7 +527,9 @@ def compare_grids(a: dict, b: dict) -> str | None:
         gb = {f["block"]: f.get("grid") for f in fb[key]}
         if entry_ok and exits_ok and all(grids_overlap(ga[k], gb[k]) for k in ga):
             same = (_grid_universe(a) == _grid_universe(b)
-                    and _norm_exec(a.get("execution")) == _norm_exec(b.get("execution")))
+                    and _norm_exec(a.get("execution")) == _norm_exec(b.get("execution"))
+                    and _norm_grid(a.get("sizing")) == _norm_grid(b.get("sizing"))      # 사이징·사다리(D16)도 다르면
+                    and _norm_grid(a.get("ladder")) == _norm_grid(b.get("ladder")))    # 다른 전략
             return "exact" if same else "same_blocks"
     return "same_blocks"
 

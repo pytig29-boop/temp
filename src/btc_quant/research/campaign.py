@@ -38,6 +38,18 @@ PLAN §5.1 ①~③. 관문(④~⑥)은 `pipeline.py`, 리포트는 `report.py`.
 - 신호 캐시(`SignalCache.prepared`)는 `fast.prepare` 를 직접 쓰므로 집행을 **반드시** `simulate_*(execution=…)` 로
   넘긴다(이 모듈·pipeline·nulls·robustness 모두). 지정가 체결 규칙 = `backtest.types.LIMIT_FILL_DEFAULT`
   (시장 측정치 class ①; manifest `fill_model` 에 기록).
+
+부분 사이징·분할 매수 사다리 (`sizing`, `ladder`, docs/ENGINE_SPEC.md "부분 사이징·분할 매수", PLAN D16, 2026-11-10)
+- 생략 = 전액 단일 진입(기존). 격자는 작게 고정한다(같은 비중 고정, 비중 맞춤 없음):
+    sizing: {entry_fraction: [0.5]}                                # 목록, 값 ≤ 3개
+    ladder: {tranches: [3, 4], step_bp: [100, 150] | step_atr: [0.5, 1.0],   # 분할 수 ≤ 2개 값, 간격 2~3개 값
+             order: market | limit, exit: per_tranche | average (단일 값; 목록이면 격자 모드 = 파라미터 +1),
+             max_exposure: 1.0 (단일 값, class ③ 상한 risk_prefs.max_exposure_per_sleeve 이하)}
+  sizing 과 ladder 는 함께 쓸 수 없다. 변형마다 격자 곱에 포함 → 예산·시도 수에 그대로 반영.
+- 파라미터 수: 스펙 n_params(사다리 +2 = 분할 수·간격) + 격자 모드(exit 목록, entry_fraction 목록 > 1개) 각 +1 ≤ MAX_PARAMS.
+  넘으면 원장에 쓰기 전에 CampaignError (MAX_PARAMS 는 바꾸지 않는다 — 보고 대상).
+- 신호 캐시는 `fast.prepare` 를 직접 쓰므로 사이징·사다리도 `simulate_*(sizing=…, ladder=…)` 로 명시해 넘긴다.
+  G2 귀무 = 같은 사다리 구조 + 무작위 첫 진입 시각(독립 포지션 수 맞춤), G3 인접 = 분할 수·간격 격자 한 칸 포함.
 """
 from __future__ import annotations
 
@@ -65,9 +77,11 @@ from btc_quant.registry.splits import DataAccess
 from btc_quant.registry.strategies import StrategyRegistry
 from btc_quant.strategy.blocks import REGISTRY, Context, Registry
 from btc_quant.strategy.features import to_tf
-from btc_quant.strategy.spec import (DEFAULT_ATR_BARS, DEFAULT_TIF_BARS, DEFAULT_TIMEFRAME, DEFAULT_UNIVERSE,
-                                     ENTRY_MODES, MARKET, MAX_FILTERS, TIMEFRAMES, TP_MODES, BlockRef,
-                                     ExecutionSpec, ExitSpec, StrategySpec, tf_minutes, tf_name)
+from btc_quant.strategy.spec import (DEFAULT_ATR_BARS, DEFAULT_MAX_EXPOSURE, DEFAULT_TIF_BARS, DEFAULT_TIMEFRAME,
+                                     DEFAULT_UNIVERSE, ENTRY_MODES, FULL, LADDER_EXITS, LADDER_MAX_TRANCHES,
+                                     LADDER_MIN_TRANCHES, LADDER_ORDERS, MARKET, MAX_FILTERS, MAX_PARAMS, TIMEFRAMES,
+                                     TP_MODES, BlockRef, ExecutionSpec, ExitSpec, LadderSpec, SizingSpec,
+                                     StrategySpec, tf_minutes, tf_name)
 
 from . import universe as U
 
@@ -282,6 +296,8 @@ class CampaignTemplate:
     power: dict = field(default_factory=dict)   # {target_sharpe: float} (선택)
     universe: tuple[str, ...] = DEFAULT_UNIVERSE   # 자산 유니버스 (D15) — 기본 [data.symbol]
     execution: dict = field(default_factory=dict)   # 집행 격자 (정규화된 dict; 빈 dict = 시장가)
+    sizing: dict = field(default_factory=dict)      # 사이징 격자 {entry_fraction: [...]} (빈 dict = 전액)
+    ladder: dict = field(default_factory=dict)      # 사다리 격자 (정규화된 dict; 빈 dict = 단일 진입)
 
     @property
     def tf_min(self) -> int:
@@ -311,7 +327,7 @@ class CampaignTemplate:
             raise CampaignError("template must be a mapping")
         allowed = {"name", "hypothesis", "data", "entry", "filters", "exits", "costs", "budget",
                    "family", "segment", "timeframe", "from_screen", "requires_screen_pass", "power", "universe",
-                   "execution"}
+                   "execution", "sizing", "ladder"}
         extra = set(d) - allowed
         if extra:
             raise CampaignError(f"unknown template keys {sorted(extra)}")
@@ -337,6 +353,7 @@ class CampaignTemplate:
         tf_min = tf_minutes(tf)
         universe = template_universe(d)
         execution = _execution_grid(d.get("execution"))
+        sizing, ladder = _position_grid(d.get("sizing"), d.get("ladder"))
         entry = _block_grid(d.get("entry"), "entry", registry)
         fsets_raw = d.get("filters", [[]])
         if not isinstance(fsets_raw, list) or not fsets_raw:
@@ -419,7 +436,7 @@ class CampaignTemplate:
                   family=str(d.get("family") or entry.block), segment=segment, raw=d,
                   decision_tf=tf, exit_mode=mode, atr_bars=int(atr_bars),
                   from_screen=from_screen.strip() if from_screen else None, requires_screen_pass=rsp,
-                  power=power, universe=universe, execution=execution)
+                  power=power, universe=universe, execution=execution, sizing=sizing, ladder=ladder)
         tpl.validate_specs(registry)
         return tpl
 
@@ -429,7 +446,30 @@ class CampaignTemplate:
         n_entry = math.prod(len(v) for v in self.entry.grid.values())
         n_f = sum(math.prod(math.prod(len(v) for v in f.grid.values()) for f in fs)
                   for fs in self.filter_sets)
-        return n_entry * n_f * n_exit * len(self.execution_combos())
+        return n_entry * n_f * n_exit * len(self.execution_combos()) * len(self.position_combos())
+
+    # ---------------------------------------------------------- 사이징·사다리
+    def position_combos(self) -> list[tuple[SizingSpec, LadderSpec | None]]:
+        """(사이징, 사다리) 변형 (격자 순서 = 분할 수 → 간격 → 청산 방식; 사이징 = entry_fraction 순). 없으면 [(전액, None)]."""
+        if self.ladder:
+            g = self.ladder
+            key = "step_atr" if "step_atr" in g else "step_bp"
+            return [(FULL, LadderSpec(int(n), order=g["order"], exit=str(x), max_exposure=float(g["max_exposure"]),
+                                      **{key: float(v)}))
+                    for n in g["tranches"] for v in g[key] for x in g["exit"]]
+        if self.sizing:
+            return [(SizingSpec(float(f)), None) for f in self.sizing["entry_fraction"]]
+        return [(FULL, None)]
+
+    def gridded_mode_params(self) -> int:
+        """격자로 고른 모드·크기 선택의 파라미터 수 (스펙 n_params 에 없는 것): 사다리 exit 목록 > 1 → +1,
+        entry_fraction 목록 > 1 → +1. 고정 선택은 0."""
+        n = 0
+        if self.ladder and len(self.ladder["exit"]) > 1:
+            n += 1
+        if self.sizing and len(self.sizing["entry_fraction"]) > 1:
+            n += 1
+        return n
 
     # ---------------------------------------------------------- 집행
     def execution_combos(self) -> list[ExecutionSpec]:
@@ -445,8 +485,9 @@ class CampaignTemplate:
 
     @property
     def needs_atr_window(self) -> bool:
-        """신호 캐시가 ATR 비율 배열을 준비해야 하는가 (ATR 청산 또는 ATR 오프셋 지정가)."""
-        return self.exit_mode == "atr" or "offset_atr" in (self.execution or {})
+        """신호 캐시가 ATR 비율 배열을 준비해야 하는가 (ATR 청산 · ATR 오프셋 지정가 · ATR 간격 사다리)."""
+        return (self.exit_mode == "atr" or "offset_atr" in (self.execution or {})
+                or "step_atr" in (self.ladder or {}))
 
     @property
     def prep_atr_bars(self) -> int | None:
@@ -484,31 +525,42 @@ class CampaignTemplate:
         return out
 
     def make_spec(self, entry: BlockRef, filters: tuple[BlockRef, ...], sl: float, tp: float,
-                  hold: int, execution: ExecutionSpec | None = None) -> StrategySpec:
-        """sl/tp: 고정 % 모드는 %, ATR 모드는 ATR 배수. 결정 주기 = 템플릿 timeframe. execution: 집행 변형 (None = 시장가)."""
+                  hold: int, execution: ExecutionSpec | None = None, sizing: SizingSpec | None = None,
+                  ladder: LadderSpec | None = None) -> StrategySpec:
+        """sl/tp: 고정 % 모드는 %, ATR 모드는 ATR 배수. 결정 주기 = 템플릿 timeframe. execution: 집행 변형 (None = 시장가).
+        sizing/ladder: 사이징·사다리 변형 (None = 전액 단일 진입)."""
         ex = self.make_exit(sl, tp, hold)
         xe = execution or MARKET
+        sz = sizing or FULL
         tmp = StrategySpec("x", entry, ex, tuple(filters), timeframe=self.decision_tf, universe=self.universe,
-                           execution=xe)
+                           execution=xe, sizing=sz, ladder=ladder)
         return StrategySpec(f"{self.name}_{tmp.logic_hash()[:10]}", entry, ex, tuple(filters),
-                            timeframe=self.decision_tf, universe=self.universe, execution=xe)
+                            timeframe=self.decision_tf, universe=self.universe, execution=xe, sizing=sz, ladder=ladder)
 
     def enumerate(self) -> list[StrategySpec]:
         exits = self.exit_combos()
-        return [self.make_spec(e, fs, *x, execution=xe) for e, fs, _ in self.signal_combos()
-                for xe in self.execution_combos() for x in exits]
+        return [self.make_spec(e, fs, *x, execution=xe, sizing=sz, ladder=lad) for e, fs, _ in self.signal_combos()
+                for xe in self.execution_combos() for sz, lad in self.position_combos() for x in exits]
 
     def validate_specs(self, registry: Registry = REGISTRY) -> None:
         """구조(필터 세트)마다 대표 스펙 하나로 StrategySpec.validate (모든 스펙의 파라미터 수가 같음)."""
         x = tuple(self.exits[k][0] for k in self.exit_keys)
         e = BlockRef(self.entry.block, self.entry.combos()[0])
         xe = max(self.execution_combos(), key=lambda q: q.n_params())   # 파라미터 수 최대 변형으로 검증
+        sz, lad = self.position_combos()[0]
+        extra = self.gridded_mode_params()
         for fs in self.filter_sets:
-            spec = self.make_spec(e, tuple(BlockRef(f.block, f.combos()[0]) for f in fs), *x, execution=xe)
+            spec = self.make_spec(e, tuple(BlockRef(f.block, f.combos()[0]) for f in fs), *x, execution=xe,
+                                  sizing=sz, ladder=lad)
             try:
                 spec.validate(registry)
             except (ValueError, KeyError) as err:
                 raise CampaignError(f"invalid spec structure {[f.block for f in fs]}: {err}") from err
+            if spec.n_params() + extra > MAX_PARAMS:
+                raise CampaignError(
+                    f"spec structure {[f.block for f in fs]} has {spec.n_params()} params + {extra} gridded mode(s) "
+                    f"> MAX_PARAMS {MAX_PARAMS} (ladder adds tranches + step; a gridded exit mode / entry_fraction "
+                    "adds 1). Fix the mode or drop a parameter — MAX_PARAMS is not raised to fit (report it).")
 
     def check_budget(self) -> int:
         n = self.n_specs()
@@ -542,7 +594,79 @@ class CampaignTemplate:
             rec["universe"] = list(self.universe)
         if self.execution:
             rec["execution"] = dict(self.execution)
+        if self.sizing:
+            rec["sizing"] = dict(self.sizing)
+        if self.ladder:
+            rec["ladder"] = dict(self.ladder)
         return rec
+
+
+def _position_grid(sz, lad) -> tuple[dict, dict]:
+    """템플릿 `sizing`·`ladder` → 정규화 dict ({} = 없음). 격자는 작게: entry_fraction ≤ 3개, tranches ≤ 2개(2~5),
+    간격 2~3개(1개도 허용), order 단일 값, exit 단일 값 또는 두 모드 목록, max_exposure 단일 값 ≤ class ③ 상한."""
+    from btc_quant.params import max_exposure_cap
+    cap = max_exposure_cap()
+    if sz is not None and lad is not None:
+        raise CampaignError("sizing and ladder cannot be combined (ladder tranche size = max_exposure / tranches)")
+    sizing: dict = {}
+    if sz is not None:
+        if not isinstance(sz, dict) or set(sz) - {"entry_fraction"} or "entry_fraction" not in sz:
+            raise CampaignError("sizing must be a mapping {entry_fraction: [values]}")
+        vals = _value_list(sz["entry_fraction"] if isinstance(sz["entry_fraction"], list) else [sz["entry_fraction"]],
+                           "sizing.entry_fraction")
+        if len(vals) > 3:
+            raise CampaignError("sizing.entry_fraction: at most 3 values (keep the grid small)")
+        for v in vals:
+            if isinstance(v, bool) or not isinstance(v, (int, float)) or not (0 < v <= 1):
+                raise CampaignError("sizing.entry_fraction values must be in (0, 1]")
+            if v > cap + 1e-12:
+                raise CampaignError(f"sizing.entry_fraction {v} > class ③ cap risk_prefs.max_exposure_per_sleeve {cap}")
+        sizing = {"entry_fraction": [float(v) for v in vals]}
+        if sizing["entry_fraction"] == [1.0]:
+            sizing = {}
+    ladder: dict = {}
+    if lad is not None:
+        if not isinstance(lad, dict):
+            raise CampaignError("ladder must be a mapping {tranches, step_bp|step_atr, order, exit, max_exposure}")
+        unknown = set(lad) - {"tranches", "step_bp", "step_atr", "order", "exit", "max_exposure"}
+        if unknown:
+            raise CampaignError(f"ladder: unknown keys {sorted(unknown)} (weights are fixed equal — no weight grid)")
+        if "tranches" not in lad:
+            raise CampaignError("ladder.tranches required (a list, e.g. [3, 4])")
+        tr = _value_list(lad["tranches"] if isinstance(lad["tranches"], list) else [lad["tranches"]],
+                         "ladder.tranches")
+        if len(tr) > 2:
+            raise CampaignError("ladder.tranches: at most 2 values (keep the grid small, e.g. [3, 4])")
+        for n in tr:
+            if isinstance(n, bool) or not isinstance(n, int) or not (LADDER_MIN_TRANCHES <= n <= LADDER_MAX_TRANCHES):
+                raise CampaignError(f"ladder.tranches values must be integers in [{LADDER_MIN_TRANCHES}, "
+                                    f"{LADDER_MAX_TRANCHES}]")
+        if ("step_bp" in lad) == ("step_atr" in lad):
+            raise CampaignError("ladder needs exactly one of step_bp / step_atr (a list)")
+        key = "step_bp" if "step_bp" in lad else "step_atr"
+        steps = _value_list(lad[key] if isinstance(lad[key], list) else [lad[key]], f"ladder.{key}")
+        if len(steps) > 3:
+            raise CampaignError(f"ladder.{key}: at most 3 values (keep the grid small)")
+        for v in steps:
+            if isinstance(v, bool) or not isinstance(v, (int, float)) or not v > 0:
+                raise CampaignError(f"ladder.{key} values must be > 0")
+            if key == "step_bp" and (max(tr) - 1) * v >= 1e4:
+                raise CampaignError("ladder.step_bp × (tranches − 1) must be < 10000")
+        order = lad.get("order", "market")
+        if not isinstance(order, str) or order not in LADDER_ORDERS:
+            raise CampaignError(f"ladder.order must be one of {LADDER_ORDERS} (a single value)")
+        ex = lad.get("exit", "average")
+        exits = _value_list(ex if isinstance(ex, list) else [ex], "ladder.exit")
+        if any(x not in LADDER_EXITS for x in exits):
+            raise CampaignError(f"ladder.exit values must be in {LADDER_EXITS}")
+        mx = lad.get("max_exposure", DEFAULT_MAX_EXPOSURE)
+        if isinstance(mx, (list, bool)) or not isinstance(mx, (int, float)) or not (0 < mx <= 1):
+            raise CampaignError("ladder.max_exposure must be a single value in (0, 1] (class ③ preference, not a grid)")
+        if mx > cap + 1e-12:
+            raise CampaignError(f"ladder.max_exposure {mx} > class ③ cap risk_prefs.max_exposure_per_sleeve {cap}")
+        ladder = {"tranches": [int(n) for n in tr], key: [float(v) for v in steps], "order": order,
+                  "exit": [str(x) for x in exits], "max_exposure": float(mx)}
+    return sizing, ladder
 
 
 def _execution_grid(d) -> dict:
@@ -901,6 +1025,7 @@ def register_campaign(env: ResearchEnv, tpl: CampaignTemplate, snapshot: str, pe
              + (f", universe {list(tpl.universe)} (pooled, equal sleeves; 1 trial per spec)"
                 if not U.is_default(tpl.universe) else "")
              + (f", execution {tpl.execution}" if tpl.execution else "")
+             + (f", sizing {tpl.sizing}" if tpl.sizing else "") + (f", ladder {tpl.ladder}" if tpl.ladder else "")
              + f"; evaluated on dev with {tpl.costs['primary']} (primary) and {tpl.costs['grade']} (grade)")
     return hyp_id, camp_id
 
@@ -911,6 +1036,16 @@ def execution_columns(tpl: CampaignTemplate, xe: ExecutionSpec) -> dict:
         return {}
     key = "offset_atr" if "offset_atr" in tpl.execution else "offset_bp"
     return {f"exec.{key}": getattr(xe, key), "exec.tif_bars": xe.tif_bars}
+
+
+def position_columns(tpl: CampaignTemplate, sz: SizingSpec, lad: LadderSpec | None) -> dict:
+    """결과표의 사이징·사다리 열 (해당 격자가 있는 템플릿만)."""
+    if tpl.ladder and lad is not None:
+        key = "step_atr" if "step_atr" in tpl.ladder else "step_bp"
+        return {"ladder.tranches": lad.tranches, f"ladder.{key}": getattr(lad, key), "ladder.exit": lad.exit}
+    if tpl.sizing:
+        return {"sizing.entry_fraction": sz.entry_fraction}
+    return {}
 
 
 def exit_columns(tpl: CampaignTemplate, sl, tp, hold) -> dict:
@@ -965,17 +1100,21 @@ def run_campaign(template: CampaignTemplate | str | Path, root: str | Path | Non
     bench_const: dict = {}
     combos = tpl.signal_combos()
     xcombos = tpl.execution_combos()
-    loop = [(entry, filters, set_idx, xe) for entry, filters, set_idx in combos for xe in xcombos]
-    for ci, (entry, filters, set_idx, xe) in enumerate(loop):
+    pcombos = tpl.position_combos()
+    loop = [(entry, filters, set_idx, xe, pc) for entry, filters, set_idx in combos for xe in xcombos
+            for pc in pcombos]
+    for ci, (entry, filters, set_idx, xe, (sz, lad)) in enumerate(loop):
         if ci == 0 or loop[ci - 1][:3] != (entry, filters, set_idx):
             ps = {sym: caches[sym].prepared(entry, filters) for sym in syms}
-        xarg = None if xe.is_default else xe        # 시장가 = 기존 호출 그대로
+        xarg = None if (xe.is_default and lad is None and sz.is_default) else xe   # 기본 = 기존 호출 그대로
+        pkw = {} if (lad is None and sz.is_default) else {"sizing": None if sz.is_default else sz, "ladder": lad}
         for cost_name in eval_costs:
             cost = cost_by_name[cost_name]
             trs = {sym: (fast.simulate_many(ps[sym], exits, sleeve_costs[sym][cost_name], start, end,
                                             atr_bars=tpl.sim_atr_bars) if xarg is None else
                          fast.simulate_many(ps[sym], exits, sleeve_costs[sym][cost_name], start, end,
-                                            atr_bars=tpl.sim_atr_bars, execution=xarg, fill=LIMIT_FILL_DEFAULT))
+                                            atr_bars=tpl.sim_atr_bars, execution=xarg, fill=LIMIT_FILL_DEFAULT,
+                                            **pkw))
                    for sym in syms}
             if cost_name == tpl.costs["primary"]:
                 mats = []
@@ -984,7 +1123,7 @@ def run_campaign(template: CampaignTemplate | str | Path, root: str | Path | Non
                     mats.append(m_)
                 mat = U.combine_matrix(mats)
             for xi, (sl, tp, hold) in enumerate(exits):
-                spec = tpl.make_spec(entry, filters, sl, tp, hold, execution=xe)
+                spec = tpl.make_spec(entry, filters, sl, tp, hold, execution=xe, sizing=sz, ladder=lad)
                 lh = spec.logic_hash()
                 specs[lh] = spec
                 sleeves = {sym: fast.to_result(ps[sym], trs[sym][xi], sleeve_costs[sym][cost_name], start, end,
@@ -1008,6 +1147,7 @@ def run_campaign(template: CampaignTemplate | str | Path, root: str | Path | Non
                              **{f"entry.{k}": v for k, v in entry.params.items()},
                              **{f"{f.block}.{k}": v for f in filters for k, v in f.params.items()},
                              **exit_columns(tpl, sl, tp, hold), **execution_columns(tpl, xe),
+                             **position_columns(tpl, sz, lad),
                              "spec_json": json.dumps(spec.to_dict(), sort_keys=True),
                              **{k: v for k, v in met.items() if k != "per_asset"}, **pa_cols, "cost": cost_name})
                 items.append((spec, cost_name, _metrics_record(met)))
@@ -1039,6 +1179,16 @@ def run_campaign(template: CampaignTemplate | str | Path, root: str | Path | Non
                                  "fill_model": {k: getattr(LIMIT_FILL_DEFAULT, k) for k in
                                                 ("name", "through_ticks", "tick", "through_bp", "fill_prob",
                                                  "min_volume", "seed", "tick_from_data")}}
+    if tpl.sizing or tpl.ladder:             # 사이징·사다리 격자 (없으면 매니페스트가 이전과 같다)
+        from btc_quant.params import max_exposure_cap
+        manifest["position"] = {"sizing": dict(tpl.sizing) or None, "ladder": dict(tpl.ladder) or None,
+                                "n_variants": len(pcombos), "gridded_mode_params": tpl.gridded_mode_params(),
+                                "max_exposure_cap": max_exposure_cap(config_root(env)),
+                                "accounting": "sleeve equity; tranche size = max_exposure/N of equity at the first "
+                                              "fill; cash earns 0; realized daily returns (ENGINE_SPEC)",
+                                "fill_model": {k: getattr(LIMIT_FILL_DEFAULT, k) for k in
+                                               ("name", "through_ticks", "tick", "through_bp", "fill_prob",
+                                                "min_volume", "seed", "tick_from_data")}}
     if not U.is_default(tpl.universe):      # 기본 유니버스는 매니페스트도 이전과 같다
         manifest["universe"] = syms
         manifest["sleeves"] = {"weight": 1.0 / len(syms), "accounting": "equal fixed sleeves; portfolio daily "

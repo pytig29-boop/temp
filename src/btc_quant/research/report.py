@@ -196,9 +196,12 @@ def render(campaign_id: str, root: str | Path | None = None, env: ResearchEnv | 
     prim = cr.ranked()
     L.append("## Top specs (primary cost, ranked by weighted Sharpe)\n")
     cols = ["spec_id", "filters", *tpl.exit_keys, "sharpe_w", "sharpe", "recent_sharpe",
-            "n_trades", "recent_n_trades", "expectancy", "max_dd", "rolling_frac_positive", "exposure_days"]
-    pcols = [c for c in prim.columns if c.startswith("entry.") or ("." in c and c.split(".")[0] in
+            "n_trades", "n_positions", "recent_n_trades", "expectancy", "max_dd", "rolling_frac_positive",
+            "exposure_days", "worst_day", "cvar5_daily", "max_inventory"]
+    pcols = [c for c in prim.columns if c.startswith(("entry.", "ladder.", "sizing.")) or ("." in c and c.split(".")[0] in
              {f.block for fs in tpl.filter_sets for f in fs})]
+    if not (getattr(tpl, "ladder", None) or getattr(tpl, "sizing", None)):
+        cols = [c for c in cols if c not in ("n_positions", "worst_day", "cvar5_daily", "max_inventory")]
     L.append(_table(prim.head(10).to_dict("records"), cols[:2] + pcols + [c for c in cols[2:] if c in prim.columns]))
     acols = [c for c in prim.columns if c.startswith("asset.")]
     if acols:
@@ -282,6 +285,7 @@ def render(campaign_id: str, root: str | Path | None = None, env: ResearchEnv | 
             if not agent and isinstance(g6d, dict) and g6d.get("benchmark_val"):
                 L += benchmark_lines(g6d["benchmark_val"], "**Val** — HUMAN-ONLY",
                                      *([f"EW {len(tpl.universe)}-asset buy & hold"] if len(tpl.universe) > 1 else []))
+            L += tail_lines(c.get("metrics") or {})
             if c.get("yearly"):
                 L.append("Yearly (Dev, primary cost):\n")
                 L.append(_table(c["yearly"], ["year", "n_days", "total_return", "sharpe", "max_dd", "n_trades"]))
@@ -386,13 +390,37 @@ def benchmark_lines(m: dict, label: str, bh_name: str = "BTC buy & hold") -> lis
     return L
 
 
+TAIL_ROWS = (("worst day", "worst_day"), ("worst week", "worst_week"), ("CVaR 5% (daily)", "cvar5_daily"),
+             ("skew (daily)", "skew"), ("max inventory (fraction of sleeve)", "max_inventory"),
+             ("longest time at max inventory (min)", "max_inventory_minutes"),
+             ("2022 bear: total return", "bear_total_return"), ("2022 bear: Sharpe", "bear_sharpe"),
+             ("2022 bear: max DD", "bear_max_dd"), ("return in worst B&H drawdown", "worst_bh_dd_strategy_return"),
+             ("positions (ladders) / tranche rows", None))
+
+
+def tail_lines(m: dict) -> list[str]:
+    """꼬리 위험 (Dev, 실현 일간 수익 기준; MTM 기준은 견고성 'tail' 검사) — 정보 전용, 관문 아님."""
+    if m.get("worst_day") is None:
+        return []
+    parts = []
+    for lab, k in TAIL_ROWS:
+        if k is None:
+            if m.get("n_positions") is not None:
+                parts.append(f"{lab} {m.get('n_positions')} / {m.get('n_trades')}")
+        elif m.get(k) is not None:
+            parts.append(f"{lab} {_f(m.get(k))}")
+    return ["Tail risk (Dev, realized daily returns; information only — not a gate):\n", "- " + "; ".join(parts), ""]
+
+
 def _rob_row(name: str, v: dict) -> dict:
     """견고성 검사 한 줄: 결과 + 핵심 수치."""
     res = "PASS" if v.get("passed") is True else "FAIL" if v.get("passed") is False else "skipped"
     keys = {"latency": ["base_sharpe", "min_retention"], "outliers": ["base_sharpe", "n_trades"],
             "leave_year_out": ["min_sharpe", "worst_year_removed"], "cost": [],
             "regime": [], "alpha": ["alpha_t", "beta", "exposure"],
-            "cross_venue": ["other_venue", "sharpe_target", "sharpe_other", "ratio"]}.get(name, [])
+            "cross_venue": ["other_venue", "sharpe_target", "sharpe_other", "ratio"],
+            "tail": ["mtm_worst_day", "mtm_worst_week", "mtm_cvar5_daily", "mtm_max_dd", "max_inventory",
+                     "max_inventory_minutes", "bear_total_return"]}.get(name, [])
     parts = [f"{k}={_f(v.get(k), 3)}" for k in keys if k in v]
     if name == "outliers":
         parts += [f"{r['removed']}→SR {_f(r['sharpe'], 2)}" for r in v.get("removals") or []]
@@ -400,6 +428,10 @@ def _rob_row(name: str, v: dict) -> dict:
         parts += [f"×{r['mult']}→SR {_f(r['sharpe'], 2)}" for r in v.get("scenarios") or []]
     if name == "regime":
         parts += [f"{d}: max share {_f((v.get(d) or {}).get('max_pnl_share'), 2)}" for d in ("trend", "vol")]
+    if name == "tail":
+        res = ("flag" if v.get("flag") else "ok") + (" (informational)" if v.get("informational") else "")
+        if v.get("passed") is False:
+            res = "FAIL"
     if v.get("reason"):
         parts.append(str(v["reason"]))
     return {"check": name, "result": res, "key numbers": "; ".join(parts)}

@@ -29,6 +29,13 @@
 7. cross_venue  : 같은 스펙을 다른 거래소 데이터(예: 대상 코인원 → 업비트)에서 **같은 비용 모델**로 실행
                   (신호의 재현을 보는 것; 비용 등급은 pipeline 이 따로 본다). 다른 거래소 Sharpe > 0 이고
                   Sharpe 비(다른/대상) ≥ CROSS_VENUE_MIN_RATIO. 데이터 없으면 skipped.
+8. tail         : 꼬리 위험 (2026-11-10, 분할 매수 사다리·부분 사이징과 함께 추가). 평가 기준(MTM, 보유 분할을 매일
+                  종가에 청산 평가) 일간 수익의 최악 일·최악 주·CVaR 5%, 최대 보유 비중에 연속으로 머문 최장 기간,
+                  Dev 약세장 연도(2022) 총수익, 실현 기준 일간 수익의 같은 값, B&H 최악 낙폭 구간 수익.
+                  판정: worst_day ≥ −tail_max_worst_day, worst_week ≥ −tail_max_worst_week, cvar5 ≥ −tail_max_cvar5,
+                  최대 비중 최장 기간 ≤ tail_max_full_inventory_days, 약세장 총수익 ≥ tail_min_bear_return (연도가 없으면 그 항목 제외).
+                  **tail_enabled = false (기본)** 이면 정보 전용(passed=True, informational=True, flag 만 표시) — 관문을 바꾸지 않는다.
+                  켜기는 class ② 기준 변경(사람 승인).
 
 수치 기준은 config/gates.yaml 의 `robustness:` (class ② 증거 기준, config/params.yaml 에 등급·근거 수록)에서
 읽는다. 아래 모듈 상수는 같은 값의 대체값(설정에 항목이 없을 때)이다. 파이프라인은 캠페인 시점 관문 설정
@@ -69,6 +76,12 @@ CROSS_VENUE_MIN_RATIO = 0.5        # Sharpe(다른 거래소)/Sharpe(대상) ≥
 REGIME_MODE = "pnl_share"          # 국면 검사 판정 방식: pnl_share(현재) | dominant_alpha | informational
 REGIME_DOMINANT_MIN_EXCESS = 0.0   # dominant_alpha: 지배 국면 안 노출-맞춤 B&H 대비 초과수익(연율) 하한
 REGIME_MODES = ("pnl_share", "dominant_alpha", "informational")
+TAIL_ENABLED = False               # 꼬리 위험 검사 판정 사용 (기본 false = 정보 전용)
+TAIL_MAX_WORST_DAY = 0.10          # MTM 최악 일 손실 ≤ 10% (슬리브·포트폴리오 자산 대비)
+TAIL_MAX_WORST_WEEK = 0.15         # MTM 최악 주(월~일) 손실 ≤ 15%
+TAIL_MAX_CVAR5 = 0.03              # MTM 일간 하위 5% 평균 손실 ≤ 3%
+TAIL_MAX_FULL_INVENTORY_DAYS = 30  # 최대 보유 비중에 연속으로 머문 최장 기간 ≤ 30일
+TAIL_MIN_BEAR_RETURN = -0.20       # Dev 약세장 연도(2022) 총수익 ≥ −20% (실현 기준)
 
 THRESHOLDS = {
     "latency_min_retention": LATENCY_MIN_RETENTION, "latency_delays_min": list(LATENCY_DELAYS_MIN),
@@ -78,6 +91,9 @@ THRESHOLDS = {
     "alpha_min_tstat": ALPHA_MIN_TSTAT, "alpha_nw_lags": ALPHA_NW_LAGS,
     "cross_venue_min_ratio": CROSS_VENUE_MIN_RATIO,
     "regime_mode": REGIME_MODE, "regime_dominant_min_excess": REGIME_DOMINANT_MIN_EXCESS,
+    "tail_enabled": TAIL_ENABLED, "tail_max_worst_day": TAIL_MAX_WORST_DAY, "tail_max_worst_week": TAIL_MAX_WORST_WEEK,
+    "tail_max_cvar5": TAIL_MAX_CVAR5, "tail_max_full_inventory_days": TAIL_MAX_FULL_INVENTORY_DAYS,
+    "tail_min_bear_return": TAIL_MIN_BEAR_RETURN,
 }
 DEFAULT_THRESHOLDS = THRESHOLDS
 
@@ -101,7 +117,7 @@ def load_thresholds(cfg: dict | None = None) -> dict:
     return out
 
 
-CHECKS = ("latency", "outliers", "leave_year_out", "cost", "regime", "alpha", "cross_venue")
+CHECKS = ("latency", "outliers", "leave_year_out", "cost", "regime", "alpha", "cross_venue", "tail")
 
 Builder = Callable[[pd.DataFrame], fast.Prepared]
 
@@ -149,7 +165,7 @@ def scale_cost(cost: CostModel, mult: float) -> CostModel:
 
 
 def _subset(tr: fast.TradeArrays, mask: np.ndarray) -> fast.TradeArrays:
-    return fast.TradeArrays._make(np.asarray(f)[mask] for f in tr)
+    return fast.TradeArrays._make(None if f is None else np.asarray(f)[mask] for f in tr)
 
 
 class _Engine:
@@ -184,8 +200,9 @@ class _Engine:
             p = replace(p, cand=self._shift_positions(p.cand, delay), exit_dec=ex)
             if c.atr_bars is not None:
                 p = replace(p, atr_frac={c.atr_bars: self._shift_frac(p.frac(c.atr_bars), delay)})
-            elif p.execution is not None and p.execution.offset_mode == "atr":
-                # 고정 % 청산 + ATR 오프셋 지정가: 오프셋 ATR 창도 지연 진입 행으로 옮긴다 (지정가 = 새 기준가 기준)
+            elif ((p.execution is not None and p.execution.offset_mode == "atr")
+                  or (p.ladder is not None and p.ladder.step_mode == "atr")):
+                # 고정 % 청산 + ATR 오프셋 지정가 / ATR 간격 사다리: ATR 창도 지연 진입 행으로 옮긴다 (새 기준가 기준)
                 p = replace(p, atr_frac={k: self._shift_frac(v, delay) for k, v in p.atr_frac.items()})
         tr = fast.simulate_prepared(p, c.sl_pct, c.tp_pct, c.max_hold_min, cost, self.si, self.ei,
                                     c.atr_bars)
@@ -260,9 +277,20 @@ def check_latency(eng: _Engine, base: _Run, cost: CostModel, th: dict | None = N
             "scenarios": rows, "note": "delays: 1 min (live fill), 1 bar, 1 bar + 1 min (5m strategies)"}
 
 
+def _contrib(tr: fast.TradeArrays) -> np.ndarray:
+    """거래 행의 슬리브 대비 손익 (순위용): 기본 net_ret, 부분 사이징·사다리 weight × net_ret."""
+    return tr.net_ret if tr.weight is None else tr.net_ret * tr.weight
+
+
+def _hold_weighted(tr: fast.TradeArrays) -> np.ndarray:
+    """보유 분 × 크기 (기본 = 보유 분)."""
+    h = np.asarray(tr.hold_min, float)
+    return h if tr.weight is None else h * tr.weight
+
+
 def check_outliers(eng: _Engine, base: _Run, th: dict | None = None) -> dict:
     th = th or DEFAULT_THRESHOLDS
-    net = base.tr.net_ret
+    net = _contrib(base.tr)
     n = len(net)
     if n == 0:
         return {"passed": False, "reason": "no trades"}
@@ -356,7 +384,7 @@ def _day_exposure(eng: _Engine, tr: fast.TradeArrays, days: pd.DatetimeIndex) ->
         ed = ed.tz_localize(days.tz)
     elif days.tz is None and ed.tz is not None:
         ed = ed.tz_convert(None)
-    s = pd.Series(np.asarray(tr.hold_min, float), index=ed).groupby(level=0).sum()
+    s = pd.Series(_hold_weighted(tr), index=ed).groupby(level=0).sum()
     return np.minimum(s.reindex(days).fillna(0.0).to_numpy(float) / 1440.0, 1.0)
 
 
@@ -465,7 +493,7 @@ def check_alpha(eng: _Engine, base: _Run, th: dict | None = None) -> dict:
     b, se = _ols_nw(y, x, int(th["alpha_nw_lags"]))
     t_a = float(b[0] / se[0]) if se[0] > 0 else 0.0
     minutes_total = max((eng.e - eng.s).total_seconds() / 60, 1.0)
-    exposure = float(np.sum(base.tr.hold_min) / minutes_total)
+    exposure = float(np.sum(_hold_weighted(base.tr)) / minutes_total)
     bh_matched = exposure * x
     return {"passed": bool(t_a >= th["alpha_min_tstat"]), "alpha_daily": float(b[0]),
             "alpha_annual": float(b[0] * M.ANN), "alpha_t": t_a, "beta": float(b[1]),
@@ -492,6 +520,66 @@ def check_cross_venue(cand: Candidate, base: _Run, other_m1: pd.DataFrame | None
             "ratio": ratio, "same_sign": bool(np.sign(sr0) == np.sign(sr1)), "daily_corr": corr,
             "n_trades_target": len(base.tr.net_ret), "n_trades_other": len(r.tr.net_ret),
             "cost": cost.name}
+
+
+def _tail_frame(eng: _Engine, tr: fast.TradeArrays, cost: CostModel) -> pd.DataFrame:
+    return fast.to_result(eng.p, tr, cost, eng.s, eng.e).trades
+
+
+def tail_verdict(stats: dict, th: dict | None = None) -> dict:
+    """꼬리 위험 판정 항목 (tail_enabled 와 무관하게 계산; 판정 사용 여부는 호출 측)."""
+    th = th or DEFAULT_THRESHOLDS
+    items = {"ok_worst_day": stats["mtm_worst_day"] >= -float(th["tail_max_worst_day"]),
+             "ok_worst_week": stats["mtm_worst_week"] >= -float(th["tail_max_worst_week"]),
+             "ok_cvar5": stats["mtm_cvar5_daily"] >= -float(th["tail_max_cvar5"]),
+             "ok_full_inventory": stats["max_inventory_minutes"] <= float(th["tail_max_full_inventory_days"]) * 1440}
+    br = stats.get("bear_total_return")
+    if br is not None and br == br:
+        items["ok_bear"] = br >= float(th["tail_min_bear_return"])
+    return {k: bool(v) for k, v in items.items()}
+
+
+def _tail_result(stats: dict, th: dict) -> dict:
+    items = tail_verdict(stats, th)
+    flagged = not all(items.values())
+    enabled = bool(th.get("tail_enabled", TAIL_ENABLED))
+    out = {"passed": (not flagged) if enabled else True, "flag": flagged, **items, **stats,
+           "enabled": enabled,
+           "note": "MTM = inventory marked at each UTC day close (liquidation value incl. costs); realized = gate "
+                   "daily returns. Thresholds: config/gates.yaml robustness.tail_* (class ②)."}
+    if not enabled:
+        out["informational"] = True
+    return out
+
+
+def _tail_stats(daily_real: pd.Series, daily_mtm: pd.Series, trades: pd.DataFrame | None, n_sleeves: int = 1,
+                bh: pd.Series | None = None) -> dict:
+    tr = M.tail_metrics(daily_real, trades, n_sleeves=n_sleeves)
+    tm = M.tail_metrics(daily_mtm, None)
+    out = {"mtm_worst_day": tm["worst_day"], "mtm_worst_week": tm["worst_week"], "mtm_cvar5_daily": tm["cvar5_daily"],
+           "mtm_max_dd": M.max_drawdown(daily_mtm)[0],
+           "worst_day": tr["worst_day"], "worst_week": tr["worst_week"], "cvar5_daily": tr["cvar5_daily"],
+           "max_dd": M.max_drawdown(daily_real)[0], "skew": float(pd.Series(daily_mtm).skew()),
+           "max_inventory": tr["max_inventory"], "max_inventory_minutes": tr["max_inventory_minutes"],
+           "max_inventory_episodes": tr["max_inventory_episodes"],
+           "bear_total_return": tr["bear_total_return"], "bear_sharpe": tr["bear_sharpe"],
+           "bear_max_dd": tr["bear_max_dd"], "bear_n_days": tr["bear_n_days"]}
+    if bh is not None:
+        bm = M.benchmark_metrics(daily_real, None, bh)
+        out["worst_bh_dd_episodes"] = [
+            {"depth": bm.get(f"bh_dd{i}_depth"), "start": bm.get(f"bh_dd{i}_start"), "end": bm.get(f"bh_dd{i}_end"),
+             "strategy_return": bm.get(f"bh_dd{i}_strategy_return")} for i in range(1, M.BH_N_EPISODES + 1)
+            if bm.get(f"bh_dd{i}_start")]
+    return out
+
+
+def check_tail(eng: _Engine, base: _Run, cost: CostModel, th: dict | None = None) -> dict:
+    from btc_quant.backtest.sizing import mtm_daily_returns
+    th = th or DEFAULT_THRESHOLDS
+    trades = _tail_frame(eng, base.tr, cost)
+    mtm = mtm_daily_returns(trades, eng.m1["close"], base.daily.index, cost)
+    bh = M.buy_hold_daily(eng.m1["close"], base.daily.index)
+    return _tail_result(_tail_stats(base.daily, mtm, trades, 1, bh), th)
 
 
 # ============================================================== 묶음
@@ -521,6 +609,8 @@ def run_suite(cand: Candidate, m1: pd.DataFrame, start, end, cost: CostModel = C
         res["alpha"] = check_alpha(eng, base, th)
     if "cross_venue" in checks:
         res["cross_venue"] = check_cross_venue(cand, base, other_m1, start, end, cost, other_venue, th)
+    if "tail" in checks:
+        res["tail"] = check_tail(eng, base, cost, th)
     failed = [k for k, v in res.items() if v["passed"] is False]
     skipped = [k for k, v in res.items() if v["passed"] is None]
     passed = not failed
@@ -624,7 +714,7 @@ def robustness_suite_universe(spec, m1s: dict[str, pd.DataFrame], start, end,
                               "note": "every sleeve delayed; portfolio = mean of sleeve daily returns"}
     if "outliers" in checks:
         tags = np.concatenate([np.full(len(base[s].tr.net_ret), i) for i, s in enumerate(syms)])
-        net = np.concatenate([base[s].tr.net_ret for s in syms])
+        net = np.concatenate([_contrib(base[s].tr) for s in syms])
         pos = np.concatenate([np.arange(len(base[s].tr.net_ret)) for s in syms])
         n = int(net.size)
         if n == 0:
@@ -697,7 +787,7 @@ def robustness_suite_universe(spec, m1s: dict[str, pd.DataFrame], start, end,
                 t_a = float(b[0] / se[0]) if se[0] > 0 else 0.0
                 e0 = engs[syms[0]]
                 minutes_total = max((e0.e - e0.s).total_seconds() / 60, 1.0)
-                exposure = float(sum(np.sum(base[s].tr.hold_min) for s in syms) / (minutes_total * len(syms)))
+                exposure = float(sum(np.sum(_hold_weighted(base[s].tr)) for s in syms) / (minutes_total * len(syms)))
                 bh_matched = exposure * x
                 res["alpha"] = {"passed": bool(t_a >= th["alpha_min_tstat"]), "alpha_daily": float(b[0]),
                                 "alpha_annual": float(b[0] * M.ANN), "alpha_t": t_a, "beta": float(b[1]),
@@ -732,6 +822,18 @@ def robustness_suite_universe(spec, m1s: dict[str, pd.DataFrame], start, end,
                                   "ratio": ratio, "same_sign": bool(np.sign(s0) == np.sign(s1)),
                                   "assets": avail, "missing": [s for s in syms if s not in avail],
                                   "per_asset": per, "cost": cost.name}
+    if "tail" in checks:
+        from btc_quant.backtest.sizing import mtm_daily_returns
+        frames, mtms = [], []
+        for s in syms:
+            t = _tail_frame(engs[s], base[s].tr, sc[s])
+            frames.append(t.assign(symbol=s))
+            mtms.append(mtm_daily_returns(t, m1s[s]["close"], base[s].daily.index, sc[s]))
+        pooled = pd.concat(frames, ignore_index=True) if frames else None
+        from .universe import buy_hold_universe
+        bh = buy_hold_universe({s: m1s[s]["close"] for s in syms}, bdaily.index)
+        res["tail"] = _tail_result(_tail_stats(bdaily, _combine(mtms), pooled, len(syms), bh), th)
+        res["tail"]["per_asset_mtm_worst_day"] = {s: float(m.min()) if len(m) else 0.0 for s, m in zip(syms, mtms)}
     failed = [k for k, v in res.items() if v["passed"] is False]
     skipped = [k for k, v in res.items() if v["passed"] is None]
     passed = not failed

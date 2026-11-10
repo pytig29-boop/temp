@@ -52,7 +52,7 @@ claude -p --agent researcher "research-campaign skill로 다음 가설 캠페인
 | `power_check` | 격자 크기/템플릿 → G5 통과 최소 연 Sharpe, 목표 대비 판정 | – | `power.budget_report` |
 | `create_and_run_campaign` | 선별 연결 캠페인 사전등록·실행 → 관문 G0~G6 → 견고성 → 리포트 2벌(사람용 전체 + 에이전트 안전) | 원장·캠페인 폴더·레지스트리(pipeline)·리포트·오답노트 | `run_campaign` + `run_pipeline` + `write_reports` (연구 모드 Bash 직접 호출은 hook 이 거부) |
 | `list_campaigns` | 캠페인·선별 목록(최신 먼저, 계열·예산·판정) | – | `campaign.list_campaigns` |
-| `get_campaign_report` | 캠페인/선별 구조화 요약: 격자·검정력·선별 연결, Dev 깔때기·관문, **Dev 매수보유(B&H) 기준**(`campaign.benchmark_dev`, 후보별 `benchmark_dev`: 노출·B&H 대비 수익/Sharpe/MDD·capture·최악 B&H 낙폭 구간, `G4_exposure_aware` shadow), 견고성·기여도, **G6 = pass/fail** (`G6_outcome`: pass/fail/budget_exhausted/engine_mismatch), 오답노트 사실, 에이전트 안전 리포트 경로 | – | `pipeline_public.json` (없으면 `pipeline.json` 을 서버 안에서 같은 규칙으로 정제) |
+| `get_campaign_report` | 캠페인/선별 구조화 요약: 격자·검정력·선별 연결, Dev 깔때기·관문, **Dev 매수보유(B&H) 기준**(`campaign.benchmark_dev`, 후보별 `benchmark_dev`: 노출·B&H 대비 수익/Sharpe/MDD·capture·최악 B&H 낙폭 구간, `G4_exposure_aware` shadow), 견고성·기여도, **꼬리 위험**(후보별 `tail_risk_dev`: 최악 일·주, CVaR 5%, 왜도, 최대 보유 비중·지속, Dev 2022 약세장, B&H 최악 낙폭 구간 수익, 독립 포지션 수 + 견고성 `tail` 검사(MTM, 기본 정보 전용) — PLAN D16), **G6 = pass/fail** (`G6_outcome`: pass/fail/budget_exhausted/engine_mismatch), 오답노트 사실, 에이전트 안전 리포트 경로 | – | `pipeline_public.json` (없으면 `pipeline.json` 을 서버 안에서 같은 규칙으로 정제) |
 | `query_ledger` | 원장 읽기 전용 조회(화이트리스트 표·열, 동등 필터) + `trials` 집계 | – | `Ledger().records`, `trials_count` |
 | `lessons_view` | 사실·해석(현재 상태)·무결성·주간 예산 | – | `LessonBook().facts/interpretations/verify` |
 | `lessons_add_interpretation` | 해석 추가(항상 unverified, 근거 필수, Val/잠금 수치 거부) | 오답노트 | `add_interpretation` |

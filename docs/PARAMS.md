@@ -148,6 +148,11 @@ snap = params_snapshot()      # {"params_version": "79bc502df565", "cost_version
 - 견고성 기준(`robustness.*`)은 `config/gates.yaml` `robustness:` 로 이관됐다(값·params_version 변화 없음).
   다른 class ② 기준과 같은 절차(propose-criteria → 사람 승인 → 다음 캠페인부터)로 바꾼다.
 - `risk_prefs.capital_fraction` 은 미정(사람 결정 대기).
+- 2026-11-10 (PLAN D16): class ③ `risk_prefs.max_exposure_per_sleeve` = **1.0** 추가 — 사용자 결정(채팅 2026-11-10, `added_by`).
+  분할 매수 사다리 `ladder.max_exposure`·`sizing.entry_fraction` 상한(캠페인 템플릿·페이퍼 트레이더가 `params.check_exposure_cap` 로 검증).
+  class ② 꼬리 위험 견고성 기준 `robustness.tail_*` 6개 추가 — **`tail_enabled: false`(정보 전용, 판정 변화 없음)**, 기본값
+  최악 일 MTM 손실 10%, 최악 주 15%, CVaR 5% 3%, 최대 보유 비중 지속 30일, Dev 2022 총수익 −20%. 켜기·값 변경은 class ② 절차.
+  params_version 은 목록 추가로 바뀜(관문 판정 변화 없음).
 - 2026-11-10: 노출 인식 관문 변형 `gates.exposure_aware.*` 12개 추가(class ②, `enabled: false`). 합성 국면 보정 결과 검정력 증가가 없어 **제안 없음** — §6.
 - 2026-11-10: 견고성 국면 검사 옵션 `robustness.regime_mode`(`pnl_share`) · `robustness.regime_dominant_min_excess`(0.0)
   추가(class ②, 기본 = 기존 동작; params_version bc8fb6b2bc0e → a8064a43c730 은 목록 추가 때문, 판정 변화 없음). 합성 보정

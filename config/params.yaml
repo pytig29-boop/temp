@@ -23,6 +23,7 @@ settings:
     n_boot: 2000
   risk_prefs:
     capital_fraction: null
+    max_exposure_per_sleeve: 1.0
 uncatalogued_ok:
 - version
 - primary_metric.annualization
@@ -805,6 +806,66 @@ params:
   owner: human
   history: []
   note: 2026-11-09 코드 상수(research/robustness.py)에서 config/gates.yaml robustness 로 이관 — 값·버전 변경 없음
+- key: robustness.tail_enabled
+  class: 2
+  source: yaml:config/gates.yaml#robustness.tail_enabled
+  value: false
+  rationale: 꼬리 위험 견고성 검사(tail)를 판정에 쓰는가 — 기본 false = 정보 전용(flag 만 기록, 관문 불변). 켜기는 class ② 변경 + 사람 승인
+  evidence: 신규 정보 전용 검사 기본값(관문 영향 없음, tail_enabled=false) — docs/ENGINE_SPEC.md "부분 사이징·분할 매수", PLAN D16
+  version: 1
+  last_updated: '2026-11-10'
+  owner: human
+  history: []
+- key: robustness.tail_max_worst_day
+  class: 2
+  source: yaml:config/gates.yaml#robustness.tail_max_worst_day
+  value: 0.1
+  rationale: 평가 기준(MTM, 보유 분할 일 종가 청산 평가) 최악 일 손실 상한 10% — 분할 매수 사다리의 '떨어지는 칼' 꼬리 표시
+  evidence: 신규 정보 전용 검사 기본값(관문 영향 없음, tail_enabled=false) — docs/ENGINE_SPEC.md "부분 사이징·분할 매수", PLAN D16
+  version: 1
+  last_updated: '2026-11-10'
+  owner: human
+  history: []
+- key: robustness.tail_max_worst_week
+  class: 2
+  source: yaml:config/gates.yaml#robustness.tail_max_worst_week
+  value: 0.15
+  rationale: MTM 최악 주(월~일, 복리) 손실 상한 15%
+  evidence: 신규 정보 전용 검사 기본값(관문 영향 없음, tail_enabled=false) — docs/ENGINE_SPEC.md "부분 사이징·분할 매수", PLAN D16
+  version: 1
+  last_updated: '2026-11-10'
+  owner: human
+  history: []
+- key: robustness.tail_max_cvar5
+  class: 2
+  source: yaml:config/gates.yaml#robustness.tail_max_cvar5
+  value: 0.03
+  rationale: MTM 일간 하위 5% 평균 손실(CVaR 5%) 상한 3%
+  evidence: 신규 정보 전용 검사 기본값(관문 영향 없음, tail_enabled=false) — docs/ENGINE_SPEC.md "부분 사이징·분할 매수", PLAN D16
+  version: 1
+  last_updated: '2026-11-10'
+  owner: human
+  history: []
+- key: robustness.tail_max_full_inventory_days
+  class: 2
+  source: yaml:config/gates.yaml#robustness.tail_max_full_inventory_days
+  value: 30
+  rationale: 최대 보유 비중에 연속으로 머문 최장 기간 상한 30일 — 물린 재고(stuck inventory) 표시
+  evidence: 신규 정보 전용 검사 기본값(관문 영향 없음, tail_enabled=false) — docs/ENGINE_SPEC.md "부분 사이징·분할 매수", PLAN D16
+  version: 1
+  last_updated: '2026-11-10'
+  owner: human
+  history: []
+- key: robustness.tail_min_bear_return
+  class: 2
+  source: yaml:config/gates.yaml#robustness.tail_min_bear_return
+  value: -0.2
+  rationale: Dev 약세장 연도(2022, BTC −64%) 총수익(실현 기준) 하한 −20%
+  evidence: 신규 정보 전용 검사 기본값(관문 영향 없음, tail_enabled=false) — docs/ENGINE_SPEC.md "부분 사이징·분할 매수", PLAN D16
+  version: 1
+  last_updated: '2026-11-10'
+  owner: human
+  history: []
 - key: calibration.quantiles
   class: 2
   source: params:calibration.quantiles
@@ -1177,4 +1238,16 @@ params:
   version: 1
   last_updated: '2026-11-09'
   owner: human
+  history: []
+- key: risk_prefs.max_exposure_per_sleeve
+  class: 3
+  source: params:risk_prefs.max_exposure_per_sleeve
+  value: 1.0
+  rationale: 슬리브(자산)당 최대 노출 상한 — 분할 매수 사다리 ladder.max_exposure 와 sizing.entry_fraction 은 이 값을
+    넘을 수 없다(캠페인 템플릿·페이퍼 검증). 1.0 = 모든 분할이 체결되면 그 자산 슬리브 100% (3자산 유니버스면 총자본의 1/3)
+  evidence: 사용자 결정 (채팅 2026-11-10) — PLAN D16
+  version: 1
+  last_updated: '2026-11-10'
+  owner: human
+  added_by: user (chat 2026-11-10)
   history: []

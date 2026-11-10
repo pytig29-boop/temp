@@ -108,16 +108,20 @@ def max_drawdown(daily) -> tuple[float, int]:
 
 
 def trade_stats(trades: pd.DataFrame, n_days: int) -> dict:
-    """거래 통계. trades 는 TRADE_COLUMNS (net_ret, hold_min 사용)."""
+    """거래 통계. trades 는 TRADE_COLUMNS (net_ret, hold_min 사용).
+    n_positions = 독립 포지션 수 — 사다리(분할 매수)면 사다리 수, 아니면 거래 수 (G1 표본·G2 거래 수 맞춤 단위).
+    부분 사이징·사다리 거래 행은 분할(tranche) 하나씩이고 net_ret 은 분할 명목 대비 (슬리브 대비 = weight × net_ret)."""
+    from btc_quant.backtest.sizing import n_positions
     n = 0 if trades is None else len(trades)
     if n == 0:
-        return {"n_trades": 0, "expectancy": 0.0, "win_rate": 0.0, "profit_factor": 0.0,
+        return {"n_trades": 0, "n_positions": 0, "expectancy": 0.0, "win_rate": 0.0, "profit_factor": 0.0,
                 "avg_hold_min": 0.0, "trades_per_day": 0.0}
     r = trades["net_ret"].to_numpy(dtype=float)
     gains, losses = r[r > 0].sum(), -r[r < 0].sum()
     pf = float(gains / losses) if losses > 0 else (float("inf") if gains > 0 else 0.0)
     return {
         "n_trades": int(n),
+        "n_positions": n_positions(trades),
         "expectancy": float(r.mean()),
         "win_rate": float((r > 0).mean()),
         "profit_factor": pf,
@@ -314,14 +318,19 @@ def benchmark_metrics(daily: pd.Series, trades: pd.DataFrame | None, bh_daily: p
         전략 복리 수익), worst_bh_dd_strategy_return (가장 깊은 구간의 전략 수익).
 
     n_sleeves (다자산 유니버스, PLAN D15): 거래 목록이 N 개 동일 슬리브의 합이면 exposure_time = 보유 분 합 /
-    (일수 × 1440 × N) = 슬리브 평균 노출 시간. days_in_market 은 '어느 슬리브든 보유한 날'. 기본 1 = 이전과 같다."""
+    (일수 × 1440 × N) = 슬리브 평균 노출 시간. days_in_market 은 '어느 슬리브든 보유한 날'. 기본 1 = 이전과 같다.
+    부분 사이징·사다리(거래 표에 weight 열): exposure_time = Σ weight × 보유 분 / … = 평균 보유 비중(자본 가중)."""
     s = pd.Series(daily).dropna().astype(float)
     n = s.size
     x = s.to_numpy()
     out: dict = {}
     idx = s.index if isinstance(s.index, pd.DatetimeIndex) else None
     inm = days_in_market(trades, idx) if idx is not None else np.zeros(n, dtype=bool)
-    hold = float(trades["hold_min"].astype(float).sum()) if trades is not None and len(trades) else 0.0
+    # 보유 시간 × 크기 (부분 사이징·사다리: weight 가중 = 평균 보유 비중; 기본 weight 1 = 보유 시간 비율)
+    hold = 0.0
+    if trades is not None and len(trades):
+        hm = trades["hold_min"].astype(float).to_numpy()
+        hold = float((hm * trades["weight"].to_numpy(float)).sum() if "weight" in trades.columns else hm.sum())
     out["exposure_time"] = float(min(1.0, hold / (n * 1440.0 * max(int(n_sleeves), 1)))) if n else 0.0
     out["days_in_market"] = int(inm.sum())
     out["exposure_days"] = float(inm.mean()) if n else 0.0
@@ -384,6 +393,43 @@ def benchmark_metrics(daily: pd.Series, trades: pd.DataFrame | None, bh_daily: p
     return out
 
 
+# ============================================================== 꼬리 위험 (정보 전용 + 견고성 'tail' 검사 입력)
+TAIL_CVAR_Q = 0.05                 # CVaR: 일간 수익 하위 5% 평균
+BEAR_YEAR = 2022                   # Dev 약세장 하위 구간 (BTC 2022: −64%)
+TAIL_KEYS = ("worst_day", "worst_week", "cvar5_daily", "max_inventory", "max_inventory_minutes",
+             "max_inventory_episodes", "bear_total_return", "bear_sharpe", "bear_max_dd", "bear_n_days")
+
+
+def tail_metrics(daily, trades: pd.DataFrame | None = None, cvar_q: float = TAIL_CVAR_Q,
+                 bear_year: int = BEAR_YEAR, n_sleeves: int = 1) -> dict:
+    """꼬리 위험 지표 (사다리·부분 사이징 평가용, 모든 전략에 계산 — 정보 전용):
+    worst_day / worst_week(월~일 복리) / cvar5_daily(하위 cvar_q 일간 수익 평균), 최대 보유 비중과 그 비중에 머문 최장
+    시간(분)·횟수(`sizing.inventory_profile`), 약세장 연도(bear_year, Dev 2022) 하위 구간 총수익·Sharpe·MDD·일수
+    (그 연도가 없으면 NaN). 왜도는 summarize 의 skew, B&H 최악 낙폭 구간 수익은 benchmark_metrics 의 bh_dd*_strategy_return."""
+    from btc_quant.backtest.sizing import inventory_profile
+    s = pd.Series(daily).dropna().astype(float)
+    x = s.to_numpy()
+    out: dict = {"worst_day": float(x.min()) if x.size else 0.0}
+    if isinstance(s.index, pd.DatetimeIndex) and x.size:
+        wk = (1 + s).resample("W-SUN").prod() - 1
+        out["worst_week"] = float(wk.min())
+    else:
+        out["worst_week"] = float(min((np.prod(1 + x[i:i + 7]) - 1 for i in range(0, x.size, 7)), default=0.0))
+    if x.size:
+        k = max(1, int(np.ceil(cvar_q * x.size)))
+        out["cvar5_daily"] = float(np.sort(x)[:k].mean())
+    else:
+        out["cvar5_daily"] = 0.0
+    out.update(inventory_profile(trades, n_sleeves))
+    if isinstance(s.index, pd.DatetimeIndex) and (s.index.year == bear_year).any():
+        b = s[s.index.year == bear_year]
+        out.update(bear_total_return=float(np.prod(1 + b.to_numpy()) - 1), bear_sharpe=sharpe(b),
+                   bear_max_dd=max_drawdown(b)[0], bear_n_days=int(b.size))
+    else:
+        out.update(bear_total_return=float("nan"), bear_sharpe=float("nan"), bear_max_dd=float("nan"), bear_n_days=0)
+    return out
+
+
 def recent(daily: pd.Series, days: int = RECENT_DAYS) -> pd.Series:
     """마지막 `days` 일 (DatetimeIndex 면 달력 기준 (end-days, end], 아니면 마지막 days 개)."""
     s = pd.Series(daily).dropna()
@@ -398,8 +444,10 @@ def summarize(result, half_life_days: float = 365, benchmark: pd.Series | None =
 
     키: n_days, sharpe, sharpe_w, mean_w, std_w, n_eff, mean_daily, std_daily, skew,
     kurtosis(정규=3), total_return, cagr, max_dd, max_dd_days, n_trades, expectancy, win_rate,
-    profit_factor, avg_hold_min, trades_per_day, recent_sharpe, recent_n_trades,
+    profit_factor, avg_hold_min, trades_per_day, recent_sharpe, recent_n_trades, n_positions, recent_n_positions,
     rolling_frac_positive, rolling_n_windows, sharpe_year_YYYY
+    + 꼬리 위험 (`tail_metrics`, 정보 전용): worst_day, worst_week, cvar5_daily, max_inventory(_minutes/_episodes),
+    bear_total_return/bear_sharpe/bear_max_dd/bear_n_days (Dev 2022)
     + 노출·B&H 기준 (`benchmark_metrics`, 정보 전용): exposure_time, exposure_days, days_in_market, downside_dev,
     rolling_n_neutral/active, rolling_frac_positive_active, rolling_neutral_exposure, 그리고 benchmark(같은
     일자의 BTC 매수보유 일간 수익, `buy_hold_daily`)가 주어지면 bh_* · capture · 낙폭 구간 키.
@@ -434,6 +482,7 @@ def summarize(result, half_life_days: float = 365, benchmark: pd.Series | None =
     out.update(trade_stats(trades, n))
     rec = recent(s)
     out["recent_sharpe"] = sharpe(rec)
+    out["recent_n_positions"] = 0
     if trades is not None and len(trades) and rec.size:
         et = pd.to_datetime(trades["exit_time"])
         lo = rec.index.min()
@@ -444,13 +493,17 @@ def summarize(result, half_life_days: float = 365, benchmark: pd.Series | None =
             elif et_idx.tz is not None and lo.tzinfo is None:
                 lo = lo.tz_localize(et_idx.tz)
             # 일자 index 는 자정 라벨 → 해당 일자 전체 포함
-            out["recent_n_trades"] = int((et_idx.normalize() >= lo.normalize()).sum())
+            rmask = np.asarray(et_idx.normalize() >= lo.normalize())
+            out["recent_n_trades"] = int(rmask.sum())
+            from btc_quant.backtest.sizing import n_positions
+            out["recent_n_positions"] = n_positions(trades[rmask])
         else:
             out["recent_n_trades"] = 0
     else:
         out["recent_n_trades"] = 0
     out["rolling_frac_positive"], out["rolling_n_windows"] = rolling_positive_fraction(s)
     ns = int(n_sleeves if n_sleeves is not None else (getattr(result, "n_sleeves", 1) or 1))
+    out.update(tail_metrics(s, trades, n_sleeves=ns))
     out.update(benchmark_metrics(s, trades, benchmark, neutral_exposure=neutral_exposure, n_sleeves=ns))
     if isinstance(s.index, pd.DatetimeIndex) and n:
         for y, row in yearly_table(s, trades).iterrows():

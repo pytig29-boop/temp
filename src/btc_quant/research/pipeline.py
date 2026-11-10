@@ -69,6 +69,12 @@
   `robustness.robustness_suite_universe`). B&H 기준 = 동일 비중 N자산. 리스크 한도 = 포트폴리오(§7 공식) + 슬리브별
   (`sleeve_limits`, 같은 공식을 슬리브 Val 수익에). 원장·DSR·검정력 의미는 그대로(스펙 하나 = 시도 1회).
   자산별 Dev 지표는 후보 `per_asset` 에 보고만 한다. 기본 유니버스 [BTC-KRW] 는 이전과 같은 경로·같은 결과.
+- 부분 사이징·분할 매수 사다리(`spec.sizing`/`spec.ladder`, PLAN D16, docs/ENGINE_SPEC.md "부분 사이징·분할 매수"): 모든 Dev
+  재실행·G2 귀무(같은 사다리 구조 + 무작위 첫 진입 시각, 독립 포지션 수 맞춤)·G3 인접(분할 수·간격 격자 한 칸 포함)·기여도·
+  견고성·G6 이 스펙의 사이징 그대로. G1 표본 = 독립 포지션(사다리) 수. 관문은 모두 **실제 사이징의 포트폴리오 일간 수익**으로
+  판정한다 — 낙폭 관문(G6 MDD·MC MDD95, §7 한도)은 크기에 따라 달라지는 것이 의도(entry_fraction 을 줄이면 MDD 가 줄어든다)이고,
+  엣지 관문(G2 = 같은 사이징 귀무 대비 백분위, G5 = Sharpe 기반 DSR/PBO)은 크기에 거의 불변이라 크기를 줄여 통과할 수 없다.
+  몬테카를로 MDD 는 포지션(사다리)당 슬리브 손익 Σ w·r 을 재표본한다.
 - 주문 집행(`spec.execution`, 지정가 — docs/ENGINE_SPEC.md "지정가 집행"): 모든 Dev 재실행·G2 귀무(같은 집행·같은
   체결 규칙 `LIMIT_FILL_DEFAULT` 로 무작위 진입 시각에 지정가)·G3 인접(집행 격자 한 칸 이동 포함)·기여도·견고성·G6
   (run_fast/run_reference 가 스펙 집행을 따름)이 스펙의 집행 그대로. 신호 캐시는 fast.prepare 를 직접 쓰므로 집행을
@@ -88,6 +94,7 @@ import pandas as pd
 
 from btc_quant.backtest import fast
 from btc_quant.backtest.reference import run_reference
+from btc_quant.backtest.sizing import frame_position_returns
 from btc_quant.backtest.types import LIMIT_FILL_DEFAULT
 from btc_quant.evaluation import gates as G
 from btc_quant.evaluation import inference, montecarlo, selection
@@ -95,7 +102,7 @@ from btc_quant.evaluation import metrics as M
 from btc_quant.params import gate_config_for_campaign
 from btc_quant.registry.ledger import ValBudgetExhaustedError
 from btc_quant.strategy.blocks import REGISTRY, Context, spec_uses_experimental
-from btc_quant.strategy.spec import BlockRef, StrategySpec
+from btc_quant.strategy.spec import BlockRef, SizingSpec, StrategySpec
 
 from . import universe as U
 from .campaign import (HALF_LIFE_DAYS, LIVE_AUX, CampaignResult, ResearchEnv, SignalCache,
@@ -289,40 +296,72 @@ def neighbor_specs(cr: CampaignResult, spec: StrategySpec) -> list[tuple[str, St
 
     xs = tpl.exit_values(spec.exit)        # 고정 %: sl_pct/tp_pct/max_hold_min, ATR: sl_atr/tp_atr/max_hold_min
     xe = spec.execution                    # 집행은 그대로 (지정가 스펙의 인접도 같은 집행)
+    pkw = {"sizing": spec.sizing, "ladder": spec.ladder}   # 사이징·사다리도 그대로
     # 진입 파라미터
     for k, v in spec.entry.params.items():
         for nv in steps(tpl.entry.grid[k], v):
             e = BlockRef(spec.entry.block, {**spec.entry.params, k: nv})
-            out.append((f"entry.{k}={nv}", tpl.make_spec(e, spec.filters, *xs.values(), execution=xe)))
+            out.append((f"entry.{k}={nv}", tpl.make_spec(e, spec.filters, *xs.values(), execution=xe, **pkw)))
     # 필터 파라미터
     for fi, (f, fg) in enumerate(zip(spec.filters, fset)):
         for k, v in f.params.items():
             for nv in steps(fg.grid[k], v):
                 fl = list(spec.filters)
                 fl[fi] = BlockRef(f.block, {**f.params, k: nv})
-                out.append((f"{f.block}.{k}={nv}", tpl.make_spec(spec.entry, tuple(fl), *xs.values(), execution=xe)))
+                out.append((f"{f.block}.{k}={nv}", tpl.make_spec(spec.entry, tuple(fl), *xs.values(), execution=xe,
+                                                                 **pkw)))
     # 청산 파라미터
     for k, v in xs.items():
         for nv in steps(tpl.exits[k], v):
             nx = {**xs, k: nv}
-            out.append((f"{k}={nv}", tpl.make_spec(spec.entry, spec.filters, *nx.values(), execution=xe)))
+            out.append((f"{k}={nv}", tpl.make_spec(spec.entry, spec.filters, *nx.values(), execution=xe, **pkw)))
     # 집행 파라미터 (지정가 격자: 오프셋·tif 한 칸)
+    import dataclasses
     g = tpl.execution or {}
     if xe.limit_entry and g.get("entry") == "limit":
-        import dataclasses
         key = "offset_atr" if "offset_atr" in g else "offset_bp"
         for k, grid in ((key, g[key]), ("tif_bars", g["tif_bars"])):
             for nv in steps(grid, getattr(xe, k)):
                 nxe = dataclasses.replace(xe, **{k: nv})
-                out.append((f"exec.{k}={nv}", tpl.make_spec(spec.entry, spec.filters, *xs.values(), execution=nxe)))
+                out.append((f"exec.{k}={nv}", tpl.make_spec(spec.entry, spec.filters, *xs.values(), execution=nxe,
+                                                            **pkw)))
+    # 사다리 파라미터 (분할 수·간격 격자 한 칸; 격자로 고른 청산 방식은 다른 값)·사이징 (entry_fraction 한 칸)
+    lg = getattr(tpl, "ladder", None) or {}
+    if spec.ladder is not None and lg:
+        key = "step_atr" if "step_atr" in lg else "step_bp"
+        for k, grid in (("tranches", lg["tranches"]), (key, lg[key])):
+            for nv in steps(grid, getattr(spec.ladder, k)):
+                nl = dataclasses.replace(spec.ladder, **{k: nv})
+                out.append((f"ladder.{k}={nv}", tpl.make_spec(spec.entry, spec.filters, *xs.values(), execution=xe,
+                                                              ladder=nl)))
+        for nv in lg["exit"]:
+            if nv != spec.ladder.exit:
+                nl = dataclasses.replace(spec.ladder, exit=nv)
+                out.append((f"ladder.exit={nv}", tpl.make_spec(spec.entry, spec.filters, *xs.values(), execution=xe,
+                                                               ladder=nl)))
+    sg = getattr(tpl, "sizing", None) or {}
+    if sg and not spec.sizing.is_default:
+        for nv in steps(sg["entry_fraction"], spec.sizing.entry_fraction):
+            out.append((f"sizing.entry_fraction={nv}", tpl.make_spec(spec.entry, spec.filters, *xs.values(),
+                                                                     execution=xe, sizing=SizingSpec(nv))))
     return out
 
 
 def _exec_kw(spec: StrategySpec) -> dict:
-    """귀무 등에 넘길 집행 인자 (시장가 스펙은 빈 dict = 기존 호출 그대로)."""
-    if spec.execution.is_default:
-        return {}
-    return {"execution": spec.execution, "fill": LIMIT_FILL_DEFAULT}
+    """귀무 등에 넘길 집행·사이징 인자 (시장가·전액 단일 진입 스펙은 빈 dict = 기존 호출 그대로)."""
+    out: dict = {}
+    if not spec.execution.is_default:
+        out.update(execution=spec.execution, fill=LIMIT_FILL_DEFAULT)
+    if spec.is_sized:
+        out.update(fill=LIMIT_FILL_DEFAULT, sizing=None if spec.sizing.is_default else spec.sizing,
+                   ladder=spec.ladder)
+    return out
+
+
+def _n_positions(metrics: dict) -> int:
+    """G2 귀무 거래 수 맞춤 목표: 독립 포지션(사다리) 수 (없으면 거래 수)."""
+    v = metrics.get("n_positions")
+    return int(v if v is not None and v == v else metrics["n_trades"])
 
 
 def _trades_match(a: pd.DataFrame, b: pd.DataFrame) -> bool:
@@ -424,13 +463,15 @@ class Pipeline:
             p = c.prepared(spec.entry, spec.filters)
             _, _, si, ei = p.bounds(self.start, self.end)
             cost = get_sleeve_cost(cost_name, sym) if self.multi else get_cost(cost_name)
-            if spec.execution.is_default:          # 시장가 = 기존 호출 그대로
+            if spec.execution.is_default and not spec.is_sized:          # 시장가·전액 = 기존 호출 그대로
                 tr = fast.simulate_prepared(p, ex.sl, ex.tp, ex.max_hold_min,
                                             cost, si, ei, ex.atr_bars if ex.is_atr else None)
             else:
                 tr = fast.simulate_prepared(p, ex.sl, ex.tp, ex.max_hold_min, cost, si, ei,
                                             ex.atr_bars if ex.is_atr else None, execution=spec.execution,
-                                            fill=LIMIT_FILL_DEFAULT)
+                                            fill=LIMIT_FILL_DEFAULT,
+                                            sizing=None if spec.sizing.is_default else spec.sizing,
+                                            ladder=spec.ladder)
             out[sym] = fast.to_result(p, tr, cost, self.start, self.end, spec.id, spec.logic_hash())
         return out
 
@@ -554,7 +595,7 @@ class Pipeline:
         nd = null_distribution(self.cache.m1, c.bars.index, c.block(spec.entry), c.filter_ok(spec.filters),
                                ex.sl, ex.tp, ex.max_hold_min, get_cost(cost_name),
                                self.start, self.end, self.n_null, self.null_seed0, HALF_LIFE_DAYS,
-                               calibration=self.null_calibration, target_trades=int(observed["n_trades"]),
+                               calibration=self.null_calibration, target_trades=_n_positions(observed),
                                tf_min=spec.tf_min, atr_bars=ex.atr_bars if ex.is_atr else None, bars=c.bars,
                                **_exec_kw(spec))
         ok, d = G.check_g2(observed, nd["sharpe_w"], self.cfg)
@@ -562,13 +603,15 @@ class Pipeline:
         d.update({k: nd.get(k) for k in ("p", "p_signal_rate", "calibration", "calibration_probe_trades",
                                          "n_entry_bars", "n_filter_bars", "n_seeds", "seed0", "tf_min",
                                          "atr_bars", "n_trades_median", "sharpe_w_p95", "sharpe_w_median")},
-                 candidate_n_trades=int(observed["n_trades"]), ok_null_runs=enough, cost=cost_name)
+                 candidate_n_trades=int(observed["n_trades"]), candidate_n_positions=_n_positions(observed),
+                 ok_null_runs=enough, cost=cost_name)
         return _gate(ok and enough, **d)
 
     def _g2_universe(self, spec: StrategySpec, observed: dict, cost_name: str) -> dict:
         """G2 다자산: 자산별 귀무(자산별 p·같은 seed) → 포트폴리오 가중 Sharpe 분포 vs 후보 포트폴리오."""
         ex = spec.exit
-        per_trades = {sym: int(r.trades.shape[0]) for sym, r in self.dev_sleeves(spec, cost_name).items()}
+        from btc_quant.backtest.sizing import n_positions
+        per_trades = {sym: n_positions(r.trades) for sym, r in self.dev_sleeves(spec, cost_name).items()}
         sleeves = [{"symbol": sym, "m1": c.m1, "bars_index": c.bars.index, "entry": c.block(spec.entry),
                     "filter_ok": c.filter_ok(spec.filters), "bars": c.bars, "target_trades": per_trades[sym],
                     "cost": get_sleeve_cost(cost_name, sym)}
@@ -626,7 +669,8 @@ class Pipeline:
             for i, f in enumerate(spec.filters):
                 rest = spec.filters[:i] + spec.filters[i + 1:]
                 ex = spec.exit
-                drop = tpl.make_spec(spec.entry, rest, ex.sl, ex.tp, ex.max_hold_min, execution=spec.execution)
+                drop = tpl.make_spec(spec.entry, rest, ex.sl, ex.tp, ex.max_hold_min, execution=spec.execution,
+                                     sizing=spec.sizing, ladder=spec.ladder)
                 lh = drop.logic_hash()
                 if lh not in self.prim.index:
                     to_run[lh] = drop
@@ -679,7 +723,8 @@ class Pipeline:
                 sp = self.cr.specs[slh]
                 keep = tuple(f for f in sp.filters if f not in removable)
                 ex = sp.exit
-                ns = tpl.make_spec(sp.entry, keep, ex.sl, ex.tp, ex.max_hold_min, execution=sp.execution)
+                ns = tpl.make_spec(sp.entry, keep, ex.sl, ex.tp, ex.max_hold_min, execution=sp.execution,
+                                   sizing=sp.sizing, ladder=sp.ladder)
                 simplified = {"spec": ns.to_dict(), "logic_hash": ns.logic_hash(),
                               "note": "NEW spec — not swapped in; test it in a follow-up campaign"}
             out[slh] = {"filters": rows, "simplified": simplified, "ablation_campaign": abl_camp,
@@ -962,7 +1007,7 @@ class Pipeline:
             if self.multi:      # 슬리브별 §7 한도 (같은 공식, 슬리브 Val 수익) — 페이퍼 슬리브 리스크 관리자용
                 c["sleeve_risk_limits"] = {
                     sym: G.risk_limits_from_validation(
-                        r.daily_returns, montecarlo.worst_case_mdd95(r.trades["net_ret"].to_numpy(float),
+                        r.daily_returns, montecarlo.worst_case_mdd95(frame_position_returns(r.trades),
                                                                      n_sims=self.cfg["G6"]["mc_sims"]),
                         float(len(r.trades) / max(len(r.daily_returns), 1)), self.cfg)
                     for sym, r in vres.sleeves.items()}

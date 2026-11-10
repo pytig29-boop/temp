@@ -23,6 +23,12 @@
 `backtest.queue.QueueFillOracle` 을 꽂으면(서비스 `limit_fill="queue"`) 1분봉 규칙 대신 실시간 체결·호가 대기열 재현으로
 체결을 판정한다 — 서비스가 수신 체결·호가를 `add_trade/add_book` 으로 넣는다. 기본은 1분봉 규칙(= 백테스트와 같은 판정).
 
+부분 사이징·분할 매수 사다리(`spec.sizing`/`spec.ladder`, PLAN D16, ENGINE_SPEC "부분 사이징·분할 매수"): 엔진에 같은 사이징·
+사다리를 넘긴다(분할 주문이 여러 개 걸림 — `engine.lad.pending`, 지정가 분할은 `fill_oracle` 대기열 재현도 그대로). 분할 명목 =
+사다리 시작(첫 분할 체결) 시점 실현 자산 × w, 청산마다 실현 자산 += 사다리 시작 자산 × w × net_ret (엔진 회계와 같음),
+평가자산 = 실현 자산 + 보유 분할 평가손익. 거래 기록은 분할마다(`ladder`, `tranche`, `weight` 포함). 상태 STATE_VERSION 3
+(사다리: 보유 분할·걸린 분할 주문·평균 익절 주문·사다리 시작 자산; 1·2 도 읽음). 리스크 강제 청산은 전량 청산 + 걸린 분할 주문 취소.
+
 다자산 스펙(PLAN D15): 서비스가 자산(슬리브)마다 트레이더 하나(초기 자산 = 명목 금액/N, 슬리브 리스크 한도)를 만들고
 같은 `SleeveGroup`(포트폴리오 리스크 한도 = 슬리브 자산 합계 기준)에 묶는다. 슬리브는 자기 한도와 포트폴리오 한도를
 모두 통과해야 진입하고, 포트폴리오 사람 정지(누적 낙폭 등)·청산 스위치는 모든 슬리브를 청산한다. 엔진 의미론은
@@ -42,8 +48,8 @@ from typing import Any
 
 import pandas as pd
 
-from btc_quant.backtest.reference import FillEvent, Position, ReferenceEngine, is_boundary
-from btc_quant.backtest.reference import RestingOrder
+from btc_quant.backtest.reference import (FillEvent, LadderState, Position, ReferenceEngine, RestingOrder, Tranche,
+                                          is_boundary)
 from btc_quant.backtest.signals import atr_series, infer_ticks
 from btc_quant.backtest.types import COINONE_CONSERVATIVE, LIMIT_FILL_DEFAULT, CostModel
 from btc_quant.live.risk import RiskManager
@@ -59,8 +65,8 @@ from .fills import DEFAULT_NOTIONAL, BookFill, compare_to_model, walk_book
 log = logging.getLogger("btc_quant.paper.trader")
 
 ONE_MIN = pd.Timedelta(minutes=1)
-STATE_VERSION = 2            # 2: 지정가 주문 상태(engine.order, position.tp_order/maker) 추가 — 1 도 읽는다
-READABLE_STATE_VERSIONS = (1, 2)
+STATE_VERSION = 3            # 2: 지정가 주문 상태 / 3: 부분 사이징·사다리 상태 — 1·2 도 읽는다
+READABLE_STATE_VERSIONS = (1, 2, 3)
 
 
 def strategy_key(spec: StrategySpec) -> str:
@@ -124,7 +130,7 @@ def evaluate_signals(spec: StrategySpec, m1_window: pd.DataFrame, bar: pd.Timest
     ex = (bool(registry.evaluate(spec.exit.signal_exit, bars, ctx).loc[bar])
           if spec.exit.signal_exit is not None else False)
     atr = None
-    if spec.exit.is_atr:
+    if spec.needs_atr:     # ATR 청산 · ATR 오프셋 지정가 · ATR 간격 사다리 (창 = exit.atr_bars, 고정 % 청산이면 14)
         v = float(atr_series(bars, spec.exit.atr_bars).loc[bar])
         atr = v if math.isfinite(v) else None
     out.update(entry=entry, filters=filt, complete=complete,
@@ -143,8 +149,47 @@ def _order_dict(o: RestingOrder | None) -> dict | None:
 def _order_from(d: dict | None) -> RestingOrder | None:
     if not d:
         return None
-    return RestingOrder(str(d["id"]), str(d["kind"]), str(d["side"]), float(d["price"]), float(d["trigger"]),
+    trig = d["trigger"]
+    trig = float(trig) if trig is not None else (math.inf if d.get("side") == "sell" else -math.inf)
+    return RestingOrder(str(d["id"]), str(d["kind"]), str(d["side"]), float(d["price"]), trig,
                         _ts(d["placed"]), _ts(d.get("expires")), bool(d.get("draw_ok", True)), d.get("atr_frac"))
+
+
+def _ladder_dict(lad: LadderState | None) -> dict | None:
+    if lad is None:
+        return None
+    return {"id": lad.id, "start": _iso(lad.start), "p1": lad.p1, "weight": lad.weight, "d_step": lad.d_step,
+            "d_sl": lad.d_sl, "d_tp": lad.d_tp, "tick": lad.tick, "stop": lad.stop, "expiry": _iso(lad.expiry),
+            "maker_first": lad.maker_first, "atr_frac": lad.atr_frac, "n_filled": lad.n_filled, "inv_sum": lad.inv_sum,
+            "avg_tp": lad.avg_tp, "avg_tp_order": _order_dict(lad.avg_tp_order),
+            "held": [{"j": t.j, "entry_time": _iso(t.entry_time), "ref": t.ref, "entry_price": t.entry_price,
+                      "maker": t.maker, "tp": t.tp, "at_open": t.at_open, "tp_order": _order_dict(t.tp_order)}
+                     for t in lad.held],
+            "pending": {str(j): _order_dict(od) for j, od in lad.pending.items()}}
+
+
+def _ladder_from(d: dict | None) -> LadderState | None:
+    if not d:
+        return None
+    tick = d.get("tick")
+    lad = LadderState(int(d["id"]), _ts(d["start"]), float(d["p1"]), float(d["weight"]), float(d["d_step"]),
+                      float(d["d_sl"]), float(d["d_tp"]), math.nan if tick is None else float(tick), float(d["stop"]),
+                      _ts(d["expiry"]), bool(d["maker_first"]), d.get("atr_frac"))
+    lad.held = [Tranche(int(t["j"]), _ts(t["entry_time"]), float(t["ref"]), float(t["entry_price"]), bool(t["maker"]),
+                        float(t["tp"]), bool(t.get("at_open", False)), _order_from(t.get("tp_order")))
+                for t in d.get("held") or []]
+    lad.pending = {int(j): _order_from(od) for j, od in (d.get("pending") or {}).items()}
+    lad.n_filled = int(d.get("n_filled", len(lad.held)))
+    lad.inv_sum = float(d.get("inv_sum", 0.0))
+    lad.avg_tp = d.get("avg_tp")
+    lad.avg_tp_order = _order_from(d.get("avg_tp_order"))
+    return lad
+
+
+def _ladder_status(lad: LadderState) -> dict:
+    return {"ladder": lad.id, "entry_time": lad.start, "ref": lad.p1, "sl": lad.stop, "tp": lad.avg_tp,
+            "expiry": lad.expiry, "tranches_held": [t.j for t in lad.held], "pending": sorted(lad.pending),
+            "inventory": lad.weight * len(lad.held)}
 
 
 class SleeveGroup:
@@ -208,6 +253,8 @@ class PaperTrader:
         if grade not in ("A", "B"):
             raise ValueError("grade must be A or B")
         spec.validate(registry)
+        from btc_quant.params import check_exposure_cap
+        check_exposure_cap(spec)                      # class ③ 슬리브당 최대 노출 상한 (D16)
         self.aux_keys = spec_aux(spec, registry)
         check_live_ready(spec, registry, available_aux=tuple(aux_hist or ()))
         self.aux_hist = aux_hist or {}
@@ -223,8 +270,13 @@ class PaperTrader:
         self.step = pd.Timedelta(minutes=self.tf)
         self.lookback_bars = int(lookback_bars) if lookback_bars else required_lookback_bars(spec, registry)
         self.window_min = window_minutes(self.lookback_bars, self.tf)
-        self.limit = not spec.execution.is_default      # 지정가 집행 (ENGINE_SPEC "페이퍼 훅")
-        if self.limit:
+        # 지정가 집행 또는 사다리(분할 주문의 관통 폭에 호가 단위·거래량 필요) (ENGINE_SPEC "페이퍼 훅")
+        self.limit = not spec.execution.is_default or spec.ladder is not None
+        if spec.is_sized:
+            self.engine = ReferenceEngine.from_exit(spec.exit, cost, start=start, end=None,
+                                                    timeframe=spec.timeframe, execution=spec.execution,
+                                                    fill=LIMIT_FILL_DEFAULT, sizing=spec.sizing, ladder=spec.ladder)
+        elif self.limit:
             self.engine = ReferenceEngine.from_exit(spec.exit, cost, start=start, end=None,
                                                     timeframe=spec.timeframe, execution=spec.execution,
                                                     fill=LIMIT_FILL_DEFAULT)
@@ -234,7 +286,9 @@ class PaperTrader:
         self._tick_cache: tuple[int, float] | None = None   # (UTC 일, 호가 단위)
         self.initial_equity = float(initial_equity)
         self.equity = float(initial_equity)          # 실현 자산 (청산마다 복리)
-        self.qty = 0.0                               # 보유 수량 (BTC)
+        self.qty = 0.0                               # 보유 수량 (BTC) — 사다리면 분할 합계
+        self.ladder_equity: float | None = None      # 사다리 시작(첫 분할 체결) 시점 실현 자산 (분할 명목 기준)
+        self.tranche_qty: dict[int, float] = {}      # 사다리: 단 번호 → 보유 수량
         self.last_ts: pd.Timestamp | None = None     # 마지막 처리 1분봉
         self.pending_flatten: str | None = None
         self.entry_cmp: dict | None = None           # 진입 체결 비교(호가 vs 모델)
@@ -267,10 +321,16 @@ class PaperTrader:
         return self.engine.position
 
     def mark_equity(self, price: float) -> float:
+        lad = self.engine.lad
+        if lad is not None:
+            eg = self.ladder_equity if self.ladder_equity is not None else self.equity
+            return self.equity + sum(eg * lad.weight * self.cost.net_return(t.entry_price, self.cost.sell_fill(price))
+                                     for t in lad.held)
         pos = self.engine.position
         if pos is None:
             return self.equity
-        return self.equity_at_entry * (1 + self.cost.net_return(pos.entry_price, self.cost.sell_fill(price)))
+        f = float(self.spec.sizing.entry_fraction)
+        return self.equity_at_entry * (1 + f * self.cost.net_return(pos.entry_price, self.cost.sell_fill(price)))
 
     @property
     def equity_at_entry(self) -> float:
@@ -279,13 +339,21 @@ class PaperTrader:
     # ------------------------------------------------------------------ 실시간 체결 (청산 감시)
     def on_price(self, ts_ms: int, price: float, book: dict | None) -> None:
         """체결 스트림 가격. 보유 중 SL/TP 레벨 최초 도달 순간의 호가를 청산 추정용으로 저장."""
-        pos = self.engine.position
-        if pos is None or self.exit_capture is not None or book is None:
-            return
+        lad = self.engine.lad
+        if lad is not None:
+            if self.exit_capture is not None or book is None or not lad.held:
+                return
+            sl = lad.stop
+            tp = lad.avg_tp if self.spec.ladder.average_exit else min(t.tp for t in lad.held)
+        else:
+            pos = self.engine.position
+            if pos is None or self.exit_capture is not None or book is None:
+                return
+            sl, tp = pos.sl, pos.tp
         reason = None
-        if price <= pos.sl:
+        if price <= sl:
             reason = "sl"
-        elif price >= pos.tp + self.cost.tick:
+        elif tp is not None and price >= tp + self.cost.tick:
             reason = "tp"
         if reason:
             self.exit_capture = {"reason": reason, "ts_ms": int(ts_ms), "price": float(price),
@@ -340,7 +408,10 @@ class PaperTrader:
         # 1) 강제 청산 (리스크) — 이 봉 시가. 걸린 진입 지정가도 취소
         if self.pending_flatten and self.engine.order is not None:
             self._cancel_order(ts, self.pending_flatten)
-        if self.pending_flatten and self.engine.position is not None:
+        if self.pending_flatten and self.engine.lad is not None:      # 사다리: 전량 + 걸린 분할 주문 취소
+            for ev in self.engine._ladder_close_all(ts, bar.open, "flatten", at_open=True):
+                events += self._on_fill(ev, bar, book, live)
+        elif self.pending_flatten and self.engine.position is not None:
             ev = self.engine._close(ts, bar.open, "flatten", at_open=True)
             events += self._on_fill(ev, bar, book, live)
         self.pending_flatten = None
@@ -357,7 +428,7 @@ class PaperTrader:
         # 3) 리스크 갱신 (봉 마감 시각 기준)
         if not bar.filled or bar.n_trades > 0:     # 공백 직후 워밍업 봉(filled 표시, 실제 체결)도 시세 갱신
             self.risk.on_market_data(_dt(t_close), price=bar.close)
-        if self.engine.position is not None:      # 무포지션이면 자산 불변 (청산 시 on_trade_closed 가 갱신)
+        if self.engine.in_position:               # 무포지션이면 자산 불변 (청산 시 on_trade_closed 가 갱신)
             self.risk.on_equity(_dt(t_close), self.mark_equity(bar.close))
         if self.group is not None:                # 포트폴리오 한도: 슬리브 평가자산 합계
             self.group.on_sleeve_equity(self.key, self.mark_equity(bar.close), _dt(t_close))
@@ -368,7 +439,7 @@ class PaperTrader:
             flat, why = self.group.should_flatten(_dt(t_close))
         if flat and self.engine.order is not None:      # 걸린 진입 지정가는 즉시 취소
             self._cancel_order(t_close, why)
-        if flat and self.engine.position is not None:
+        if flat and self.engine.in_position:
             self.pending_flatten = why
             self._log("risk", {"type": "flatten_pending", "ts": t_close, "reason": why})
 
@@ -414,7 +485,7 @@ class PaperTrader:
         ok, why = self.risk.can_enter(_dt(t))
         if ok and self.group is not None:
             ok, why = self.group.can_enter(_dt(t))
-        pos = self.engine.position is not None
+        pos = self.engine.in_position
         cooldown = self.engine.cooldown_until is not None and t < self.engine.cooldown_until
         entry_ok = bool(sig["entry_ok"] and ok)
         self.engine.on_decision(t, entry_ok, sig["exit_sig"], sig["atr"])
@@ -435,29 +506,53 @@ class PaperTrader:
         if ev.side == "buy":
             sl, tp = ev.sl, ev.tp        # 같은 봉에서 청산까지 되면 engine.position 은 이미 None
             expiry = ev.ts + pd.Timedelta(minutes=int(self.spec.exit.max_hold_min))
-            notional = self.equity
-            maker = self.spec.execution.limit_entry          # 지정가 체결 = 지정가 (호가 대입 비교 없음)
+            lad = self.spec.ladder
+            if ev.tranche is not None and lad is not None:   # 사다리 분할: 명목 = 사다리 시작 자산 × w
+                if ev.tranche == 0 or self.ladder_equity is None:
+                    self.ladder_equity = self.equity
+                    self.tranche_qty = {}
+                notional = self.ladder_equity * float(ev.weight)
+                maker = (self.spec.execution.limit_entry if ev.tranche == 0 else lad.limit_orders)
+            else:
+                notional = self.equity * float(self.spec.sizing.entry_fraction)
+                maker = self.spec.execution.limit_entry          # 지정가 체결 = 지정가 (호가 대입 비교 없음)
             bf = (walk_book(self.book_open, "buy", notional=notional, now=self.book_open_wall)
                   if self.book_open and not maker else None)
             cmp = compare_to_model(bf, ev.fill_price, ev.ref_price, self.cost, self.conservative)
             if maker:
                 cmp["maker"] = True
-            self.entry_cmp = cmp
+            if ev.tranche is None or ev.tranche == 0:
+                self.entry_cmp = cmp
             self.exit_capture = None
-            self.qty = notional / ev.fill_price
-            self.risk.on_fill(_dt(ev.ts), "buy", self.qty, ev.fill_price, fee=None)
+            q = notional / ev.fill_price
+            if ev.tranche is not None and lad is not None:
+                self.tranche_qty[int(ev.tranche)] = q
+                self.qty = sum(self.tranche_qty.values())
+            else:
+                self.qty = q
+            self.risk.on_fill(_dt(ev.ts), "buy", q, ev.fill_price, fee=None)
             if self.group is not None:
                 self.group.on_entry(_dt(ev.ts))
             rec = {"type": "fill", "side": "buy", "ts": ev.ts, "reason": ev.reason,
-                   "ref_price": ev.ref_price, "fill_price": ev.fill_price, "qty": self.qty,
+                   "ref_price": ev.ref_price, "fill_price": ev.fill_price, "qty": q,
                    "notional": notional, "sl": sl, "tp": tp, "expiry": expiry,
+                   **({"tranche": int(ev.tranche), "weight": float(ev.weight),
+                       "ladder": int(self.engine.n_ladders - 1)} if ev.tranche is not None else {}),
                    "live": live, **cmp}
             self._log("fills", rec)
-            return [{"type": "entry", "ts": ev.ts, "price": ev.fill_price, "sl": sl, "tp": tp,
-                     "book_cost_bps": cmp.get("book_cost_bps"), "live": live}]
+            return [{"type": "entry" if (ev.tranche is None or ev.tranche == 0) else "scale_in", "ts": ev.ts,
+                     "price": ev.fill_price, "sl": sl, "tp": tp, "book_cost_bps": cmp.get("book_cost_bps"),
+                     **({"tranche": int(ev.tranche)} if ev.tranche is not None else {}), "live": live}]
 
         # sell
-        trade = self.engine.trades.pop() if self.engine.trades else None
+        if ev.trade is not None:          # 사다리·부분 사이징: 이 청산의 거래 행 (분할마다)
+            trade = ev.trade
+            if any(t is trade for t in self.engine.trades):
+                self.engine.trades = [t for t in self.engine.trades if t is not trade]
+        else:
+            trade = self.engine.trades.pop() if self.engine.trades else None
+        tranche = ev.tranche
+        qty = self.tranche_qty.pop(int(tranche), 0.0) if tranche is not None else self.qty
         if ev.reason in ("sl", "tp") and self.exit_capture and self.exit_capture["reason"] == ev.reason:
             src, book, at = "stream_trigger", self.exit_capture["book"], self.exit_capture["wall"]
         elif ev.reason in ("sl", "tp"):
@@ -467,24 +562,30 @@ class PaperTrader:
         maker_x = ev.reason == "tp" and self.spec.execution.limit_tp
         if maker_x:
             src, book = "limit_order", None
-        bf = walk_book(book, "sell", qty=self.qty, now=at) if book and self.qty > 0 else None
+        bf = walk_book(book, "sell", qty=qty, now=at) if book and qty > 0 else None
         cmp = compare_to_model(bf, ev.fill_price, ev.ref_price, self.cost, self.conservative)
         if maker_x:
             cmp["maker"] = True
         eq_before = self.equity
-        self.equity = eq_before * (1 + trade["net_ret"]) if trade else eq_before
+        if trade and tranche is not None and self.spec.ladder is not None:   # 실현 = 사다리 시작 자산 × w × r
+            eg = self.ladder_equity if self.ladder_equity is not None else eq_before
+            self.equity = eq_before + eg * float(ev.weight) * trade["net_ret"]
+        elif trade:
+            self.equity = eq_before * (1 + float(self.spec.sizing.entry_fraction) * trade["net_ret"])
         book_net = None
-        if bf is not None and self.entry_cmp and self.entry_cmp.get("book") and math.isfinite(bf.vwap):
+        if (bf is not None and self.entry_cmp and self.entry_cmp.get("book") and math.isfinite(bf.vwap)
+                and (tranche is None or tranche == 0)):        # 사다리: 첫 분할만 진입 호가 비교가 있다
             book_net = self.cost.net_return(self.entry_cmp["book"]["vwap"], bf.vwap)
         t_eff = ev.ts + (ONE_MIN if ev.reason in ("sl", "tp") else pd.Timedelta(0))
         self.risk.on_trade_closed(_dt(t_eff), self.equity - eq_before, self.equity)
         frec = {"type": "fill", "side": "sell", "ts": ev.ts, "reason": ev.reason,
-                "ref_price": ev.ref_price, "fill_price": ev.fill_price, "qty": self.qty,
+                "ref_price": ev.ref_price, "fill_price": ev.fill_price, "qty": qty,
+                **({"tranche": int(tranche)} if tranche is not None else {}),
                 "book_source": src, "live": live, **cmp}
         self._log("fills", frec)
         self.n_trades += 1
         trec = {"type": "trade", **(trade or {}), "spec_id": self.spec.id, "version": self.spec.version,
-                "cost": self.cost.name, "grade": self.grade, "qty": self.qty,
+                "cost": self.cost.name, "grade": self.grade, "qty": qty,
                 "equity_before": eq_before, "equity_after": self.equity,
                 "entry_book_cost_bps": (self.entry_cmp or {}).get("book_cost_bps"),
                 "entry_vs_model_bps": (self.entry_cmp or {}).get("vs_model_bps"),
@@ -492,11 +593,22 @@ class PaperTrader:
                 "exit_vs_model_bps": cmp.get("vs_model_bps"),
                 "book_net_ret": book_net, "live": live}
         self._log("trades", trec)
-        self.qty = 0.0
-        self.entry_cmp = None
-        self.exit_capture = None
+        if tranche is not None and self.spec.ladder is not None:
+            self.qty = sum(self.tranche_qty.values())
+            if self.engine.lad is None and not self.tranche_qty:   # 사다리 종료 (같은 봉 전량 청산의 마지막 분할까지 처리 후)
+                self.qty = 0.0
+                self.tranche_qty = {}
+                self.ladder_equity = None
+                self.entry_cmp = None
+                self.exit_capture = None
+        else:
+            self.qty = 0.0
+            self.entry_cmp = None
+            self.exit_capture = None
         return [{"type": "exit", "ts": ev.ts, "reason": ev.reason, "price": ev.fill_price,
-                 "net_ret": trade["net_ret"] if trade else None, "equity": self.equity, "live": live}]
+                 "net_ret": trade["net_ret"] if trade else None, "equity": self.equity,
+                 **({"equity_ret": self.equity / eq_before - 1 if eq_before else None,
+                     "tranche": tranche} if self.spec.is_sized else {}), "live": live}]
 
     # ------------------------------------------------------------------ 저장/복원
     def state_dict(self) -> dict:
@@ -519,6 +631,8 @@ class PaperTrader:
             "last_ts": _iso(self.last_ts), "start": _iso(e.start),
             "position": pos, "cooldown_until": _iso(e.cooldown_until), "decision": dec,
             "order": _order_dict(e.order), "execution": self.spec.execution.to_dict(),
+            "ladder_state": _ladder_dict(e.lad), "n_ladders": e.n_ladders, "ladder_equity": self.ladder_equity,
+            "tranche_qty": {str(k): v for k, v in self.tranche_qty.items()},
             "pending_flatten": self.pending_flatten, "entry_cmp": self.entry_cmp,
             "n_trades": self.n_trades, "n_decisions": self.n_decisions,
             "timeframe": self.spec.timeframe, "lookback_bars": self.lookback_bars, "saved_at": time.time(),
@@ -558,6 +672,10 @@ class PaperTrader:
             float(pos["tp"]), _ts(pos["expiry"]), pos.get("atr_frac"), bool(pos.get("maker", False)),
             _order_from(pos.get("tp_order")))
         e.order = _order_from(d.get("order"))
+        e.lad = _ladder_from(d.get("ladder_state"))
+        e.n_ladders = int(d.get("n_ladders", 0))
+        self.ladder_equity = None if d.get("ladder_equity") is None else float(d["ladder_equity"])
+        self.tranche_qty = {int(k): float(v) for k, v in (d.get("tranche_qty") or {}).items()}
         dec = d.get("decision")
         if dec is not None:
             e.on_decision(_ts(dec["ts"]), dec["entry_ok"], dec["exit_sig"], dec.get("atr"))
@@ -575,8 +693,9 @@ class PaperTrader:
             "key": self.key, "grade": self.grade, "cost": self.cost.name,
             "equity": self.equity, "initial_equity": self.initial_equity,
             "return": self.equity / self.initial_equity - 1,
-            "position": None if pos is None else {"entry_time": pos.entry_time, "ref": pos.ref,
-                                                  "sl": pos.sl, "tp": pos.tp, "expiry": pos.expiry},
+            "position": (_ladder_status(self.engine.lad) if self.engine.lad is not None else
+                         None if pos is None else {"entry_time": pos.entry_time, "ref": pos.ref,
+                                                   "sl": pos.sl, "tp": pos.tp, "expiry": pos.expiry}),
             "last_ts": self.last_ts, "n_trades": self.n_trades, "n_decisions": self.n_decisions,
             "halt_level": rs["level"], "halt_reasons": rs["reasons"][:3],
             "daily_return": rs["daily_return"], "drawdown": rs["drawdown"],

@@ -32,7 +32,7 @@ DEFAULT_SYMBOL = DEFAULT_UNIVERSE[0]
 FIXED_ASSETS: tuple[str, ...] = ("BTC-KRW", "XRP-KRW", "ETH-KRW")
 SYMBOL_RE = re.compile(r"^[A-Z0-9]{2,10}-KRW$")
 # 캠페인 결과표·원장 per_asset 에 남기는 자산별 지표 (정보 전용 — 관문 아님)
-PER_ASSET_KEYS = ("n_trades", "recent_n_trades", "sharpe", "sharpe_w", "total_return", "max_dd", "expectancy",
+PER_ASSET_KEYS = ("n_trades", "n_positions", "recent_n_trades", "sharpe", "sharpe_w", "total_return", "max_dd", "expectancy",
                   "win_rate", "trades_per_day")
 
 
@@ -158,8 +158,16 @@ def n_sleeves(result) -> int:
 
 
 def portfolio_trade_returns(result) -> np.ndarray:
-    """몬테카를로 MDD 입력: 거래당 **포트폴리오** 손익 = 슬리브 거래 순수익 × (1/N)."""
-    r = result.trades["net_ret"].to_numpy(float) if len(result.trades) else np.zeros(0)
+    """몬테카를로 MDD 입력: 포지션당 **포트폴리오** 손익 = 슬리브 포지션 손익 × (1/N).
+    포지션 손익 = 거래 순수익(기본) 또는 사다리별 Σ weight × net_ret (부분 사이징·사다리, `sizing.frame_position_returns`
+    — 같은 사다리 분할들은 함께 움직이므로 한 단위로 재표본한다). 다자산이면 슬리브별로 묶는다."""
+    from btc_quant.backtest.sizing import frame_position_returns
+    sl = getattr(result, "sleeves", None) or {}
+    if len(sl) > 1:
+        parts = [frame_position_returns(r.trades) for r in sl.values()]
+        r = np.concatenate(parts) if parts else np.zeros(0)
+    else:
+        r = frame_position_returns(result.trades) if len(result.trades) else np.zeros(0)
     n = n_sleeves(result)
     return r if n == 1 else r / n
 
@@ -206,7 +214,8 @@ def asset_metrics(res: BacktestResult, half_life_days: float = 365) -> dict:
     else:
         recent_n = 0
     r = tr["net_ret"].to_numpy(float) if nt else np.zeros(0)
-    return {"n_trades": nt, "recent_n_trades": recent_n, "sharpe": M.sharpe(s),
+    from btc_quant.backtest.sizing import n_positions
+    return {"n_trades": nt, "n_positions": n_positions(tr), "recent_n_trades": recent_n, "sharpe": M.sharpe(s),
             "sharpe_w": M.weighted_sharpe(s, half_life_days).sharpe,
             "total_return": float(np.prod(1 + x) - 1) if n else 0.0, "max_dd": M.max_drawdown(s)[0],
             "expectancy": float(r.mean()) if nt else 0.0, "win_rate": float((r > 0).mean()) if nt else 0.0,

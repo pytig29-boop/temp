@@ -15,5 +15,31 @@ from .registry import (
            params_version,
 )
 
+DEFAULT_MAX_EXPOSURE_CAP = 1.0     # 설정이 없을 때 (사용자 결정 2026-11-10, PLAN D16)
+
+
+def max_exposure_cap(root=None) -> float:
+    """class ③ 슬리브당 최대 노출 상한 (config/params.yaml settings.risk_prefs.max_exposure_per_sleeve, 기본 1.0).
+    분할 매수 사다리 `ladder.max_exposure` 와 `sizing.entry_fraction` 은 이 값을 넘을 수 없다."""
+    from ._io import read_yaml
+    from .registry import params_path
+    try:
+        doc = read_yaml(params_path(root))
+    except (FileNotFoundError, OSError):
+        return DEFAULT_MAX_EXPOSURE_CAP
+    v = ((doc.get("settings") or {}).get("risk_prefs") or {}).get("max_exposure_per_sleeve")
+    return DEFAULT_MAX_EXPOSURE_CAP if v is None else float(v)
+
+
+def check_exposure_cap(spec, root=None) -> None:
+    """스펙의 최대 노출(사다리 max_exposure 또는 entry_fraction)이 class ③ 상한 이하인지 (넘으면 ValueError)."""
+    cap = max_exposure_cap(root)
+    x = spec.ladder.max_exposure if spec.ladder is not None else spec.sizing.entry_fraction
+    if x > cap + 1e-12:
+        raise ValueError(f"max exposure {x} > class ③ cap risk_prefs.max_exposure_per_sleeve = {cap} "
+                         "(config/params.yaml; human decision)")
+
+
 __all__ = ["all_cost_models", "cost_model", "cost_versions", "gate_config_for_campaign", "load_registry",
-           "params_snapshot", "params_version"]
+           "params_snapshot", "params_version", "max_exposure_cap", "check_exposure_cap",
+           "DEFAULT_MAX_EXPOSURE_CAP"]

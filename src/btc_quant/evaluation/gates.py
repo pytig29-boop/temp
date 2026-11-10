@@ -32,11 +32,18 @@ def _cfg(cfg, gate):
 
 
 def check_g1(metrics: dict, cfg: dict | None = None) -> tuple[bool, dict]:
-    """G1 표본: 거래 ≥ 300, Dev 최근 12개월 거래 ≥ 60."""
+    """G1 표본: 거래 ≥ 300, Dev 최근 12개월 거래 ≥ 60.
+    거래 = 독립 포지션(`n_positions`/`recent_n_positions` 가 있으면 — 분할 매수 사다리는 사다리 하나가 1 거래; 같은
+    사다리의 분할들은 한 결정의 상관된 조각이라 표본을 부풀리지 않는다). 기본 전략은 n_positions == n_trades (불변)."""
     c = _cfg(cfg, "G1")
-    n, nr = int(metrics["n_trades"]), int(metrics["recent_n_trades"])
+    n = int(metrics["n_positions"] if metrics.get("n_positions") is not None else metrics["n_trades"])
+    nr = int(metrics["recent_n_positions"] if metrics.get("recent_n_positions") is not None
+             else metrics["recent_n_trades"])
     d = {"n_trades": n, "recent_n_trades": nr,
          "ok_trades": n >= c["min_trades"], "ok_recent": nr >= c["min_recent_trades"]}
+    if metrics.get("n_positions") is not None and int(metrics["n_positions"]) != int(metrics["n_trades"]):
+        d["n_tranche_rows"] = int(metrics["n_trades"])
+        d["unit"] = "positions (ladders)"
     return d["ok_trades"] and d["ok_recent"], d
 
 

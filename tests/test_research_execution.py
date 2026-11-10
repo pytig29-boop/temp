@@ -211,7 +211,7 @@ def test_paper_limit_execution_hooks(tmp_path, limit_fill):
     assert tr.n_decisions >= 28 and buys and all(f.get("maker") for f in buys)
     assert all(f["fill_price"] == f["ref_price"] for f in buys)          # 지정가 체결 = 지정가, 호가 대입 없음
     st = json.loads((svc.cfg.out / "svc_lim_v1" / "state.json").read_text())
-    assert st["version"] == STATE_VERSION == 2 and st["execution"]["entry"] == "limit" and "order" in st
+    assert st["version"] == STATE_VERSION >= 2 and st["execution"]["entry"] == "limit" and "order" in st
     if limit_fill == "bar":            # 1분봉 규칙 = 백테스트와 같은 판정 → 기준 엔진과 거래 일치
         rep = S.build_report(svc.cfg.out / "svc_lim_v1", m1=svc.hist.frame())
         t = rep["trades"]

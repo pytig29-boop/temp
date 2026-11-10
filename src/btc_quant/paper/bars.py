@@ -149,7 +149,7 @@ def required_lookback_bars(spec: StrategySpec, registry: Registry = REGISTRY,
             log.warning("unknown block %s: lookback falls back to %.1f days", ref.block, default_days)
             continue
         need = max(need, n)
-    if spec.exit.is_atr:
+    if spec.needs_atr:          # ATR 청산 · ATR 오프셋 · ATR 간격 사다리 (창 = exit.atr_bars)
         need = max(need, int(spec.exit.atr_bars) + 2)
     cap = int(max_days * day)
     if need > cap:
