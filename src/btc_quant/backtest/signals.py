@@ -134,6 +134,47 @@ def atr_frac_decisions(atr: pd.Series, m1_open, index_1m: pd.DatetimeIndex, tf_m
     return frac
 
 
+# ---------------------------------------------------------------- 호가 단위 (지정가 집행)
+# 후보 호가 단위: 1e6 ... 1e-8 의 1·5 배 (큰 것부터)
+TICK_CANDIDATES = tuple(float(m * 10.0 ** e) for e in range(6, -9, -1) for m in (5, 1))
+TICK_SHARE = 0.99
+
+
+def infer_ticks(m1: pd.DataFrame, share: float = TICK_SHARE) -> np.ndarray:
+    """1분봉 행별 호가 단위 추정 (UTC 일자별): 그날 실제(filled 아닌) 봉 종가의 `share` 이상이 배수인 가장 큰
+    후보 값. 실제 봉이 없는 날은 직전 날 값(없으면 다음 날). 추정 불가면 0 (지정가 주문 불가 = 보수적).
+    빠른 엔진·기준 엔진이 같은 함수를 쓴다(LimitFillModel.tick_from_data). 예: 코인원 BTC 2024-09-29 이전
+    1,000원, 이후 10,000원. 같은 날 가격대별 단위가 섞이면 작은 쪽이 된다(문서 ENGINE_SPEC 참조).
+    후보 단위는 가격의 0.01bp 이상만 (연속 가격 → 0)."""
+    if len(m1) == 0:
+        return np.zeros(0)
+    return infer_ticks_arrays(minutes(m1.index), m1["close"].to_numpy(np.float64), filled_mask(m1), share)
+
+
+def infer_ticks_arrays(tmin: np.ndarray, close: np.ndarray, filled: np.ndarray | None,
+                       share: float = TICK_SHARE) -> np.ndarray:
+    n = len(close)
+    if n == 0:
+        return np.zeros(0)
+    day = np.asarray(tmin, np.int64) // 1440
+    c = np.asarray(close, np.float64)
+    fl = np.zeros(n, bool) if filled is None else np.asarray(filled, bool)
+    real = ~fl & np.isfinite(c) & (c > 0)
+    days, inv = np.unique(day, return_inverse=True)
+    n_real = np.bincount(inv, weights=real.astype(float), minlength=len(days))
+    tick_day = np.zeros(len(days))
+    for cand in TICK_CANDIDATES:
+        q = c / cand
+        # 격자 판정: 몫이 정수(1e-7 단위 허용 — 부동소수 오차 ≪ 이 값). 호가 단위가 가격의 0.01bp 미만인
+        # 후보는 받지 않는다(연속 가격이 아주 작은 단위로 '추정'되어 사실상 터치 규칙이 되는 것을 막음).
+        on = (np.abs(q - np.round(q)) <= 1e-7) & (cand >= 1e-6 * c) & real
+        n_on = np.bincount(inv, weights=on.astype(float), minlength=len(days))
+        ok = (n_real > 0) & (tick_day == 0) & (n_on >= share * n_real)
+        tick_day[ok] = cand
+    tick_day = pd.Series(np.where(tick_day > 0, tick_day, np.nan)).ffill().bfill().fillna(0.0).to_numpy()
+    return tick_day[inv]
+
+
 def filled_mask(m1: pd.DataFrame) -> np.ndarray:
     if "filled" in m1:
         return m1["filled"].fillna(False).to_numpy(bool)

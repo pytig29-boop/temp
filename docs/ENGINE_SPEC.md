@@ -121,3 +121,101 @@
     (`Prepared.atr_frac[n]`) 배수 격자만 스윕한다. 두 엔진의 연산 순서는 같다(비트 단위 일치).
 12. **ATR과 공백**: 결정 주기 봉은 `to_tf` 결과의 행 순서로 이어 붙인다(완전히 빈 봉은 없음 — `regularize` 후 입력 기준).
     filled 평탄 봉도 TR 계산에 그대로 포함된다(B = 1이면 그 봉의 TR = 0). 공백 직후의 갭은 다음 실제 봉의 TR에 반영된다.
+
+## 지정가 집행 (`StrategySpec.execution`, 2026-11-10 추가)
+
+"싸게 조금 사고 비싸게 조금 판다"(그리드·수동적 평균회귀)를 메이커 주문으로 시험하기 위한 규칙. 기본값
+(`entry: market`, `take_profit: market`)은 위 의미론 그대로이고 직렬화·`logic_hash` 에서 생략된다(기존 해시 불변,
+빠른 엔진은 기존 `_core` 경로 그대로).
+
+### 스펙
+```yaml
+execution:            # 생략 = 시장가 (기존)
+  entry: limit        # market | limit
+  offset_bp: 5        # 또는 offset_atr: 0.5 (정확히 하나)
+  tif_bars: 3         # 지정가 유지 결정 주기 봉 수 (기본 1)
+  take_profit: limit  # market (기존 TP 규칙) | limit (익절가 매도 지정가). 손절은 항상 시장가
+```
+- 파라미터 수: 지정가 진입이면 오프셋 +1, `tif_bars ≠ 1` 이면 +1 (MAX_PARAMS 8 안). 익절 방식은 모드라 세지 않는다.
+- 체결 보수성 파라미터는 스펙이 아니라 `backtest.types.LimitFillModel`(시장 측정치 class ①, 비용 모델과 같은
+  위치): `run_fast/run_reference(..., fill=)`, `simulate_*(..., fill=)`, 기본 `LIMIT_FILL_DEFAULT`.
+
+### 진입 지정가 (entry = limit)
+- 주문: 시장가 진입이 일어났을 바로 그 결정(같은 조건: 무포지션·entry_ok·[start, end)·쿨다운·봉 i 실제·ATR 유효)에서,
+  1분봉 i 시가에 **매수 지정가** `L = snap_down(o_i × (1 − d))`, `d = offset_bp/1e4` 또는 `offset_atr × ATR(s)/o_i`
+  (ATR 창 = `exit.atr_bars`, 고정 % 청산이면 14). 기준가가 시장가 진입과 같은 o_i 다(시장가는 o_i 에 체결된다고
+  가정하므로 대칭; 페이퍼/실거래는 그 분 첫 체결 후 주문 — 아래 대기열 재현의 τ).
+- 유지: 1분봉 i, i+1, …, `t_i + tif_bars × B` 직전까지. 만료 시각 이상의 첫 1분봉 시가 전에 취소되고, 그 봉이
+  결정 경계면 같은 봉에서 새 주문이 가능하다(미체결 만료에는 쿨다운 없음). 주문이 걸려 있는 동안의 결정은 무시.
+  기간 종료(`end`) 이후 1분봉에서는 취소(체결 없음).
+- 체결(1분봉 규칙, 아래): 1분봉 k 에서 처음 성립하면 `entry_time = t_k`, 기준가 = 체결가 = **L** (가격 개선 없음;
+  시가가 L 아래로 갭이어도 L), 비용 = 수수료만(`CostModel.fee_rate`; 스프레드·슬리피지 없음).
+- 레벨: `sl = L(1 − d_sl)`, `tp = L(1 + d_tp)` (ATR 모드 `d = k × ATR(s)/o_i` — 결정 시점 값), 만기 `t_k + max_hold_min`.
+- **체결 봉 k 의 보수적 처리**: 봉 안에서 체결이 언제였는지 모르므로 익절은 하지 않고(고가가 체결 전일 수 있음)
+  손절만 본다 — `o_k ≤ sl` 이면 시가 `o_k` 로(갭), 아니면 `l_k ≤ sl` 이면 `sl` 로. 다음 봉부터는 위 보유 규칙 그대로
+  (시가 청산은 k 보다 뒤 봉에서만).
+- `hold_min` = 청산 t_eff − t_k. 쿨다운은 청산 기준 그대로.
+
+### 익절 지정가 (take_profit = limit)
+- 진입 체결 시 `T = snap_up(tp)` 에 매도 지정가. 체결 = 1분봉 규칙(매도), 체결가 = T, 비용 = 수수료만, 사유 `tp`.
+  시장가 진입이면 진입 봉부터, 지정가 진입이면 체결 다음 봉부터 판정. 우선순위는 SL > TP 그대로.
+- `take_profit: market` = 기존(`h ≥ tp + cost.tick` → `tp` 에 비용 반영 체결).
+
+### 1분봉 체결 규칙 (`LimitFillModel`) — 보수적 관통 규칙
+- 매수 지정가 L 은 1분봉 k 에서 `low_k ≤ L − thr` 일 때만 체결, 매도 지정가 T 는 `high_k ≥ T + thr`.
+  `thr = max(through_ticks × tick, P × through_bp × 1e-4)` — **터치(low = L)는 체결로 보지 않는다**: 같은 가격의
+  대기열 앞쪽이 먼저 체결되므로 보장이 없다. 가격이 L 아래에서 거래됐다면 가격-시간 우선상 L 의 매수 대기열은 모두
+  소진된 것이므로 체결이 보장된다.
+- `tick`: `tick_from_data=True`(기본)면 **1분봉 데이터에서 UTC 일자별로 추정한 호가 단위**
+  (`signals.infer_ticks`: 그날 실제 봉 종가의 99 % 이상이 배수인 가장 큰 1·5×10^k, 가격의 0.01 bp 미만 단위는 불가,
+  실제 봉 없는 날은 직전 값). 코인원 BTC 는 2024-09-29/30 에 1,000 → 10,000원으로 바뀌었다(현재 ≈ 1 bp).
+  주문 시각의 tick 을 쓴다(진입 = 주문 봉 i, 익절 = 진입 체결 봉). 추정 tick 이 없으면(0) 진입 지정가는 걸지
+  않고(진입 신호 False 와 동일), 익절 지정가는 체결되지 않는다. `tick_from_data=False` 면 고정 `tick`(0 = 연속 가격)
+  — 이때 bp 조건이 1 tick 미만이면 실제 격자 주문 기준으로 터치 체결이 섞여 낙관적이 된다.
+- 지정가는 tick 격자로 맞춘다(매수 내림, 매도 올림; tick 0 이면 그대로).
+- filled(합성) 1분봉에서는 체결되지 않는다. `min_volume > 0` 이면 그 봉 거래량 ≥ min_volume 일 때만.
+- `fill_prob < 1`: 주문마다 결정적 해시 `u = hash_u01(주문 시각 epoch 분, 2·seed + side)` (side 0 매수 / 1 매도;
+  익절은 진입 체결 분) 가 `u < fill_prob` 인 주문만 체결될 수 있다(재현 가능한 추가 할인). 불합격 주문은 수명 동안
+  체결되지 않는다.
+- 연산 순서(두 엔진 동일, 비트 단위): `px = o × (1 − d)`; `px = floor(px / tick) × tick`; `a = m × tick`;
+  `b = px × through_bp × 1e-4`; `trig = px − (a if a > b else b)`. 익절: `T = ceil(tp / tick) × tick`, `T + max(…)`.
+- 현재 값(2026-11-10, 잠정 — `research/reports/fill_model_20261110.md`): `through_ticks = 1`, `through_bp = 0`,
+  `fill_prob = 1`, `tick_from_data = True`. 실시간 대기열 재현 대비 1 tick 관통의 정밀도(1분봉 규칙 체결 중 실제로
+  같은 분 끝까지 체결된 비율) ≈ 99.5 % (95 % 하한 ≈ 99 %, 약 7시간 자료), 터치 규칙은 ≈ 74 % (낙관적).
+
+### 대기열 재현 (`backtest.queue`) — 보정·페이퍼 공용
+- 주문 시각 τ (진입 = 그 분 첫 체결 + 지연, 익절 = 진입 체결 + 지연). τ 에 받은 마지막 호가 스냅샷에서 우리 가격의
+  표시 수량 A = 앞선 대기량(우리는 맨 뒤). 반대편 최우선과 맞닿으면 cross(τ 에 체결), 최우선보다 좋은 가격이면 A = 0,
+  보이는 범위 밖(15단계보다 깊음)이면 처음 보일 때의 표시 수량.
+- 체결: 우리 가격보다 나쁜 쪽 체결이 하나라도 나오면(관통) 체결; 우리 가격에서 우리 쪽을 치는 테이커 수량 누적이
+  A + 우리 수량 이상이면 체결. 취소로 인한 전진은 인정하지 않는다(낙관 변형 `optimistic=True` 는 비교용).
+- `simulate_order`(배열, numba) 와 `QueueSim`(상태 기계) 는 같은 결과(테스트).
+
+### 페이퍼 훅
+- `ReferenceEngine.from_exit(..., execution=spec.execution, fill=...)`; 매 1분봉 `on_bar_1m(ts, o, h, l, c, filled,
+  volume, tick)` — `tick` 은 거래소 호가 단위(실시간). 걸린 진입 주문은 `engine.order`(`RestingOrder`: id, kind, side,
+  price, placed, expires), 익절 주문은 `engine.position.tp_order`, 주문 기록 `engine.orders_log`(placed/filled/expired).
+- `engine.fill_oracle = QueueFillOracle(latency_s=…, notional=…)` 을 꽂으면 1분봉 규칙 대신 대기열 재현으로 체결을
+  판정한다. 페이퍼는 수신하는 체결마다 `oracle.add_trade(t_ns, price, qty, taker_side)`, 호가 스냅샷마다
+  `oracle.add_book(t_ns, book_dict)` 를 시간순으로 넣고, 1분봉이 닫히면 평소처럼 `on_bar_1m` 을 부른다(엔진이 주문마다
+  오라클에 "1분봉 ts 동안 체결됐나"를 묻는다). 체결가 = 지정가, 비용 = 수수료만.
+- 페이퍼 트레이더(`paper/trader.py`)는 아직 이 훅을 쓰지 않는다(다중 자산 작업 중인 파일). 필요한 변경:
+  (1) 엔진 생성에 `execution=spec.execution`, `fill=LIMIT_FILL_DEFAULT`; (2) 서비스의 체결·호가 수신 루프에서
+  `add_trade/add_book`; (3) `on_bar_1m(..., bar.volume, venue_tick)`; (4) `_on_fill` 이 `FillEvent.fill_price` 를
+  쓰고 지정가 체결은 호가 대입(walk_book) 비교를 건너뜀; (5) 상태 저장에 `engine.order`·`position.tp_order` 추가
+  (STATE_VERSION 올림); (6) 리스크 강제 청산 시 걸린 진입 주문 취소(`engine.order = None`).
+
+### 연구 파이프라인과의 관계
+- `fast.prepare_spec` 은 `Prepared.execution` 에 스펙의 집행을 담고 `simulate_prepared / simulate_exit /
+  simulate_many` 는 인자 `execution=` 이 없으면 그것을 따른다. 캠페인 템플릿·`research.campaign.SignalCache` 처럼
+  `prepare(...)` 를 직접 쓰는 경로는 `execution` 이 없으므로 **시장가로 평가된다** — 지정가 스펙을 캠페인에서
+  쓰려면 그 경로가 `execution=spec.execution`(또는 템플릿의 집행 변형)을 넘겨야 한다(research 쪽 변경 필요).
+- 차등 테스트: `tests/test_engine_limit.py` (1m/5m/15m/1h × %/ATR × bp/ATR 오프셋 × 시장가/지정가 익절 × 고정/추정
+  tick × fill_prob/min_volume, 240 사례, 비트 단위 일치) + 시나리오.
+
+## 다자산 유니버스 (PLAN D15, 2026-11-10) — 엔진 밖의 회계
+엔진 계약(위 전부)은 **자산 하나**에 대한 것이고 바뀌지 않는다. 다자산 스펙(`StrategySpec.universe`, 예: BTC/XRP/ETH-KRW)은
+자산마다 그 자산의 `m1`(같은 `prepare_venue_m1`)·같은 `spec`·같은 `cost` 로 엔진을 따로 실행한다(슬리브, 자산별 독립 포지션).
+결합은 엔진 밖(`research.universe`)에서: 포트폴리오 `daily_returns` = 슬리브 `daily_returns`(같은 [start, end) 일자)의 단순 평균,
+`trades` = 슬리브 거래를 합친 목록(+ `symbol` 열, 진입 시각 순). 차등 테스트·미래참조 테스트는 자산마다 그대로 적용되고,
+G6 의 기준 엔진 대조는 모든 자산에서 일치해야 한다. 기본 유니버스 [BTC-KRW] 는 엔진 호출·결과가 이전과 같다.
