@@ -23,6 +23,13 @@ PLAN §5.1 ①~③. 관문(④~⑥)은 `pipeline.py`, 리포트는 `report.py`.
    zero-cost 로 → gross_sharpe_w, gross_expectancy; 오답노트 COST_EATEN 분류) → 원장 runs 에 모두 기록
    (`Ledger.record_runs`, 스냅샷 id, 코드 커밋 포함).
 7. research/campaigns/<campaign_id>/ 에 결과 저장 (README 참조: 무엇을 git 에 넣는지).
+
+자산 유니버스 (`universe: [BTC-KRW, XRP-KRW, ETH-KRW]`, PLAN D15, `research.universe`)
+- 생략하면 [data.symbol] (기본 BTC-KRW) → 스펙·해시·결과·원장 기록이 이전과 같다.
+- 선언하면 같은 스펙을 자산마다 같은 빠른 엔진으로 실행(자산별 Dev 1분봉·같은 심볼의 업비트 보조 데이터)하고,
+  슬리브(1/N) 일간 수익의 평균 = 포트폴리오 일간 수익으로 모든 지표·관문을 계산한다. 거래 수는 자산 합계.
+  스펙 하나 = 원장 시도 1회(유니버스는 파라미터가 아님). 자산별 결과는 결과표 `asset.<SYM>.*` 열과 원장
+  metrics.per_asset 에 보고만 한다. B&H 기준 = 동일 비중 N자산 매수보유.
 """
 from __future__ import annotations
 
@@ -50,8 +57,10 @@ from btc_quant.registry.splits import DataAccess
 from btc_quant.registry.strategies import StrategyRegistry
 from btc_quant.strategy.blocks import REGISTRY, Context, Registry
 from btc_quant.strategy.features import to_tf
-from btc_quant.strategy.spec import (DEFAULT_ATR_BARS, DEFAULT_TIMEFRAME, MAX_FILTERS, TIMEFRAMES, BlockRef,
-                                     ExitSpec, StrategySpec, tf_minutes, tf_name)
+from btc_quant.strategy.spec import (DEFAULT_ATR_BARS, DEFAULT_TIMEFRAME, DEFAULT_UNIVERSE, MAX_FILTERS,
+                                     TIMEFRAMES, BlockRef, ExitSpec, StrategySpec, tf_minutes, tf_name)
+
+from . import universe as U
 
 # 비용 모델은 버전 관리되는 레지스트리(config/costs.yaml, `btc_quant.params.cost_model`)에서 읽는다
 # (docs/PARAMS.md §4). 예전 모듈 상수 COST_MODELS / UPBIT_STRESS 는 없어졌다 — `get_cost(name)` 를 쓴다.
@@ -77,6 +86,23 @@ def gross_metrics(p: fast.Prepared, tr: fast.TradeArrays, cost: CostModel, start
     ws = M.weighted_sharpe(pd.Series(mat[0], index=days), HALF_LIFE_DAYS)
     return {"gross_sharpe_w": float(ws.sharpe),
             "gross_expectancy": float(tr0.net_ret.mean()) if len(tr0.net_ret) else 0.0}
+
+
+def gross_metrics_sleeves(pairs: list[tuple[fast.Prepared, fast.TradeArrays]], cost: CostModel, start, end) -> dict:
+    """다자산 유니버스: 슬리브마다 zero-cost 재가격 → 포트폴리오(평균) 일간 수익의 가중 Sharpe, 풀링 거래 평균.
+    슬리브 1개면 `gross_metrics` 그대로."""
+    if len(pairs) == 1:
+        return gross_metrics(pairs[0][0], pairs[0][1], cost, start, end)
+    zero = CostModel("zero_cost", 0.0, 0.0, 0.0, cost.tick)
+    mats, nets, days = [], [], None
+    for p, tr in pairs:
+        tr0 = fast.reprice(tr, zero)
+        days, mat = fast.daily_returns_matrix(p, [tr0], start, end)
+        mats.append(mat)
+        nets.append(np.asarray(tr0.net_ret, float))
+    ws = M.weighted_sharpe(pd.Series(U.combine_matrix(mats)[0], index=days), HALF_LIFE_DAYS)
+    allr = np.concatenate(nets) if nets else np.zeros(0)
+    return {"gross_sharpe_w": float(ws.sharpe), "gross_expectancy": float(allr.mean()) if allr.size else 0.0}
 
 
 class CampaignError(ValueError):
@@ -120,6 +146,20 @@ def get_cost(name: str, root: str | Path | None = None) -> CostModel:
         return cost_model(name, doc=doc)
     except CostRegistryError:
         raise CampaignError(f"unknown cost model {name!r}; one of {sorted(doc['models'])}") from None
+
+
+def sleeve_cost_name(name: str, symbol: str, root: str | Path | None = None) -> str:
+    """다자산 슬리브의 비용 모델 이름: config/costs.yaml 에 `<name>@<SYM>` (예: coinone_conservative@XRP-KRW) 이 있으면 그것,
+    없으면 `<name>` (PLAN D15 — 자산별 호가 단위·스프레드가 다르다; 자산별 모델 추가는 비용 레지스트리 절차·사람 결정).
+    기본 심볼(BTC-KRW)은 항상 `<name>` — 단일 자산 경로는 이전과 같다."""
+    if symbol == U.DEFAULT_SYMBOL:
+        return name
+    cand = f"{name}@{symbol}"
+    return cand if cand in (_cost_doc(root).get("models") or {}) else name
+
+
+def get_sleeve_cost(name: str, symbol: str, root: str | Path | None = None) -> CostModel:
+    return get_cost(sleeve_cost_name(name, symbol, root), root)
 
 
 def __getattr__(name: str):
@@ -231,10 +271,15 @@ class CampaignTemplate:
     from_screen: str | None = None         # 선별 캠페인 id (원장) — 이 선별에서 통과한 구성만 허용
     requires_screen_pass: bool = False     # True: 원장의 어떤 선별에서든 통과한 구성만 허용
     power: dict = field(default_factory=dict)   # {target_sharpe: float} (선택)
+    universe: tuple[str, ...] = DEFAULT_UNIVERSE   # 자산 유니버스 (D15) — 기본 [data.symbol]
 
     @property
     def tf_min(self) -> int:
         return tf_minutes(self.decision_tf)
+
+    @property
+    def multi_asset(self) -> bool:
+        return len(self.universe) > 1
 
     @property
     def exit_keys(self) -> tuple[str, str, str]:
@@ -255,7 +300,7 @@ class CampaignTemplate:
         if not isinstance(d, dict):
             raise CampaignError("template must be a mapping")
         allowed = {"name", "hypothesis", "data", "entry", "filters", "exits", "costs", "budget",
-                   "family", "segment", "timeframe", "from_screen", "requires_screen_pass", "power"}
+                   "family", "segment", "timeframe", "from_screen", "requires_screen_pass", "power", "universe"}
         extra = set(d) - allowed
         if extra:
             raise CampaignError(f"unknown template keys {sorted(extra)}")
@@ -279,6 +324,7 @@ class CampaignTemplate:
         if tf not in TIMEFRAMES:
             raise CampaignError(f"timeframe must be one of {list(TIMEFRAMES)} (decision interval, D10)")
         tf_min = tf_minutes(tf)
+        universe = template_universe(d)
         entry = _block_grid(d.get("entry"), "entry", registry)
         fsets_raw = d.get("filters", [[]])
         if not isinstance(fsets_raw, list) or not fsets_raw:
@@ -355,13 +401,13 @@ class CampaignTemplate:
             raise CampaignError(f"blocks require aux data {missing}; declare data.aux: {need} "
                                 f"(live-available: {list(LIVE_AUX)})")
         tpl = cls(name=name, hypothesis={k: hyp[k] for k in ("text", "rationale", "success_criteria")},
-                  exchange=exchange, symbol=str(data.get("symbol", "BTC-KRW")),
+                  exchange=exchange, symbol=universe[0],
                   timeframe=str(data.get("timeframe", "1m")), aux=aux, entry=entry, filter_sets=fsets,
                   exits=exits, costs=costs, budget=budget,
                   family=str(d.get("family") or entry.block), segment=segment, raw=d,
                   decision_tf=tf, exit_mode=mode, atr_bars=int(atr_bars),
                   from_screen=from_screen.strip() if from_screen else None, requires_screen_pass=rsp,
-                  power=power)
+                  power=power, universe=universe)
         tpl.validate_specs(registry)
         return tpl
 
@@ -407,9 +453,9 @@ class CampaignTemplate:
                   hold: int) -> StrategySpec:
         """sl/tp: 고정 % 모드는 %, ATR 모드는 ATR 배수. 결정 주기 = 템플릿 timeframe."""
         ex = self.make_exit(sl, tp, hold)
-        tmp = StrategySpec("x", entry, ex, tuple(filters), timeframe=self.decision_tf)
+        tmp = StrategySpec("x", entry, ex, tuple(filters), timeframe=self.decision_tf, universe=self.universe)
         return StrategySpec(f"{self.name}_{tmp.logic_hash()[:10]}", entry, ex, tuple(filters),
-                            timeframe=self.decision_tf)
+                            timeframe=self.decision_tf, universe=self.universe)
 
     def enumerate(self) -> list[StrategySpec]:
         exits = self.exit_combos()
@@ -454,7 +500,25 @@ class CampaignTemplate:
         }
         if self.screen_gated:
             rec["screen_gate"] = {"from_screen": self.from_screen, "requires_screen_pass": self.requires_screen_pass}
+        if not U.is_default(self.universe):
+            rec["universe"] = list(self.universe)
         return rec
+
+
+def template_universe(d: dict) -> tuple[str, ...]:
+    """템플릿(캠페인·선별 공통) → 자산 유니버스. `universe` 가 없으면 (data.symbol,) (기본 BTC-KRW, 하위 호환).
+    있으면 D15 고정 자산 안에서 정식 순서로; data.symbol 을 함께 주면 유니버스 안에 있어야 한다."""
+    data = d.get("data") or {}
+    sym = data.get("symbol")
+    if d.get("universe") is None:
+        return (str(sym or U.DEFAULT_SYMBOL),)
+    try:
+        uni = U.normalize_universe(d["universe"])
+    except U.UniverseError as e:
+        raise CampaignError(str(e)) from None
+    if sym is not None and str(sym) not in uni:
+        raise CampaignError(f"data.symbol {sym!r} is not in universe {list(uni)} (omit data.symbol with a universe)")
+    return uni
 
 
 def _value_list(v, where: str) -> list:
@@ -561,12 +625,14 @@ def aux_context(aux_m1: dict[str, pd.DataFrame], tf_min: int) -> Context:
 
 
 def load_aux_m1(env: ResearchEnv, tpl: "CampaignTemplate", start=None, end=None,
-                segment: str | None = None) -> dict[str, pd.DataFrame]:
-    """템플릿 data.aux 의 보조 거래소 1분봉 (같은 구간, DataAccess 경유, regularize(clean_wicks))."""
+                segment: str | None = None, symbol: str | None = None) -> dict[str, pd.DataFrame]:
+    """템플릿 data.aux 의 보조 거래소 1분봉 (같은 구간, DataAccess 경유, regularize(clean_wicks)).
+    symbol: 유니버스 자산(기본 tpl.symbol) — 보조 거래소도 **같은 심볼**을 읽는다."""
     out = {}
+    sym = symbol or tpl.symbol
     for a in tpl.aux:
-        raw = (env.data.read(segment, a, tpl.symbol, tpl.timeframe) if segment is not None
-               else env.data.read_range(start, end, a, tpl.symbol, tpl.timeframe))
+        raw = (env.data.read(segment, a, sym, tpl.timeframe) if segment is not None
+               else env.data.read_range(start, end, a, sym, tpl.timeframe))
         if raw.empty:
             raise CampaignError(f"no {a} aux data for {segment or (start, end)}")
         out[a] = prepare_m1(raw, a)
@@ -574,10 +640,17 @@ def load_aux_m1(env: ResearchEnv, tpl: "CampaignTemplate", start=None, end=None,
 
 
 def data_snapshot(env: ResearchEnv, tpl: "CampaignTemplate", start, end) -> str:
-    """대상 시계열 스냅샷 id (+ 보조 데이터가 있으면 `|<aux>:<id>` 를 이어 붙임)."""
+    """대상 시계열 스냅샷 id (+ 보조 데이터가 있으면 `|<aux>:<id>` 를 이어 붙임).
+    다자산 유니버스: 첫 자산은 위와 같은 형식, 다른 자산은 `|<SYM>:<id>` 와 `|<aux>/<SYM>:<id>` 를 이어 붙인다."""
     snap = snapshot_id(tpl.exchange, tpl.symbol, tpl.timeframe, start, end, data_root=env.data.data_root)
     for a in tpl.aux:
         snap += f"|{a}:" + snapshot_id(a, tpl.symbol, tpl.timeframe, start, end, data_root=env.data.data_root)
+    for sym in tpl.universe:
+        if sym == tpl.symbol:
+            continue
+        snap += f"|{sym}:" + snapshot_id(tpl.exchange, sym, tpl.timeframe, start, end, data_root=env.data.data_root)
+        for a in tpl.aux:
+            snap += f"|{a}/{sym}:" + snapshot_id(a, sym, tpl.timeframe, start, end, data_root=env.data.data_root)
     return snap
 
 
@@ -601,10 +674,19 @@ def signal_config_key(entry: dict | BlockRef, filters, timeframe: str) -> str:
     return json.dumps([one(entry), fs, str(timeframe)])
 
 
-def screen_passes(ledger: Ledger, screen_id: str | None = None, exchange: str | None = None
-                  ) -> dict[str, dict]:
+def record_universe(grid: dict) -> tuple[str, ...]:
+    """원장 캠페인·선별 grid 기록 → 유니버스 (기록이 없으면 (data.symbol,) — 기본 BTC-KRW)."""
+    u = (grid or {}).get("universe") or ((grid or {}).get("data") or {}).get("universe")
+    if u:
+        return tuple(u)
+    return (str(((grid or {}).get("data") or {}).get("symbol") or U.DEFAULT_SYMBOL),)
+
+
+def screen_passes(ledger: Ledger, screen_id: str | None = None, exchange: str | None = None,
+                  universe: tuple[str, ...] | None = None) -> dict[str, dict]:
     """원장의 선별 통과 구성 {signal_config_key: 근거}. screen_id 가 있으면 그 선별만.
-    exchange 가 있으면 대상 거래소가 같은 선별만 (선별 캠페인 grid.data.exchange)."""
+    exchange 가 있으면 대상 거래소가 같은 선별만 (선별 캠페인 grid.data.exchange).
+    universe 가 있으면 같은 유니버스로 풀링한 선별만 (D15: 3자산 캠페인은 3자산 풀링 선별 통과가 필요)."""
     camps = {c["id"]: c for c in ledger.records("campaigns")}
     out: dict[str, dict] = {}
     for r in ledger.records("runs"):
@@ -616,6 +698,8 @@ def screen_passes(ledger: Ledger, screen_id: str | None = None, exchange: str | 
         grid = (camps.get(r["campaign_id"]) or {}).get("grid") or {}
         ex = (grid.get("data") or {}).get("exchange")
         if exchange is not None and ex != exchange:
+            continue
+        if universe is not None and record_universe(grid) != tuple(universe):
             continue
         sp = r.get("spec") or {}
         key = signal_config_key(sp["entry"], sp.get("filters") or [], sp.get("timeframe", DEFAULT_TIMEFRAME))
@@ -638,7 +722,7 @@ def check_screen_gate(ledger: Ledger, tpl: "CampaignTemplate") -> dict | None:
         camp = ledger.get("campaigns", tpl.from_screen)
         if camp is None or (camp.get("grid") or {}).get("kind") != "signal_screen":
             raise ScreenGateError(f"from_screen {tpl.from_screen!r} is not a signal screen in the ledger")
-    passes = screen_passes(ledger, tpl.from_screen, tpl.exchange)
+    passes = screen_passes(ledger, tpl.from_screen, tpl.exchange, tpl.universe)
     matches, missing = [], []
     for e, fs, _ in tpl.signal_combos():
         k = signal_config_key(e, fs, tpl.decision_tf)
@@ -651,11 +735,12 @@ def check_screen_gate(ledger: Ledger, tpl: "CampaignTemplate") -> dict | None:
         where = f"screen {tpl.from_screen}" if tpl.from_screen else "any recorded screen"
         raise ScreenGateError(
             f"{len(missing)} of {len(matches) + len(missing)} signal configs did not pass {where} "
-            f"(exchange {tpl.exchange}, timeframe {tpl.decision_tf}): {missing[:5]}"
+            f"(exchange {tpl.exchange}, timeframe {tpl.decision_tf}, universe {list(tpl.universe)}): {missing[:5]}"
             f"{' …' if len(missing) > 5 else ''}. Screen them first (research.cli screen) or narrow the grid.")
     return {"from_screen": tpl.from_screen, "requires_screen_pass": tpl.requires_screen_pass,
             "n_configs": len(matches), "matches": matches,
-            "rule": "every (entry params × filter params × timeframe × exchange) config passed a recorded screen"}
+            "rule": "every (entry params × filter params × timeframe × exchange × universe) config passed a "
+                    "recorded screen"}
 
 
 # ============================================================== 검정력 (v4)
@@ -736,6 +821,8 @@ def register_campaign(env: ResearchEnv, tpl: CampaignTemplate, snapshot: str, pe
              f"timeframe {tpl.decision_tf}, exits {tpl.exit_mode}"
              + (f", aux {tpl.aux}" if tpl.aux else "")
              + (f", screen-gated ({tpl.from_screen or 'any screen'})" if tpl.screen_gated else "")
+             + (f", universe {list(tpl.universe)} (pooled, equal sleeves; 1 trial per spec)"
+                if not U.is_default(tpl.universe) else "")
              + f"; evaluated on dev with {tpl.costs['primary']} (primary) and {tpl.costs['grade']} (grade)")
     return hyp_id, camp_id
 
@@ -772,35 +859,55 @@ def run_campaign(template: CampaignTemplate | str | Path, root: str | Path | Non
     log(f"registered {hyp_id} / {camp_id}: {n_specs} specs, snapshot {snap}, code {commit}")
 
     t0 = time.time()
-    m1 = load_segment(env, tpl.segment, tpl.exchange, tpl.symbol, tpl.timeframe)
-    aux_m1 = load_aux_m1(env, tpl, segment=tpl.segment)
-    ctx = aux_context(aux_m1, tpl.tf_min)
-    cache = SignalCache(m1, ctx, tf_min=tpl.tf_min, atr_bars=tpl.sim_atr_bars)
+    syms = list(tpl.universe)
+    multi = len(syms) > 1
+    m1s, auxs = {}, {}
+    for sym in syms:      # 자산마다 같은 구성 (기본 유니버스 = 이전과 같은 호출 하나)
+        m1s[sym] = load_segment(env, tpl.segment, tpl.exchange, sym, tpl.timeframe)
+        auxs[sym] = load_aux_m1(env, tpl, segment=tpl.segment, symbol=sym)
+    caches = {sym: SignalCache(m1s[sym], aux_context(auxs[sym], tpl.tf_min), tf_min=tpl.tf_min,
+                               atr_bars=tpl.sim_atr_bars) for sym in syms}
+    m1, aux_m1 = m1s[syms[0]], auxs[syms[0]]
     eval_costs = [tpl.costs["primary"], tpl.costs["grade"]]
     cost_by_name = {c: get_cost(c, config_root(env)) for c in eval_costs}
+    # 슬리브별 비용 (자산별 모델 `<name>@<SYM>` 이 있으면; 없으면 같은 모델)
+    sleeve_costs = {sym: {c: get_sleeve_cost(c, sym, config_root(env)) for c in eval_costs} for sym in syms}
     exits = tpl.exit_combos()
     rows, items, ret_cols, specs = [], [], {}, {}
     days = None
-    bh = None                   # BTC 매수보유 일간 수익 (정보 전용; 모든 스펙에 같은 일자)
+    bh = None                   # 매수보유 일간 수익 (정보 전용; 모든 스펙에 같은 일자) — 다자산: 동일 비중 B&H
     bench_const: dict = {}
     combos = tpl.signal_combos()
     for ci, (entry, filters, set_idx) in enumerate(combos):
-        p = cache.prepared(entry, filters)
+        ps = {sym: caches[sym].prepared(entry, filters) for sym in syms}
         for cost_name in eval_costs:
             cost = cost_by_name[cost_name]
-            trs = fast.simulate_many(p, exits, cost, start, end, atr_bars=tpl.sim_atr_bars)
+            trs = {sym: fast.simulate_many(ps[sym], exits, sleeve_costs[sym][cost_name], start, end,
+                                           atr_bars=tpl.sim_atr_bars) for sym in syms}
             if cost_name == tpl.costs["primary"]:
-                days, mat = fast.daily_returns_matrix(p, trs, start, end)
-            for xi, ((sl, tp, hold), tr) in enumerate(zip(exits, trs)):
+                mats = []
+                for sym in syms:
+                    days, m_ = fast.daily_returns_matrix(ps[sym], trs[sym], start, end)
+                    mats.append(m_)
+                mat = U.combine_matrix(mats)
+            for xi, (sl, tp, hold) in enumerate(exits):
                 spec = tpl.make_spec(entry, filters, sl, tp, hold)
                 lh = spec.logic_hash()
                 specs[lh] = spec
-                res = fast.to_result(p, tr, cost, start, end, spec.id, lh)
+                sleeves = {sym: fast.to_result(ps[sym], trs[sym][xi], sleeve_costs[sym][cost_name], start, end,
+                                               spec.id, lh) for sym in syms}
+                res = U.portfolio_result(sleeves)
                 if bh is None or not bh.index.equals(res.daily_returns.index):
-                    bh = M.buy_hold_daily(m1["close"], res.daily_returns.index)
-                met = {**M.summarize(res, HALF_LIFE_DAYS, benchmark=bh), **gross_metrics(p, tr, cost, start, end)}
+                    bh = U.buy_hold_universe({sym: m1s[sym]["close"] for sym in syms}, res.daily_returns.index)
+                met = {**M.summarize(res, HALF_LIFE_DAYS, benchmark=bh),
+                       **gross_metrics_sleeves([(ps[sym], trs[sym][xi]) for sym in syms], cost, start, end)}
                 if not bench_const:
                     bench_const = {k: met.get(k) for k in M.BENCHMARK_CONSTANT_KEYS if k in met}
+                pa_cols = {}
+                if multi:      # 자산별 결과 (보고 전용)
+                    pa = U.per_asset_metrics(sleeves, HALF_LIFE_DAYS)
+                    pa_cols = U.per_asset_columns(pa)
+                    met["per_asset"] = pa
                 if cost_name == tpl.costs["primary"]:
                     ret_cols[lh] = mat[xi]
                 rows.append({"logic_hash": lh, "spec_id": spec.id, "filter_set": set_idx,
@@ -809,7 +916,7 @@ def run_campaign(template: CampaignTemplate | str | Path, root: str | Path | Non
                              **{f"{f.block}.{k}": v for f in filters for k, v in f.params.items()},
                              **exit_columns(tpl, sl, tp, hold),
                              "spec_json": json.dumps(spec.to_dict(), sort_keys=True),
-                             **met, "cost": cost_name})
+                             **{k: v for k, v in met.items() if k != "per_asset"}, **pa_cols, "cost": cost_name})
                 items.append((spec, cost_name, _metrics_record(met)))
         log(f"  signals {ci + 1}/{len(combos)} done ({len(rows)} runs, {time.time() - t0:.1f}s)")
     env.ledger.record_runs(camp_id, items, period, snap, commit, tpl.family,   # 모든 실행 기록
@@ -834,6 +941,21 @@ def run_campaign(template: CampaignTemplate | str | Path, root: str | Path | Non
         "benchmark": {"kind": "BTC buy & hold (same venue 1m close, no cost)", **bench_const},
         "params": pver, "params_version": pver.get("params_version"), "cost_versions": pver.get("cost_versions"),
     }
+    if not U.is_default(tpl.universe):      # 기본 유니버스는 매니페스트도 이전과 같다
+        manifest["universe"] = syms
+        manifest["sleeves"] = {"weight": 1.0 / len(syms), "accounting": "equal fixed sleeves; portfolio daily "
+                               "return = mean of sleeve daily returns; trades pooled (G1 = sum over assets)",
+                               "costs": {sym: {c: m.name for c, m in sleeve_costs[sym].items()} for sym in syms}}
+        manifest["data"].update(
+            symbol=syms[0], universe=syms, rows_1m=int(sum(len(v) for v in m1s.values())),
+            filled_frac=float(np.mean([v["filled"].mean() for v in m1s.values()])),
+            by_symbol={sym: {"rows_1m": int(len(m1s[sym])), "filled_frac": float(m1s[sym]["filled"].mean()),
+                             "aux_rows_1m": {k: int(len(v)) for k, v in auxs[sym].items()}} for sym in syms})
+        if multi:
+            manifest["benchmark"]["kind"] = (f"equal-weight {len(syms)}-asset buy & hold ({', '.join(syms)}; same "
+                                             "venue 1m close, daily-rebalanced sleeves like the strategy, no cost)")
+        elif syms[0] != U.DEFAULT_SYMBOL:
+            manifest["benchmark"]["kind"] = f"{syms[0]} buy & hold (same venue 1m close, no cost)"
     out = save_campaign(env, tpl, camp_id, results, returns, manifest)
     log(f"campaign {camp_id} done: {len(items)} runs in {manifest['runtime_sec']}s → {out}")
     return CampaignResult(camp_id, hyp_id, out, tpl, results, returns, specs, manifest)
@@ -936,7 +1058,7 @@ def run_screen(template, root: str | Path | None = None, env: ResearchEnv | None
     env = env or ResearchEnv.at(root)
     tpl = load_screen_template(template)
     from btc_quant.research.signal_study import dev_aux_context
-    ctx = dev_aux_context(env, tpl) if tpl.aux else None
+    ctx = dev_aux_context(env, tpl) if tpl.aux and len(tpl.universe) <= 1 else None
     res = screen(tpl, env=env, ctx=ctx, progress=progress)
     if lessons:
         from btc_quant.research.lessons import LessonBook

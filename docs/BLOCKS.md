@@ -37,6 +37,8 @@ True@t = 봉 t가 닫힌 시점(t+봉길이)까지의 정보로 조건 성립. �
 | `venue_gap_revert` | entry · 교차거래소 | `g=log close - log upbit_close`; `z=(g_t-mean(g_{t-W..t-1}))/std(…)` (최소 W/2 개) `≤ -z` | window=240, z=2.5 | window [60,120,240,480]; z [1.5,2,2.5,3] | ✓ (requires `upbit`) | experimental |
 | `upbit_not_dumping` | filter | `r_k(upbit)·1e4 > -max_drop_bp` | k=3, max_drop_bp=40 | k [1,3,6]; max_drop_bp [20,40,60,100] | ✓ (requires `upbit`) | experimental |
 | `venue_gap_closed` | exit_signal | `venue_gap_revert` 와 같은 z `≥ exit_z` | window=240, exit_z=0 | window [60,120,240,480]; exit_z [-0.5,0,0.5,1] | ✓ (requires `upbit`) | experimental |
+| `composite_z` | entry · 합성 점수 | 프리셋 성분 x_c 마다 `z_c=clip((x_c-mean(x_{c,t-288..t-1}))/std(…),±3)` (최소 144개), `mean_c(sign_c·z_c) ≥ threshold` — 동일 가중, 적합 가중치 없음. reversion=(−r_6, −boll_48, +log1p vol), momentum=(r_12, r_48, chanpos_48), volume_momentum=(r_12, +log1p vol) | preset="momentum", threshold=1.5 | preset [reversion, momentum, volume_momentum]; threshold [0.5,1,1.5,2] | ✓ | experimental |
+| `composite_z_upbit` | entry · 합성 점수 · 교차거래소 | `composite_z` 와 같은 z·클립·평균. lead=(r_1(upbit), r_1(upbit)−r_1(target)), lead_gap=(r_1(upbit), −g), g=log close−log upbit_close, upbit_capitulation=(−r_6, −boll_48, +log1p upbit vol) | preset="lead_gap", threshold=1.5 | preset [lead, lead_gap, upbit_capitulation]; threshold [0.5,1,1.5,2] | ✓ (requires `upbit`) | experimental |
 
 ## 결정 주기 호환성 (15m / 1h / 4h, PLAN §10 스윙 연구 — 2026-11-09 추가)
 격자는 봉 개수 단위라 긴 봉에서는 같은 파라미터가 훨씬 긴 벽시계 창이 된다(4h 에서 `lookback=48` = 8일).
@@ -50,6 +52,7 @@ True@t = 봉 t가 닫힌 시점(t+봉길이)까지의 정보로 조건 성립. �
 | `range_compression_break` | ✓ | ✓ | ✓ (1일 = 24봉) | **거부** | 1일 백분위 창 = 6봉(해상도 1/6, `squeeze_pct=0.1` 불가), lookback 12–48봉(2–8일) ≫ 1일 창 |
 | `vol_regime` | ✓ | ✓ | ✓ (7일 = 168봉) | 허용 (거침) | 7일 순위 창 = 42봉(최소 6), `window=48`(8일) > 순위 창 → 느린 변동성 추세 지표 |
 | `volume_z`, `donchian_breakout`, `atr_channel_breakout`, `ema_*`, `roc_threshold`, `bollinger_z_revert`, `rsi_oversold_bounce`, `random_entry`, `ema_cross_down` | ✓ | ✓ | ✓ | ✓ | 봉 개수 단위 그대로 (4h `donchian 288` = 48일). `ema_slope`·`roc_threshold` 의 bp 문턱은 봉당 값 — 긴 봉에서 더 자주 충족 |
+| `composite_z`, `composite_z_upbit` | ✓ | ✓ | ✓ | ✓ | 창 모두 봉 개수: 표준화 W=288봉 = 5m 1일 · 1h 12일 · 4h 48일 · 1m 4.8시간, r_48 = 4h 8일. `composite_z_upbit` 의 lead 프리셋은 1h 이상에서 정보가 거의 없을 것(선행 = 초~1분) |
 | `binance_*`, `upbit_*`, `venue_gap_*` (aux) | ✓ | ✓ | ✓ | ✓ (기대 정보 없음) | aux 는 같은 B 로 `to_tf` — 선행 메커니즘(수 초~1분)이 봉보다 훨씬 짧아 4h 에서는 정보가 거의 없을 것으로 예상(거부는 안 함) |
 
 새 블록은 벽시계 의존이 있으면 `register(..., max_tf_min=, tf_note=)` 로 표시한다(`tests/test_long_tf_research.py` 가 위
@@ -76,6 +79,37 @@ True@t = 봉 t가 닫힌 시점(t+봉길이)까지의 정보로 조건 성립. �
 - 주의: 종가 = 마지막 체결가. 체결이 드문 코인원 종가는 stale 할 수 있어, 가격차 신호 일부는 "실제로 그 가격에 살 수 없는"
   가짜일 수 있다 → 페이퍼/호가 데이터로 체결 가능성 확인 필요. 거래소 간 시계(타임스탬프) 오차도 1분봉에서는 영향이 크다.
 
+## 합성 점수 블록 (`composite_z`, `composite_z_upbit` — 실험, 2026-11-10)
+약한 신호 여럿을 **적은 자유도로** 결합한다. 코드 `blocks/experimental/composite.py` (`PRESETS`, `UPBIT_PRESETS`,
+`COMPONENTS`, `composite_score` — 선별·진단용 float 점수).
+
+- 점수: 프리셋 P 의 성분마다 원시 특징 x_c (현재 봉까지만) → 자기 후행 분포로 표준화
+  `z_c,t = clip((x_c,t − mean(x_c, t−288..t−1)) / std(…), ±3)` (현재 봉 제외, 최소 144개, std=0 → NaN) →
+  `score_t = (1/|P|)·Σ sign_c·z_c,t` → `score ≥ threshold`. 성분 하나라도 NaN(워밍업, aux 결측, 거래량이 창 전체에서
+  일정 등)이면 False. 첫 신호는 원시 특징 창 + 144봉 이후, 정확한 재현 창(`lookback_bars`) = 특징 창 + 288 + 1 = 최대 337봉.
+- 파라미터 2개: `preset`(미리 선언한 성분 집합 3개) × `threshold`(평균 z 문턱 4개) → 블록당 시도 ≤ 12.
+  성분·특징 창(6/12/48봉)·부호·표준화 창 288·클립 3 은 상수다. 바꾸면 의미가 바뀌므로 **새 이름의 새 블록**이다.
+- **왜 동일 가중인가.** 가중치를 표본 안에서 맞추면(회귀·최적화) 성분 수만큼 연속 자유도가 생기고, 그 선택은 원장의
+  시도 수(G5 DSR 의 N)·PBO 에 잡히지 않는다 — 약한 신호일수록 적합 가중치는 잡음에 맞춰진다. 동일 가중은 추정할 것이
+  없어 추가 시도가 preset × threshold 뿐이고, 약한 신호·큰 추정 오차에서는 표본 밖 성과가 적합 가중치보다 대개 나쁘지 않다
+  ('부적절한 선형 모형' Dawes 1979, 1/N DeMiguel·Garlappi·Uppal 2009). 각 성분을 자기 후행 평균·표준편차로 z 화하므로
+  척도(bp·비율·로그 거래량)와 무관하게 같은 몫을 갖고(양의 아핀 변환 불변 — 테스트로 고정), ±3 클립이 한 성분의
+  극단값(거래량 급증 등)이 점수를 독차지하지 못하게 한다.
+- 문턱의 단위는 '평균 z' 다. 성분끼리 상관이 있어 점수의 표준편차는 1 보다 작고(독립이면 1/√|P|) 프리셋마다 다르므로,
+  같은 문턱이라도 신호 비율이 프리셋마다 다르다 (합성 5분봉 비율: `block_proposal_composite_z.md`).
+
+| 프리셋 | 블록 | 성분 (부호) | 메커니즘 · 상대방 | 근거 (노출) |
+|---|---|---|---|---|
+| `reversion` | `composite_z` | −r_6, −boll_48, +log1p(vol) | M4 강제 매도 뒤 되돌림. 상대방: 강제 청산된 롱·공황 매도자 | camp-000004/011 (Dev). int-000013: 코인원 거래량은 되돌림을 *약화* — 그래서 업비트 거래량 판도 둠 |
+| `momentum` | `composite_z` | r_12, r_48, chanpos_48 | M3 시계열 모멘텀(여러 지평 동일 가중). 상대방: 돌파 지점의 손절·역추세 매도자, 늦은 추격자 | camp-000009/013/017 (Dev; Val 은 결과 코드 fail 2회만, 값 미사용) |
+| `volume_momentum` | `composite_z` | r_12, +log1p(vol) | M3 + 거래량 확인(정보·강제 흐름) | camp-000020 S1 (Dev) |
+| `lead` | `composite_z_upbit` | r_1(upbit), r_1(upbit) − r_1(target) | M1 교차 거래소 지연. 상대방: 늦게 갱신되는 대상 거래소 지정가 | fact-000001/2 (Dev) |
+| `lead_gap` | `composite_z_upbit` | r_1(upbit), −g (가격차, 후행 창으로 프리미엄 표류 제거) | M1 + M5 단기 이탈 되돌림 | fact-000001, int-000002 (Dev; 최근 가격차 꼬리 축소) |
+| `upbit_capitulation` | `composite_z_upbit` | −r_6, −boll_48, +log1p(upbit vol) | M4, 업비트 거래량 = 청산 흔적 대리변수 (int-000013 반증 시험) | cycle 3C (Dev) |
+
+주의: 이 블록은 기존 블록의 연속값 버전이라 같은 family 의 시도 수에 합산해야 한다(새 family 이름 금지, 함정 P-S2).
+합성 점수의 '정보'가 성분 하나에서만 오는지는 ablation(성분별 단일 블록 대조)으로 확인한다.
+
 ## 실험 블록 (PLAN D11, "B안")
 | 단계 | 누가 | 내용 |
 |---|---|---|
@@ -92,3 +126,12 @@ True@t = 봉 t가 닫힌 시점(t+봉길이)까지의 정보로 조건 성립. �
 `causality_trunc`(절단 재계산 동일; 5분 3, 1분 2 지점), `front_window`(`lookback_bars` 선언 시 후행 창 마지막 값 = 전체 이력 값),
 `non_degenerate`(5분 중앙 격자 신호 비율: filter 1–99%, entry/exit 0.1–60%), `non_degenerate_1m`(처음/중앙/끝 중 하나 이상 0<비율<1),
 `docs`(이 표에 행 존재, 실험 블록은 행에 `experimental`). 통과 = 논리·인과성 이상 없음이지 엣지가 있다는 뜻이 아니다.
+
+## 다자산 유니버스와 블록 (PLAN D15, 2026-11-10)
+블록 코드는 바뀌지 않는다. 다자산 스펙(`universe: [BTC-KRW, XRP-KRW, ETH-KRW]`)은 **같은 블록·같은 파라미터**를 자산마다
+그 자산의 결정 주기 봉으로 평가한다(자산별 신호 캐시). 보조 데이터 블록(`requires: upbit`)은 **같은 심볼**의 업비트 1분봉을
+ctx.aux["upbit"] 로 받는다(XRP 스펙의 XRP 슬리브 = 업비트 KRW-XRP). 따라서
+- 가격 수준·호가 단위에 의존하는 절대값 파라미터(원 단위 임계값)는 자산마다 의미가 달라진다 — 블록 파라미터는 비율·bp·
+  z-점수·순위처럼 **척도 무관**이어야 한다(현재 공식 블록은 모두 비율/순위 기반). 새 블록 제안 시 이 조건을 확인한다.
+- `vol_regime`·`volume_z` 같은 순위·표준화 블록은 자산 자기 이력 기준이다(자산 간 비교 아님).
+- 인과성 점검(G0)과 미래참조 테스트는 자산마다 동일하게 적용된다.

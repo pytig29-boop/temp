@@ -486,8 +486,17 @@ def _fset_key(fs: list) -> tuple:
     return tuple(sorted(f.get("block") for f in fs or []))
 
 
+def _grid_universe(g: dict) -> tuple:
+    """격자 기록·템플릿 → 자산 유니버스 (정렬; 없으면 (data.symbol,) — 기본 BTC-KRW). PLAN D15."""
+    u = (g or {}).get("universe") or ((g or {}).get("data") or {}).get("universe")
+    if u:
+        return tuple(sorted(str(x).upper() for x in u))
+    return (str(((g or {}).get("data") or {}).get("symbol") or "BTC-KRW"),)
+
+
 def compare_grids(a: dict, b: dict) -> str | None:
-    """두 캠페인 격자(CampaignTemplate.to_record 형식) 비교 → 'exact' | 'same_blocks' | 'same_entry' | None."""
+    """두 캠페인 격자(CampaignTemplate.to_record 형식) 비교 → 'exact' | 'same_blocks' | 'same_entry' | None.
+    유니버스(D15)가 다르면 같은 격자여도 'exact' 가 아니라 'same_blocks' (다른 전략 = 다른 시도; 반복 아님)."""
     ea, eb = (a.get("entry") or {}), (b.get("entry") or {})
     if not ea.get("block") or ea.get("block") != eb.get("block"):
         return None
@@ -502,7 +511,7 @@ def compare_grids(a: dict, b: dict) -> str | None:
         ga = {f["block"]: f.get("grid") for f in fa[key]}
         gb = {f["block"]: f.get("grid") for f in fb[key]}
         if entry_ok and exits_ok and all(grids_overlap(ga[k], gb[k]) for k in ga):
-            return "exact"
+            return "exact" if _grid_universe(a) == _grid_universe(b) else "same_blocks"
     return "same_blocks"
 
 
@@ -688,6 +697,8 @@ class LessonBook:
         review_after = (_today() + timedelta(days=DEFAULT_REVIEW_DAYS)).isoformat()
         sc = {
             "exchange": data.get("exchange"), "symbol": data.get("symbol"), "timeframe": data.get("timeframe"),
+            **({"universe": list(grid.get("universe") or data.get("universe"))}
+               if (grid.get("universe") or data.get("universe")) else {}),
             "segment": period.get("segment", "dev"), "period": {"start": period.get("start"),
                                                                 "end": period.get("end")},
             "data_snapshot": period.get("data_snapshot") or manifest.get("data_snapshot"),

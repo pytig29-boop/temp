@@ -190,5 +190,74 @@ def null_distribution(m1: pd.DataFrame, bars_index: pd.DatetimeIndex, entry: np.
             "sharpe_w_median": float(np.median(srs)) if n_seeds else float("nan")}
 
 
+def null_distribution_universe(sleeves: list[dict], sl: float, tp: float, hold: int, cost: CostModel,
+                               start, end, n_seeds: int = 1000, seed0: int = 0, half_life_days: float = 365,
+                               calibration: str = "trade_count", tf_min: int = 5,
+                               atr_bars: int | None = None) -> dict:
+    """다자산 유니버스(PLAN D15) G2 귀무: **자산마다** 같은 필터·청산 + random_entry, p 는 자산별로 보정
+    (그 자산의 신호 비율 → 그 자산 후보 거래 수에 맞춤). seed 마다 슬리브 일간 수익을 평균(포트폴리오, 후보와
+    같은 회계)해 가중 Sharpe 를 계산한다.
+
+    같은 seed 를 모든 자산에 쓴다: random_entry 해시는 (결정 봉 시각, seed) 의 함수라 같은 시각에 필터를 통과한
+    자산들은 같은 균등 난수를 받는다(자산별 p 로 비교) → 무작위 진입도 시간상 동기화되어 후보의 자산 간 진입
+    상관을 (필터가 겹치는 만큼) 보존한다. 독립 seed 보다 귀무 분산이 커서 보수적이다.
+
+    sleeves: [{"symbol", "m1", "bars_index", "entry", "filter_ok", "bars", "target_trades", "cost"(선택 — 슬리브 비용)}].
+    반환은 null_distribution 과 같은 키 (+ per_asset; p·p_signal_rate·n_entry_bars·n_filter_bars 는 자산별 dict)."""
+    if len(sleeves) == 1:
+        sv = sleeves[0]
+        return null_distribution(sv["m1"], sv["bars_index"], sv["entry"], sv["filter_ok"], sl, tp, hold, cost,
+                                 start, end, n_seeds, seed0, half_life_days, calibration,
+                                 sv.get("target_trades"), tf_min, atr_bars, sv.get("bars"))
+    gens, ps, per, scost = [], [], {}, []
+    for sv in sleeves:
+        sym = sv["symbol"]
+        cost_s = sv.get("cost") or cost
+        scost.append(cost_s)
+        cal = calibrated_rate(sv["entry"], sv["filter_ok"], sv["bars_index"], start, end, tf_min)
+        gen = RandomEntryNull(sv["m1"], sv["bars_index"], sv["filter_ok"], tf_min, atr_bars, sv.get("bars"))
+        _, _, si, ei = gen.prepared.bounds(start, end)
+        info = {"p_signal_rate": cal["p"], "n_entry_bars": cal["n_entry_bars"], "n_filter_bars": cal["n_filter_bars"]}
+        p = cal["p"]
+        if calibration == "trade_count":
+            if sv.get("target_trades") is None:
+                raise ValueError("trade_count calibration needs target_trades per sleeve")
+            c2 = calibrate_p_to_trades(gen, cal["p"], int(sv["target_trades"]), sl, tp, hold, cost_s, si, ei)
+            p = c2["p"]
+            info.update(calibration_probe_trades=c2["probe_trades"], target_trades=int(sv["target_trades"]))
+        elif calibration != "signal_rate":
+            raise ValueError("calibration must be 'signal_rate' or 'trade_count'")
+        info["p"] = p
+        gens.append((gen, si, ei))
+        ps.append(p)
+        per[sym] = info
+    srs, ntr = np.empty(n_seeds), np.zeros(n_seeds, dtype=np.int64)
+    chunk = 100
+    for c0 in range(0, n_seeds, chunk):
+        seeds = list(range(seed0 + c0, seed0 + min(n_seeds, c0 + chunk)))
+        acc, days = None, None
+        for (gen, si, ei), p, cs in zip(gens, ps, scost):
+            trs = [gen.simulate(p, sd, sl, tp, hold, cs, si, ei) for sd in seeds]
+            days, mat = fast.daily_returns_matrix(gen.prepared, trs, start, end)
+            acc = mat if acc is None else acc + mat
+            ntr[c0:c0 + len(seeds)] += np.array([len(t.net_ret) for t in trs], dtype=np.int64)
+        srs[c0:c0 + len(seeds)] = weighted_sharpe_rows(acc / len(gens), days, half_life_days)
+
+    def by(k):
+        return {sym: v.get(k) for sym, v in per.items()}
+    return {"sharpe_w": srs, "n_trades": ntr, "p": by("p"), "p_signal_rate": by("p_signal_rate"),
+            "n_entry_bars": by("n_entry_bars"), "n_filter_bars": by("n_filter_bars"),
+            "calibration": calibration,
+            **({"calibration_probe_trades": by("calibration_probe_trades"), "target_trades": by("target_trades")}
+               if calibration == "trade_count" else {}),
+            "n_seeds": int(n_seeds), "tf_min": int(tf_min), "atr_bars": atr_bars, "seed0": int(seed0),
+            "n_trades_median": float(np.median(ntr)) if n_seeds else 0.0,
+            "sharpe_w_p95": float(np.percentile(srs, 95)) if n_seeds else float("nan"),
+            "sharpe_w_median": float(np.median(srs)) if n_seeds else float("nan"),
+            "universe": [sv["symbol"] for sv in sleeves], "per_asset": per,
+            "null_rule": "per-asset random entry (same filters/exits, per-asset p calibrated to that asset's trade "
+                         "count), same seed on every sleeve, portfolio = mean of sleeve daily returns"}
+
+
 __all__ = ["weighted_sharpe_rows", "calibrated_rate", "RandomEntryNull", "calibrate_p_to_trades",
-           "null_distribution"]
+           "null_distribution", "null_distribution_universe"]

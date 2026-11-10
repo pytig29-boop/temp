@@ -266,3 +266,63 @@ def test_beta_probe_grid_and_summary():
     assert s["all"]["n"] == 3 and s["dev_ret_pos"]["n"] == 2 and s["dev_ret_pos_filtered"]["n"] == 1
     assert s["dev_ret_pos"]["regime_current"][0] == 1 and s["dev_ret_pos"]["regime_info"][0] == 2
     assert s["dev_ret_pos"]["alpha_regime_info"][0] == 1 and s["dev_ret_pos"]["g2_alpha_regime_dom_alpha"][0] == 1
+
+
+# ---------------------------------------------------------------- Val 길이·저회전 (기본 꺼짐 선택지)
+def test_val_months_layout_is_opt_in_and_pairs_markets():
+    L = C.FULL_LAYOUT
+    assert round(L.val_months) == 6                               # 기본 = 실제 분할 그대로
+    L12 = L.with_val_months(12)
+    assert (L12.val_start, L12.val_end, L12.data_start, L12.dev_start) == ("2025-05-01", L.val_end, L.data_start,
+                                                                           L.dev_start)
+    assert round(L12.val_months) == 12 and abs((L.dev_years - L12.dev_years) - 0.5) < 0.01   # Dev 가 그만큼 짧아짐
+    nxt = L.with_val_months(6, "2026-11-01")
+    assert nxt.val_start == "2026-05-01" and pd.Timestamp(nxt.lockbox_end) > pd.Timestamp(nxt.val_end)
+    sp = nxt.splits()["segments"]
+    assert sp["dev"]["end"] == sp["val"]["start"] and sp["val"]["end"] == sp["lockbox"]["start"]
+    import pytest
+    with pytest.raises(ValueError, match="Dev"):
+        L.with_val_months(64)
+    with pytest.raises(ValueError, match="val-months"):
+        C.apply_overrides(C.quick_config(), val_end="2026-11-01")
+    # 기본(0/None) = 아무것도 바꾸지 않음
+    base = C.full_config(jobs=1)
+    same = C.apply_overrides(C.full_config(jobs=1))
+    assert same.to_record() == base.to_record()
+    # Val 6 vs 12: 같은 seed·같은 데이터 구간 → 같은 시장(짝 비교), 분할만 다름
+    a = C.apply_overrides(C.low_config(jobs=1), 6, "2026-11-01", markets=2, strengths=(0.0, 2.0))
+    b = C.apply_overrides(C.low_config(jobs=1), 12, "2026-11-01", markets=2, strengths=(0.0, 2.0))
+    k_for = {0.0: 0.0, 2.0: 0.005}
+    ta, tb = C.build_tasks(a, k_for), C.build_tasks(b, k_for)
+    assert [(t["seed"], t["k"], t["kind"]) for t in ta] == [(t["seed"], t["k"], t["kind"]) for t in tb] and len(ta) == 4
+    la, lb = C.Layout(**ta[0]["layout"]), C.Layout(**tb[0]["layout"])
+    assert (la.data_start, la.val_end) == (lb.data_start, lb.val_end) and la.val_start != lb.val_start
+    assert a.mode.endswith("val6m") and b.mode.endswith("val12m") and not a.decay_grids
+
+
+def test_low_turnover_scenarios():
+    from btc_quant.research.campaign import CampaignTemplate, prepare_m1
+    for sc, grid in (("5m_low", "l12"), ("5m_vlow", "v12")):
+        cfg = C.low_config(jobs=1, scenario=sc)
+        assert cfg.grid == grid and cfg.scenario == sc
+        tpl = CampaignTemplate.from_dict(C.template_for(grid, f"t_{grid}"))
+        assert tpl.n_specs() == 12
+        star = C.scenario_spec(sc)
+        ex = star.exit
+        s = tpl.make_spec(star.entry, (), ex.stop_loss_pct, ex.take_profit_pct, ex.max_hold_min)
+        assert s.logic_hash() in {x.logic_hash() for x in tpl.enumerate()}
+        assert C.plant_params(sc) == C.LOW_SCENARIOS[sc]
+    # 기존 시나리오의 시장 생성은 그대로 (gen_scenario_market = gen_market)
+    pd.testing.assert_frame_equal(C.gen_scenario_market("2023-01-01", "2023-01-03", 9, 0.0),
+                                  C.gen_market("2023-01-01", "2023-01-03", seed=9))
+    s, e = pd.Timestamp("2023-01-04", tz="UTC"), pd.Timestamp("2024-01-01", tz="UTC")
+    null = prepare_m1(C.gen_scenario_market("2023-01-01", "2024-01-01", 5, 0.0, "5m_low"))
+    plant = prepare_m1(C.gen_scenario_market("2023-01-01", "2024-01-01", 5, 0.02, "5m_low"))
+    a = C.planted_stats(null, s, e, C.PLANTED_SPEC_LOW)
+    b = C.planted_stats(plant, s, e, C.PLANTED_SPEC_LOW)
+    assert b["sharpe"] > a["sharpe"] + 2 and 0.1 < b["trades_per_day"] <= 1.0
+    # 평균 중립: 심은 시장의 B&H 연 로그 드리프트가 귀무와 크게 다르지 않다 (긴 보유 드리프트가 B&H 를 폭주시키지 않음)
+    drift = lambda m: float(np.log(m["close"].iloc[-1] / m["close"].iloc[0]))  # noqa: E731
+    assert abs(drift(plant) - drift(null)) < 1.0
+    v = prepare_m1(C.gen_scenario_market("2023-01-01", "2024-01-01", 5, 0.02, "5m_vlow"))
+    assert C.planted_stats(v, s, e, C.PLANTED_SPEC_VLOW)["trades_per_day"] <= 0.34

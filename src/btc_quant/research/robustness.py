@@ -554,3 +554,187 @@ def robustness_for_spec(spec, env=None, segment: str = "dev", exchange: str = "c
     out = robustness_suite(spec, m1, start, end, c, other_m1=other, other_venue=other_exchange)
     out.update(segment=segment, exchange=exchange)
     return out
+
+
+# ============================================================== 다자산 유니버스 (PLAN D15)
+def _combine(dailies: list[pd.Series]) -> pd.Series:
+    from .universe import combine_daily
+    return combine_daily(dailies)
+
+
+def robustness_suite_universe(spec, m1s: dict[str, pd.DataFrame], start, end,
+                              cost: CostModel = COINONE_CONSERVATIVE, *,
+                              other_m1s: dict[str, pd.DataFrame | None] | None = None,
+                              other_venue: str | None = None, ctxs: dict | None = None,
+                              checks: tuple[str, ...] = CHECKS, thresholds: dict | None = None,
+                              half_life_days: float = 365, costs: dict[str, CostModel] | None = None) -> dict:
+    """다자산 유니버스 스펙의 견고성 묶음: 자산(슬리브)마다 같은 방식으로 흔든 뒤 슬리브 일간 수익을 평균한
+    포트폴리오로 판정한다 (기준·판정 규칙은 단일 자산과 같다).
+
+    - latency/cost: 슬리브마다 지연·비용 배수로 재실행 → 포트폴리오 Sharpe.
+    - outliers: 풀링한 거래 중 순수익 상위 1%·상위 5건을 0 으로 (어느 자산 거래든) → 포트폴리오 Sharpe.
+    - leave_year_out: 포트폴리오 일간 수익.
+    - regime/alpha: '시장' = 동일 비중 유니버스 지수(`universe.market_index_close`), 노출 = 슬리브 평균 보유 비율.
+    - cross_venue: 자산마다 다른 거래소(예: 업비트 같은 심볼) 데이터로 재실행 → 다른 거래소 데이터가 있는 자산들의
+      포트폴리오(대상도 같은 자산 부분집합)로 비교. 자산별 Sharpe·상관은 `per_asset` 에 보고. 데이터가 없는 자산은
+      `missing` 에 남기고, 하나도 없으면 skipped.
+    costs: 슬리브별 비용 모델(자산별 모델이 있을 때, 없으면 모두 cost). 비용 배수 검사는 슬리브 비용마다 같은 배수.
+    반환 형식은 `run_suite` 와 같다(+ universe, per_asset base)."""
+    from .universe import market_index_close
+    th = load_thresholds(thresholds)
+    unknown = set(checks) - set(CHECKS)
+    if unknown:
+        raise ValueError(f"unknown checks {sorted(unknown)}")
+    syms = list(m1s)
+    ctxs = ctxs or {}
+    cands = {s: Candidate.from_spec(spec, ctxs.get(s)) for s in syms}
+    engs = {s: _Engine(cands[s], m1s[s], start, end) for s in syms}
+    sc = {s: (costs or {}).get(s) or cost for s in syms}
+    base = {s: engs[s].run(sc[s]) for s in syms}
+    bdaily = _combine([base[s].daily for s in syms])
+    sr0 = _sr(bdaily)
+    bar = cands[syms[0]].bar_minutes
+    res: dict[str, dict] = {}
+    if "latency" in checks:
+        delays = sorted({*(int(x) for x in th["latency_delays_min"]), bar} | ({bar + 1} if bar > 1 else set()))
+        rows = []
+        for d in delays:
+            runs = {s: engs[s].run(sc[s], delay=d) for s in syms}
+            sr = _sr(_combine([runs[s].daily for s in syms]))
+            nets = np.concatenate([runs[s].tr.net_ret for s in syms])
+            rows.append({"delay_min": d, "sharpe": sr, "retention": _ratio(sr, sr0), "n_trades": int(nets.size),
+                         "mean_net_ret": float(nets.mean()) if nets.size else 0.0})
+        if sr0 <= 0:
+            res["latency"] = {"passed": False, "base_sharpe": sr0, "scenarios": rows, "reason": "base Sharpe <= 0"}
+        else:
+            worst = min(r["retention"] for r in rows)
+            res["latency"] = {"passed": bool(worst >= th["latency_min_retention"]), "base_sharpe": sr0,
+                              "min_retention": worst, "scenarios": rows,
+                              "note": "every sleeve delayed; portfolio = mean of sleeve daily returns"}
+    if "outliers" in checks:
+        tags = np.concatenate([np.full(len(base[s].tr.net_ret), i) for i, s in enumerate(syms)])
+        net = np.concatenate([base[s].tr.net_ret for s in syms])
+        pos = np.concatenate([np.arange(len(base[s].tr.net_ret)) for s in syms])
+        n = int(net.size)
+        if n == 0:
+            res["outliers"] = {"passed": False, "reason": "no trades"}
+        else:
+            order = np.argsort(-net, kind="stable")
+            rows = []
+            for label, k in (("top_1pct", max(1, math.ceil(th["outlier_top_frac"] * n))),
+                             (f"top_{int(th['outlier_top_n'])}", int(th["outlier_top_n"]))):
+                k = min(k, n)
+                drop = order[:k]
+                dailies = []
+                for i, s in enumerate(syms):
+                    keep = np.ones(len(base[s].tr.net_ret), dtype=bool)
+                    keep[pos[drop[tags[drop] == i]]] = False
+                    dailies.append(engs[s].daily(_subset(base[s].tr, keep)))
+                d = _combine(dailies)
+                rows.append({"removed": label, "k": int(k), "sharpe": _sr(d),
+                             "total_return": float(np.prod(1 + d.to_numpy()) - 1),
+                             "removed_assets": {s: int((tags[drop] == i).sum()) for i, s in enumerate(syms)},
+                             "removed_pnl_share": float(net[drop].sum() / net.sum()) if net.sum() > 0
+                             else float("nan")})
+            res["outliers"] = {"passed": bool(all(r["sharpe"] > 0 for r in rows)), "base_sharpe": sr0,
+                               "n_trades": n, "removals": rows}
+    if "leave_year_out" in checks:
+        res["leave_year_out"] = check_leave_year_out(_Run(None, bdaily), th)
+    if "cost" in checks:
+        rows = [{"mult": 1.0, "cost": cost.name, "sharpe": sr0}]
+        mults = [float(m) for m in th["cost_mults"]]
+        pass_mult = float(th["cost_pass_mult"])
+        if pass_mult not in mults and pass_mult != 1.0:
+            mults = sorted({*mults, pass_mult})
+        for m in mults:
+            c = scale_cost(cost, m)
+            d = _combine([engs[s].run(scale_cost(sc[s], m)).daily for s in syms])
+            rows.append({"mult": m, "cost": c.name, "sharpe": _sr(d), "total_return": float(np.prod(1 + d.to_numpy()) - 1)})
+        at = next(r for r in rows if r["mult"] == pass_mult)
+        res["cost"] = {"passed": bool(at["sharpe"] > 0), "scenarios": rows,
+                       "round_trip_bps_base": 2e4 * cost.side_cost + 2e4 * cost.fee_rate}
+    if "regime" in checks or "alpha" in checks:
+        days = bdaily.index
+        mkt = pd.DataFrame({"close": market_index_close({s: m1s[s]["close"] for s in syms})})
+        lab = regime_labels(mkt, days, int(th["regime_lookback_days"]))
+        mret = lab["btc_ret"].to_numpy(float)
+        expo = np.mean([_day_exposure(engs[s], base[s].tr, days) for s in syms], axis=0)
+        if "regime" in checks:
+            ex_days = [pd.DatetimeIndex(engs[s].p.index[base[s].tr.exit_idx]).floor("D") for s in syms
+                       if len(base[s].tr.exit_idx)]
+            exit_days = (ex_days[0].append(ex_days[1:]).sort_values() if ex_days
+                         else pd.DatetimeIndex([], tz=days.tz))
+            out = {}
+            for dim in ("trend", "vol"):
+                t = _regime_table(bdaily, lab[dim], exit_days, mret, expo)
+                t["flag"] = regime_dim_flag(t, th)
+                out[dim] = t
+            mode = str(th.get("regime_mode", REGIME_MODE))
+            res["regime"] = {"passed": regime_verdict(out, th), **out, "mode": mode,
+                             "note": "market = equal-weight universe index; terciles of causal trailing-"
+                                     f"{int(th['regime_lookback_days'])}d features; 'na' = warm-up days"}
+            if mode == "informational":
+                res["regime"]["informational"] = True
+        if "alpha" in checks:
+            y = bdaily.to_numpy(float)
+            ok = np.isfinite(mret)
+            if ok.sum() < 30:
+                res["alpha"] = {"passed": None, "reason": "< 30 days with market returns"}
+            else:
+                y, x = y[ok], mret[ok]
+                b, se = _ols_nw(y, x, int(th["alpha_nw_lags"]))
+                t_a = float(b[0] / se[0]) if se[0] > 0 else 0.0
+                e0 = engs[syms[0]]
+                minutes_total = max((e0.e - e0.s).total_seconds() / 60, 1.0)
+                exposure = float(sum(np.sum(base[s].tr.hold_min) for s in syms) / (minutes_total * len(syms)))
+                bh_matched = exposure * x
+                res["alpha"] = {"passed": bool(t_a >= th["alpha_min_tstat"]), "alpha_daily": float(b[0]),
+                                "alpha_annual": float(b[0] * M.ANN), "alpha_t": t_a, "beta": float(b[1]),
+                                "beta_t": float(b[1] / se[1]) if se[1] > 0 else 0.0, "n_days": int(ok.sum()),
+                                "exposure": exposure, "strategy_mean_annual": float(y.mean() * M.ANN),
+                                "matched_bh_mean_annual": float(bh_matched.mean() * M.ANN),
+                                "excess_vs_matched_bh_annual": float((y.mean() - bh_matched.mean()) * M.ANN),
+                                "market_sharpe": _sr(x), "strategy_sharpe": _sr(y),
+                                "market": "equal-weight universe index"}
+    if "cross_venue" in checks:
+        others = {s: o for s, o in (other_m1s or {}).items() if o is not None and len(o)}
+        avail = [s for s in syms if s in others]
+        if not avail:
+            res["cross_venue"] = {"passed": None, "reason": "no other-venue data", "other_venue": other_venue,
+                                  "missing": syms}
+        else:
+            per, od = {}, []
+            for s in avail:
+                r = _Engine(cands[s], others[s], start, end).run(sc[s])
+                od.append(r.daily)
+                a, b = base[s].daily.align(r.daily, join="inner")
+                per[s] = {"sharpe_target": _sr(base[s].daily), "sharpe_other": _sr(r.daily),
+                          "n_trades_target": len(base[s].tr.net_ret), "n_trades_other": len(r.tr.net_ret),
+                          "daily_corr": float(np.corrcoef(a, b)[0, 1]) if len(a) > 2 and a.std() > 0
+                          and b.std() > 0 else float("nan")}
+            tgt = _combine([base[s].daily for s in avail])
+            oth = _combine(od)
+            s0, s1 = _sr(tgt), _sr(oth)
+            ratio = _ratio(s1, s0)
+            res["cross_venue"] = {"passed": bool(s0 > 0 and s1 > 0 and ratio >= th["cross_venue_min_ratio"]),
+                                  "other_venue": other_venue, "sharpe_target": s0, "sharpe_other": s1,
+                                  "ratio": ratio, "same_sign": bool(np.sign(s0) == np.sign(s1)),
+                                  "assets": avail, "missing": [s for s in syms if s not in avail],
+                                  "per_asset": per, "cost": cost.name}
+    failed = [k for k, v in res.items() if v["passed"] is False]
+    skipped = [k for k, v in res.items() if v["passed"] is None]
+    passed = not failed
+    ws = M.weighted_sharpe(bdaily, half_life_days)
+    e0 = engs[syms[0]]
+    return {
+        "candidate": spec.id, "start": e0.s.isoformat(), "end": e0.e.isoformat(), "cost": cost.name,
+        "universe": syms,
+        "base": {"sharpe": sr0, "sharpe_w": ws.sharpe, "n_trades": int(sum(len(base[s].tr.net_ret) for s in syms)),
+                 "n_days": len(bdaily), "total_return": float(np.prod(1 + bdaily.to_numpy()) - 1),
+                 "per_asset": {s: {"sharpe": _sr(base[s].daily), "n_trades": len(base[s].tr.net_ret)} for s in syms}},
+        "checks": res, "failed": failed, "skipped": skipped, "passed": bool(passed),
+        "verdict": ("robust" if passed and not skipped else
+                    f"robust on available checks (skipped: {', '.join(skipped)})" if passed else
+                    f"fragile: failed {', '.join(failed)}"),
+        "thresholds": th,
+    }

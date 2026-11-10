@@ -298,7 +298,7 @@ def drawdown_episodes(daily, n: int = BH_N_EPISODES) -> list[dict]:
 
 def benchmark_metrics(daily: pd.Series, trades: pd.DataFrame | None, bh_daily: pd.Series | None,
                       regime_lookback_days: int = BH_REGIME_LOOKBACK_DAYS, n_episodes: int = BH_N_EPISODES,
-                      neutral_exposure: float = NEUTRAL_EXPOSURE) -> dict:
+                      neutral_exposure: float = NEUTRAL_EXPOSURE, n_sleeves: int = 1) -> dict:
     """전략 일간 수익 vs 같은 기간 BTC 매수보유 (정보 전용 — 어떤 관문도 이것으로 판정하지 않는다;
     단 G4/G6 exposure_aware 변형(기본 OFF)은 exposure_days·bh_total_return·bh_max_dd 를 읽는다).
 
@@ -311,7 +311,10 @@ def benchmark_metrics(daily: pd.Series, trades: pd.DataFrame | None, bh_daily: p
       up_regime_return / down_regime_return / up_regime_capture / down_regime_capture
         (국면 = 직전 regime_lookback_days 일 BTC 수익 부호, 전일 종가까지 — 인과),
       bh_dd{i}_depth / bh_dd{i}_start / bh_dd{i}_end / bh_dd{i}_strategy_return (B&H 최악 낙폭 구간 i 동안
-        전략 복리 수익), worst_bh_dd_strategy_return (가장 깊은 구간의 전략 수익)."""
+        전략 복리 수익), worst_bh_dd_strategy_return (가장 깊은 구간의 전략 수익).
+
+    n_sleeves (다자산 유니버스, PLAN D15): 거래 목록이 N 개 동일 슬리브의 합이면 exposure_time = 보유 분 합 /
+    (일수 × 1440 × N) = 슬리브 평균 노출 시간. days_in_market 은 '어느 슬리브든 보유한 날'. 기본 1 = 이전과 같다."""
     s = pd.Series(daily).dropna().astype(float)
     n = s.size
     x = s.to_numpy()
@@ -319,7 +322,7 @@ def benchmark_metrics(daily: pd.Series, trades: pd.DataFrame | None, bh_daily: p
     idx = s.index if isinstance(s.index, pd.DatetimeIndex) else None
     inm = days_in_market(trades, idx) if idx is not None else np.zeros(n, dtype=bool)
     hold = float(trades["hold_min"].astype(float).sum()) if trades is not None and len(trades) else 0.0
-    out["exposure_time"] = float(min(1.0, hold / (n * 1440.0))) if n else 0.0
+    out["exposure_time"] = float(min(1.0, hold / (n * 1440.0 * max(int(n_sleeves), 1)))) if n else 0.0
     out["days_in_market"] = int(inm.sum())
     out["exposure_days"] = float(inm.mean()) if n else 0.0
     out["downside_dev"] = float(np.sqrt(np.mean(np.minimum(x, 0.0) ** 2)) * np.sqrt(ANN)) if n else 0.0
@@ -390,7 +393,7 @@ def recent(daily: pd.Series, days: int = RECENT_DAYS) -> pd.Series:
 
 
 def summarize(result, half_life_days: float = 365, benchmark: pd.Series | None = None,
-              neutral_exposure: float = NEUTRAL_EXPOSURE) -> dict:
+              neutral_exposure: float = NEUTRAL_EXPOSURE, n_sleeves: int | None = None) -> dict:
     """BacktestResult → 평탄 dict (관문 입력). 낙폭은 양수 크기.
 
     키: n_days, sharpe, sharpe_w, mean_w, std_w, n_eff, mean_daily, std_daily, skew,
@@ -400,6 +403,8 @@ def summarize(result, half_life_days: float = 365, benchmark: pd.Series | None =
     + 노출·B&H 기준 (`benchmark_metrics`, 정보 전용): exposure_time, exposure_days, days_in_market, downside_dev,
     rolling_n_neutral/active, rolling_frac_positive_active, rolling_neutral_exposure, 그리고 benchmark(같은
     일자의 BTC 매수보유 일간 수익, `buy_hold_daily`)가 주어지면 bh_* · capture · 낙폭 구간 키.
+    n_sleeves: 다자산 포트폴리오 결과(`research.universe.PortfolioResult`)면 슬리브 수 (None = result.n_sleeves 또는 1).
+    거래 통계(n_trades·expectancy 등)는 풀링한 거래 목록, Sharpe·낙폭은 포트폴리오 일간 수익 기준.
     """
     s = pd.Series(result.daily_returns).dropna().astype(float)
     x = s.to_numpy()
@@ -445,7 +450,8 @@ def summarize(result, half_life_days: float = 365, benchmark: pd.Series | None =
     else:
         out["recent_n_trades"] = 0
     out["rolling_frac_positive"], out["rolling_n_windows"] = rolling_positive_fraction(s)
-    out.update(benchmark_metrics(s, trades, benchmark, neutral_exposure=neutral_exposure))
+    ns = int(n_sleeves if n_sleeves is not None else (getattr(result, "n_sleeves", 1) or 1))
+    out.update(benchmark_metrics(s, trades, benchmark, neutral_exposure=neutral_exposure, n_sleeves=ns))
     if isinstance(s.index, pd.DatetimeIndex) and n:
         for y, row in yearly_table(s, trades).iterrows():
             out[f"sharpe_year_{y}"] = float(row["sharpe"])

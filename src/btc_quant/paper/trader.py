@@ -14,6 +14,11 @@
 
 기록: <out_dir>/{decisions,fills,trades,risk}.jsonl, state.json(엔진·자산 상태), risk.json(RiskManager).
 시각은 모두 UTC ISO. 결정·리스크 판단의 `now` 는 봉 논리 시각(재생 시 결정적)이다.
+
+다자산 스펙(PLAN D15): 서비스가 자산(슬리브)마다 트레이더 하나(초기 자산 = 명목 금액/N, 슬리브 리스크 한도)를 만들고
+같은 `SleeveGroup`(포트폴리오 리스크 한도 = 슬리브 자산 합계 기준)에 묶는다. 슬리브는 자기 한도와 포트폴리오 한도를
+모두 통과해야 진입하고, 포트폴리오 사람 정지(누적 낙폭 등)·청산 스위치는 모든 슬리브를 청산한다. 엔진 의미론은
+슬리브마다 백테스트와 같다(같은 스펙·같은 자산 1분봉 → 같은 거래).
 """
 from __future__ import annotations
 
@@ -118,6 +123,55 @@ def evaluate_signals(spec: StrategySpec, m1_window: pd.DataFrame, bar: pd.Timest
     return out
 
 
+class SleeveGroup:
+    """다자산 스펙 하나의 슬리브 묶음 — 포트폴리오 리스크 한도 (PLAN D15).
+
+    risk: 포트폴리오 RiskManager (한도 = 전략 risk.yaml `limits`, 자산 = 슬리브 평가자산 합계). 슬리브가 봉마다
+    `on_sleeve_equity` 로 자기 평가자산을 알리고, 모든 슬리브 값이 모이면 합계로 일/주/낙폭 한도를 판정한다.
+    진입 체결은 `on_entry` 로 포트폴리오 거래 수(하루 거래 한도)에 센다. 시세 수신은 슬리브 갱신 시각으로 둔다
+    (자산별 데이터 지연·참조가 괴리는 각 슬리브 RiskManager 가 판정)."""
+
+    def __init__(self, key: str, risk: RiskManager, sleeve_keys: list[str], path: Path | None = None):
+        self.key, self.risk = key, risk
+        self.sleeve_keys = list(sleeve_keys)
+        self.equity: dict[str, float] = {}
+        self.path = Path(path) if path is not None else None
+
+    @property
+    def n_sleeves(self) -> int:
+        return len(self.sleeve_keys)
+
+    def on_sleeve_equity(self, sleeve_key: str, equity: float, now: datetime) -> None:
+        self.equity[sleeve_key] = float(equity)
+        self.risk.on_market_data(now)
+        if all(k in self.equity for k in self.sleeve_keys):
+            self.risk.on_equity(now, sum(self.equity[k] for k in self.sleeve_keys))
+
+    def on_entry(self, now: datetime) -> None:
+        self.risk.on_fill(now, "buy", 0.0, 0.0, fee=None)
+
+    def can_enter(self, now: datetime) -> tuple[bool, str]:
+        """데이터 지연(stale_data)은 자산별(슬리브 RiskManager)로만 판정 — 포트폴리오는 손익·거래 수·킬스위치."""
+        reasons = [r for r in self.risk.status(now)["reasons"] if r["code"] != "stale_data"]
+        if reasons:
+            return False, f"portfolio {reasons[0]['code']}: {reasons[0]['reason']}"
+        return True, "ok"
+
+    def should_flatten(self, now: datetime) -> tuple[bool, str]:
+        flat, why = self.risk.should_flatten(now)
+        return flat, ("ok" if not flat else f"portfolio {why}")
+
+    def status(self, now: datetime) -> dict:
+        st = self.risk.status(now)
+        return {"key": self.key, "sleeves": self.sleeve_keys, "equity": sum(self.equity.values()) if self.equity
+                else None, "halt_level": st["level"], "halt_reasons": st["reasons"],
+                "daily_return": st["daily_return"], "drawdown": st["drawdown"], "trades_today": st["trades_today"]}
+
+    def save(self) -> None:
+        if self.path is not None:
+            self.risk.save(self.path)
+
+
 class PaperTrader:
     def __init__(self, spec: StrategySpec, cost: CostModel, risk: RiskManager, grade: str = "B", *,
                  key: str | None = None, out_dir: str | Path | None = None,
@@ -125,7 +179,8 @@ class PaperTrader:
                  start: pd.Timestamp | None = None, registry: Registry = REGISTRY,
                  ctx: Context | None = None, conservative: CostModel = COINONE_CONSERVATIVE,
                  aux_hist: dict[str, M1History] | None = None,
-                 clock=time.time, persist: bool = True):
+                 clock=time.time, persist: bool = True, group: SleeveGroup | None = None,
+                 symbol: str | None = None):
         if grade not in ("A", "B"):
             raise ValueError("grade must be A or B")
         spec.validate(registry)
@@ -158,6 +213,8 @@ class PaperTrader:
         self.last_decision: dict | None = None
         self.n_trades = 0
         self.n_decisions = 0
+        self.group = group                           # 다자산 슬리브: 포트폴리오 리스크 묶음 (D15)
+        self.symbol = symbol                         # 이 트레이더의 자산 (None = 단일 자산 BTC-KRW)
         if self.out_dir is not None:
             self.out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -264,9 +321,13 @@ class PaperTrader:
             self.risk.on_market_data(_dt(t_close), price=bar.close)
         if self.engine.position is not None:      # 무포지션이면 자산 불변 (청산 시 on_trade_closed 가 갱신)
             self.risk.on_equity(_dt(t_close), self.mark_equity(bar.close))
+        if self.group is not None:                # 포트폴리오 한도: 슬리브 평가자산 합계
+            self.group.on_sleeve_equity(self.key, self.mark_equity(bar.close), _dt(t_close))
         self.last_ts = ts
 
         flat, why = self.risk.should_flatten(_dt(t_close))
+        if not flat and self.group is not None:
+            flat, why = self.group.should_flatten(_dt(t_close))
         if flat and self.engine.position is not None:
             self.pending_flatten = why
             self._log("risk", {"type": "flatten_pending", "ts": t_close, "reason": why})
@@ -295,6 +356,8 @@ class PaperTrader:
             aux_m1 = {k: self.aux_hist[k].frame(lo, ts_minute(t - ONE_MIN)) for k in self.aux_keys}
         sig = evaluate_signals(self.spec, win, bar, self.registry, self.ctx, aux_m1)
         ok, why = self.risk.can_enter(_dt(t))
+        if ok and self.group is not None:
+            ok, why = self.group.can_enter(_dt(t))
         pos = self.engine.position is not None
         cooldown = self.engine.cooldown_until is not None and t < self.engine.cooldown_until
         entry_ok = bool(sig["entry_ok"] and ok)
@@ -324,6 +387,8 @@ class PaperTrader:
             self.exit_capture = None
             self.qty = notional / ev.fill_price
             self.risk.on_fill(_dt(ev.ts), "buy", self.qty, ev.fill_price, fee=None)
+            if self.group is not None:
+                self.group.on_entry(_dt(ev.ts))
             rec = {"type": "fill", "side": "buy", "ts": ev.ts, "reason": ev.reason,
                    "ref_price": ev.ref_price, "fill_price": ev.fill_price, "qty": self.qty,
                    "notional": notional, "sl": sl, "tp": tp, "expiry": expiry,

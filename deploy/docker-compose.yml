@@ -24,6 +24,7 @@ services:
       TZ: Asia/Seoul
     command: ["python", "-m", "btc_quant.live", "collect",
               "--exchanges", "${COLLECTOR_EXCHANGES:-coinone,upbit}",
+              "--symbols", "${COLLECTOR_SYMBOLS:-BTC-KRW,XRP-KRW,ETH-KRW}",
               "--ob-interval", "${COLLECTOR_OB_INTERVAL:-1.0}",
               "--stale-seconds", "${COLLECTOR_STALE_SECONDS:-30}",
               "--flush-seconds", "${COLLECTOR_FLUSH_SECONDS:-300}",

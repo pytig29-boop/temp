@@ -35,6 +35,12 @@
              bid_px, bid_qty, ask_px, ask_qty (list<float64>, 최우선→15단계)
   호가는 디스크 보호를 위해 기본 1초당 최대 1개로 샘플링한다(콜백에는 모든 갱신이 전달됨).
 
+다중 심볼 (PLAN D15, 2026-11-10: BTC/XRP/ETH-KRW): `CollectorConfig.symbols` (CLI `--symbols BTC-KRW,XRP-KRW,ETH-KRW`)
+로 한 연결에서 심볼마다 구독(코인원: 심볼별 TRADE·ORDERBOOK 구독 메시지, 업비트: codes 목록). 메시지의 심볼
+(코인원 data.target_currency, 업비트 code)로 행에 `symbol` 을 붙여 리스너에 전달하고, 저장은 심볼별 파티션
+`symbol=<SYM>/...` 로 나눈다(파일 행에는 symbol 열을 쓰지 않음 — 기존 스키마 그대로). 호가 디스크 샘플링도
+(거래소, 심볼)별. 기본(symbols 미지정) = BTC-KRW 하나 → 구독·행·파일이 이전과 같다(행에 symbol 키 없음).
+
 견고성: WS ping + 거래소 앱 레벨 PING, 지수 백오프+지터 재연결, 무수신 N초(stale_seconds) 시
 재연결, 종료 시 버퍼 flush, 하트비트 파일(runtime/collector.heartbeat), 끊김 구간 기록
 (runtime/collector_gaps.jsonl — 추후 REST 백필용).
@@ -100,16 +106,31 @@ class Adapter:
         raise NotImplementedError
 
 
+def _split_symbol(sym: str) -> tuple[str, str]:
+    """BTC-KRW → ("BTC", "KRW")."""
+    a, q = str(sym).upper().split("-")
+    return a, q
+
+
 class CoinoneAdapter(Adapter):
     name = "coinone"
     url = "wss://stream.coinone.co.kr"
 
-    def __init__(self, quote: str = "KRW", target: str = "BTC"):
+    def __init__(self, quote: str = "KRW", target: str = "BTC", symbols: Iterable[str] | None = None):
         self.topic = {"quote_currency": quote, "target_currency": target}
+        syms = tuple(symbols) if symbols else (f"{target}-{quote}",)
+        self.symbols = syms
+        self.multi = len(syms) > 1
+        self.topics = [{"quote_currency": _split_symbol(x)[1], "target_currency": _split_symbol(x)[0]} for x in syms]
 
     def subscribe_messages(self) -> list[str]:
-        return [json.dumps({"request_type": "SUBSCRIBE", "channel": ch, "topic": self.topic})
-                for ch in ("TRADE", "ORDERBOOK")]
+        return [json.dumps({"request_type": "SUBSCRIBE", "channel": ch, "topic": t})
+                for t in self.topics for ch in ("TRADE", "ORDERBOOK")]
+
+    def _tag(self, d: dict, row: dict) -> dict:
+        if self.multi:
+            row["symbol"] = f"{str(d.get('target_currency', '')).upper()}-{str(d.get('quote_currency', 'KRW')).upper()}"
+        return row
 
     def app_ping(self) -> str | None:
         return json.dumps({"request_type": "PING"})
@@ -124,17 +145,17 @@ class CoinoneAdapter(Adapter):
         d = m.get("data") or {}
         ch = m.get("channel")
         if ch == "TRADE":
-            return [("trades", {
+            return [("trades", self._tag(d, {
                 "ts_exchange": int(d["timestamp"]), "ts_recv": ts_recv,
                 "price": float(d["price"]), "qty": float(d["qty"]),
                 "side": "buy" if d.get("is_seller_maker") else "sell",
                 "trade_id": str(d.get("id", "")),
-            })]
+            }))]
         if ch == "ORDERBOOK":
             row = _book_row(int(d["timestamp"]), ts_recv,
                             [(float(x["price"]), float(x["qty"])) for x in d.get("bids", [])],
                             [(float(x["price"]), float(x["qty"])) for x in d.get("asks", [])])
-            return [("orderbook", row)] if row else []
+            return [("orderbook", self._tag(d, row))] if row else []
         return []
 
 
@@ -143,14 +164,25 @@ class UpbitAdapter(Adapter):
     url = "wss://api.upbit.com/websocket/v1"
     app_ping_interval = 60.0  # 서버 유휴 타임아웃 120초보다 짧게
 
-    def __init__(self, market: str = "KRW-BTC"):
+    def __init__(self, market: str = "KRW-BTC", symbols: Iterable[str] | None = None):
         self.market = market
+        if symbols:
+            self.markets = [f"{_split_symbol(x)[1]}-{_split_symbol(x)[0]}" for x in symbols]
+        else:
+            self.markets = [market]
+        self.multi = len(self.markets) > 1
 
     def subscribe_messages(self) -> list[str]:
         return [json.dumps([{"ticket": f"btc-quant-{uuid.uuid4().hex[:12]}"},
-                            {"type": "trade", "codes": [self.market]},
-                            {"type": "orderbook", "codes": [self.market]},
+                            {"type": "trade", "codes": list(self.markets)},
+                            {"type": "orderbook", "codes": list(self.markets)},
                             {"format": "DEFAULT"}])]
+
+    def _tag(self, m: dict, row: dict) -> dict:
+        if self.multi:
+            q, a = str(m.get("code", "")).upper().split("-") if "-" in str(m.get("code", "")) else ("KRW", "")
+            row["symbol"] = f"{a}-{q}"
+        return row
 
     def app_ping(self) -> str | None:
         return "PING"
@@ -161,18 +193,18 @@ class UpbitAdapter(Adapter):
         if "error" in m:
             raise RuntimeError(f"upbit ws error: {m}")
         if t == "trade":
-            return [("trades", {
+            return [("trades", self._tag(m, {
                 "ts_exchange": int(m["trade_timestamp"]), "ts_recv": ts_recv,
                 "price": float(m["trade_price"]), "qty": float(m["trade_volume"]),
                 "side": "buy" if m.get("ask_bid") == "BID" else "sell",
                 "trade_id": str(m.get("sequential_id", "")),
-            })]
+            }))]
         if t == "orderbook":
             units = m.get("orderbook_units") or []
             row = _book_row(int(m["timestamp"]), ts_recv,
                             [(float(u["bid_price"]), float(u["bid_size"])) for u in units],
                             [(float(u["ask_price"]), float(u["ask_size"])) for u in units])
-            return [("orderbook", row)] if row else []
+            return [("orderbook", self._tag(m, row))] if row else []
         return []  # {"status":"UP"} 등
 
 
@@ -240,8 +272,14 @@ class ParquetSink:
         self._lock = asyncio.Lock()
 
     def add(self, exchange: str, kind: str, row: dict) -> bool:
-        """행 추가. 즉시 flush 가 필요하면 True (시각 변경 또는 행 수 초과)."""
-        key = (exchange, kind)
+        """행 추가. 즉시 flush 가 필요하면 True (시각 변경 또는 행 수 초과).
+        행에 `symbol` 이 있으면(다중 심볼 수집) 그 심볼 파티션으로 보내고 파일에는 symbol 열을 쓰지 않는다."""
+        if "symbol" in row:
+            sym = row["symbol"]
+            row = {k: v for k, v in row.items() if k != "symbol"}
+            key = (exchange, kind) if sym == self.symbol else (exchange, kind, sym)
+        else:
+            key = (exchange, kind)
         hour = int(row["ts_recv"] // 3600)
         b = self.buf.setdefault(key, [])
         b.append(row)
@@ -259,18 +297,20 @@ class ParquetSink:
             bufs, self.buf = self.buf, {}
             self.last_flush = time.monotonic()
             written: list[Path] = []
-            for (ex, kind), rows in bufs.items():
+            for key, rows in bufs.items():
                 if not rows:
                     continue
+                ex, kind = key[0], key[1]
+                sym = key[2] if len(key) > 2 else self.symbol
                 try:
-                    files = await asyncio.to_thread(write_rows, self.root, ex, kind, rows, self.symbol)
+                    files = await asyncio.to_thread(write_rows, self.root, ex, kind, rows, sym)
                 except Exception:
-                    log.exception("parquet write failed (%s/%s, %d rows) — rows re-queued",
-                                  ex, kind, len(rows))
-                    self.buf.setdefault((ex, kind), [])[:0] = rows
+                    log.exception("parquet write failed (%s/%s/%s, %d rows) — rows re-queued",
+                                  ex, kind, sym, len(rows))
+                    self.buf.setdefault(key, [])[:0] = rows
                     continue
                 written += files
-                self.rows_written[(ex, kind)] = self.rows_written.get((ex, kind), 0) + len(rows)
+                self.rows_written[key] = self.rows_written.get(key, 0) + len(rows)
             self.files += written
             return written
 
@@ -304,6 +344,7 @@ class CollectorConfig:
     exchanges: tuple[str, ...] = ("coinone", "upbit")
     root: Path = Path("data/raw")
     symbol: str = SYMBOL
+    symbols: tuple[str, ...] | None = None   # 다중 심볼 (D15). None = (symbol,) — 이전과 같은 단일 심볼 수집
     ob_interval: float = 1.0          # 디스크 기록용 호가 샘플링 간격(초)
     stale_seconds: float = 30.0       # 이 시간 동안 아무 메시지 없으면 재연결
     flush_seconds: float = 300.0
@@ -328,9 +369,15 @@ class Collector:
     def __init__(self, config: CollectorConfig | None = None, notifier: Any = None,
                  adapters: dict[str, Adapter] | None = None, ws_connect: Callable | None = None):
         self.cfg = config or CollectorConfig()
-        self.adapters = adapters or {ex: ADAPTERS[ex]() for ex in self.cfg.exchanges}
+        syms = tuple(self.cfg.symbols) if self.cfg.symbols else None
+        if adapters is None:
+            adapters = {ex: (ADAPTERS[ex](symbols=syms) if syms and len(syms) > 1 else ADAPTERS[ex]())
+                        for ex in self.cfg.exchanges}
+            if syms and len(syms) == 1 and syms[0] != SYMBOL:      # 단일 다른 심볼
+                adapters = {ex: ADAPTERS[ex](symbols=syms) for ex in self.cfg.exchanges}
+        self.adapters = adapters
         self.sink = ParquetSink(self.cfg.root, self.cfg.flush_seconds, self.cfg.flush_rows,
-                                self.cfg.symbol)
+                                syms[0] if syms and len(syms) == 1 else self.cfg.symbol)
         self.stats = {ex: StreamStats() for ex in self.adapters}
         self.notifier = notifier
         self._listeners: list[Callable[[str, str, dict], Any]] = []
@@ -381,10 +428,11 @@ class Collector:
                 except Exception:
                     log.exception("listener failed")
             if kind == "orderbook":
-                last = self._last_ob_saved.get(ex)
+                ob_key = ex if "symbol" not in row else f"{ex}:{row['symbol']}"
+                last = self._last_ob_saved.get(ob_key)
                 if last is not None and ts_recv - last < self.cfg.ob_interval:
                     continue
-                self._last_ob_saved[ex] = ts_recv
+                self._last_ob_saved[ob_key] = ts_recv
             st.saved[kind] = st.saved.get(kind, 0) + 1
             need_flush |= self.sink.add(ex, kind, row)
         if need_flush:
@@ -585,6 +633,18 @@ def check_health(path: Path, max_age: float = 90.0, max_data_age: float = 300.0,
     if bad:
         return False, "data stale: " + ", ".join(bad)
     return True, f"ok (heartbeat {age:.0f}s ago)"
+
+
+def parse_symbols(s: str | Iterable[str] | None) -> tuple[str, ...] | None:
+    """'BTC-KRW,XRP-KRW,ETH-KRW' → 튜플 (빈 값 → None = 기본 BTC-KRW). 형식 XXX-KRW 만 허용."""
+    if s is None:
+        return None
+    items = s.split(",") if isinstance(s, str) else list(s)
+    out = tuple(dict.fromkeys(x.strip().upper() for x in items if x.strip()))
+    bad = [x for x in out if not (len(x.split("-")) == 2 and x.endswith("-KRW"))]
+    if bad:
+        raise ValueError(f"bad symbol(s): {bad}; expected like BTC-KRW")
+    return out or None
 
 
 def parse_exchanges(s: str | Iterable[str]) -> tuple[str, ...]:

@@ -32,8 +32,12 @@
 - 선별 판정(`screen`): 캠페인(+같은 계열의 이전 선별) 신호 p 들에 BH(기본, q=0.10) 또는 Holm 적용,
   기각 & 최소 이벤트 수 & 최적 주 지평에서 primary 비용 순평균 > 0 이면 통과.
 
-공개 API: study_events, study_signal, ScreenTemplate, screen, ScreenResult, render_screen_markdown,
-          hac_se_mean, stratified_draws, decluster, bh_reject.
+다자산 유니버스 (PLAN D15, 템플릿 `universe: [BTC-KRW, XRP-KRW, ETH-KRW]`): 같은 신호 구성을 자산마다 같은 규칙으로
+정의하고 이벤트를 풀링한다(`study_events_pooled`). 귀무는 자산별로 매칭(자산마다 자기 적격 집합·층), 신호 구성
+하나 = 시도 1회. 유니버스를 생략하면 [data.symbol] (기본 BTC-KRW) — 이전과 같은 계산·같은 원장 기록.
+
+공개 API: study_events, study_events_pooled, study_signal, ScreenTemplate, screen, ScreenResult,
+          render_screen_markdown, hac_se_mean, stratified_draws, decluster, bh_reject.
 """
 from __future__ import annotations
 
@@ -282,18 +286,7 @@ def _atr_pct(bars: pd.DataFrame, window: int = ATR_WINDOW) -> np.ndarray:
 
 
 # ============================================================== 핵심: 이벤트 스터디
-def study_events(m1: pd.DataFrame, bars_index: pd.DatetimeIndex, entry, filter_ok, bar_minutes: int,
-                 horizons=DEFAULT_HORIZONS, primary_horizons=DEFAULT_PRIMARY,
-                 cost_round_trip=0.0, n_null: int = DEFAULT_N_NULL, seed: int = 0,
-                 min_gap_min: float = DEFAULT_MIN_GAP_MIN, start=None, end=None,
-                 stratify: str = "hour_vol", atr_pct=None, min_events: int = DEFAULT_MIN_EVENTS) -> dict:
-    """결정 봉 배열 수준의 이벤트 스터디.
-
-    m1: 1분봉(open/high/low/close[, filled]). bars_index: 결정 봉 시작 시각. entry: 진입 bool 배열,
-    filter_ok: 필터 AND & complete bool 배열 (bars_index 와 같은 길이). start/end: 결정 시각 t 범위 [start, end).
-    atr_pct: 결정 봉 ATR/close (제안용, 없으면 제안의 ATR 배수 생략).
-    """
-    t0 = time.time()
+def _validate_study_args(horizons, primary_horizons, stratify):
     horizons = sorted({int(h) for h in horizons})
     primary = sorted({int(h) for h in primary_horizons})
     if not horizons or horizons[0] < 1:
@@ -302,9 +295,13 @@ def study_events(m1: pd.DataFrame, bars_index: pd.DatetimeIndex, entry, filter_o
         raise ValueError(f"primary_horizons must be 1..{MAX_PRIMARY} of horizons {horizons}")
     if stratify not in STRATIFY:
         raise ValueError(f"stratify must be one of {STRATIFY}")
-    costs = normalize_costs(cost_round_trip)
+    return horizons, primary
+
+
+def _event_arrays(m1: pd.DataFrame, bars_index, entry, filter_ok, bm: int, horizons: list[int],
+                  min_gap_min: float, start, end, stratify: str) -> dict:
+    """한 자산의 적격 결정 집합·층·이벤트(군집 제거 후)·지평 수익 F·MFE/MAE (study_events 의 데이터 단계)."""
     m1 = _regular_m1(m1)
-    bm = int(bar_minutes)
     entry = np.asarray(entry, bool)
     filter_ok = np.asarray(filter_ok, bool)
     bidx = pd.DatetimeIndex(bars_index)
@@ -362,52 +359,44 @@ def study_events(m1: pd.DataFrame, bars_index: pd.DatetimeIndex, entry, filter_o
     n = int(ev.size)
     ev_t_min = (pool_t[ev].as_unit("ns").asi8 // 60_000_000_000).astype(float)
     ev_times = pool_t[ev]
+    out = {"m1": m1, "bidx": bidx, "pool": pool, "F": F, "strata": strata, "ev": ev, "n": n,
+           "ev_t_min": ev_t_min, "ev_times": ev_times, "edges": edges,
+           "n_raw_triggers": int(trig_idx.size), "n_pool": len(pool)}
+    if n >= 2:
+        ev_pos = pool_pos[ev]
+        mfe = np.empty((n, len(H)))
+        mae = np.empty((n, len(H)))
+        chunk = max(1, int(4e6 // hmax))
+        ar = np.arange(hmax)
+        for a in range(0, n, chunk):
+            pp = ev_pos[a:a + chunk]
+            win = pp[:, None] + ar[None, :]
+            cmx = np.maximum.accumulate(hi[win], axis=1)
+            cmn = np.minimum.accumulate(lo[win], axis=1)
+            r0 = o[pp][:, None]
+            mfe[a:a + chunk] = cmx[:, H - 1] / r0 - 1.0
+            mae[a:a + chunk] = cmn[:, H - 1] / r0 - 1.0
+        out.update(mfe=mfe, mae=mae)
+    return out
 
-    base = {
-        "bar_minutes": bm, "horizons": horizons, "primary_horizons": primary,
-        "min_gap_min": float(min_gap_min), "n_null": int(n_null), "seed": int(seed),
-        "stratify": stratify, "costs": costs, "n_pool": len(pool),
-        "n_raw_triggers": int(trig_idx.size), "n_events": n,
-        "event_rate": float(trig_idx.size / len(pool)) if len(pool) else 0.0,
-        "first_event": ev_times[0].isoformat() if n else None,
-        "last_event": ev_times[-1].isoformat() if n else None,
-        "vol_tercile_edges": [float(x) for x in edges], "min_events": int(min_events),
-        "enough_events": n >= int(min_events),
-    }
-    if n < 2:
-        rows = [{"horizon": h, "n": n, "mean": float("nan"), "z": float("nan"), "p_value": 1.0}
-                for h in horizons]
-        return {**base, "table": rows, "p_signal": 1.0, "best_primary_horizon": primary[0],
-                "info_horizon": None, "saturation_horizon": None, "profile": "no events",
-                "suggestion": None, "runtime_sec": round(time.time() - t0, 3)}
 
-    # ---- 신호 이벤트 통계
-    Fe = F[ev]                                 # (n × nH)
-    ev_pos = pool_pos[ev]
-    mfe = np.empty((n, len(H)))
-    mae = np.empty((n, len(H)))
-    chunk = max(1, int(4e6 // hmax))
-    ar = np.arange(hmax)
-    for a in range(0, n, chunk):
-        pp = ev_pos[a:a + chunk]
-        win = pp[:, None] + ar[None, :]
-        cmx = np.maximum.accumulate(hi[win], axis=1)
-        cmn = np.minimum.accumulate(lo[win], axis=1)
-        r0 = o[pp][:, None]
-        mfe[a:a + chunk] = cmx[:, H - 1] / r0 - 1.0
-        mae[a:a + chunk] = cmn[:, H - 1] / r0 - 1.0
-
-    # ---- 매칭 귀무
-    rng = np.random.default_rng(seed)
+def _null_means(arr: dict, n_null: int, n_h: int, rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]:
+    """매칭 귀무: 같은 적격 집합에서 이벤트와 같은 층 구성으로 n_null 회 추출 → 지평별 평균 (n_null × nH)."""
+    strata, ev, F = arr["strata"], arr["ev"], arr["F"]
+    n = arr["n"]
     ev_strata = strata[ev]
-    null_means = np.empty((int(n_null), len(H)))
-    bchunk = max(1, int(2e7 // max(n * len(H), 1)))
+    null_means = np.empty((int(n_null), n_h))
+    bchunk = max(1, int(2e7 // max(n * n_h, 1)))
     for b0 in range(0, int(n_null), bchunk):
         b1 = min(int(n_null), b0 + bchunk)
         idx = stratified_draws(strata, ev_strata, b1 - b0, rng)
         null_means[b0:b1] = F[idx].mean(axis=1)
     comp_ev = np.bincount(ev_strata, minlength=int(strata.max()) + 1 if len(strata) else 1)
+    return null_means, comp_ev
 
+
+def _horizon_rows(Fe, ev_t_min, null_means, mfe, mae, horizons, costs, n_null) -> list[dict]:
+    n = Fe.shape[0]
     rows = []
     for j, h in enumerate(horizons):
         x = Fe[:, j]
@@ -440,8 +429,11 @@ def study_events(m1: pd.DataFrame, bars_index: pd.DatetimeIndex, entry, filter_o
             row[f"hit_net[{name}]"] = float((xn > 0).mean())
             row[f"t_net[{name}]"] = float(xn.mean() / se) if se > 0 else 0.0
         rows.append(row)
+    return rows
 
-    # ---- 신호 p (사전등록 주 지평 Bonferroni), 정보 지평
+
+def _signal_summary(rows, horizons, primary, mfe, mae, bm: int, atr_ev) -> dict:
+    """신호 p (주 지평 Bonferroni)·정보 지평·프로필·청산 제안. atr_ev = 이벤트별 결정 봉 ATR/close (없으면 None)."""
     jp = [horizons.index(h) for h in primary]
     pps = [rows[j]["p_value"] for j in jp]
     best_j = jp[int(np.argmin(pps))]
@@ -468,13 +460,8 @@ def study_events(m1: pd.DataFrame, bars_index: pd.DatetimeIndex, entry, filter_o
         sugg = {"max_hold_min": hold, "basis_horizon": info_h,
                 "tp_pct_q50_mfe": float(np.quantile(mfe[:, k], TP_QUANTILE) * 100),
                 "sl_pct_q75_absmae": float(np.quantile(-mae[:, k], SL_QUANTILE) * 100)}
-        if atr_pct is None:      # 결정 봉 ATR 을 1분봉에서 직접 (bars_index 위치에 정렬)
-            db = decision_bars(m1, bm)
-            j = db.index.get_indexer(bidx)
-            atr_all = _atr_pct(db)
-            atr_pct = np.where(j >= 0, atr_all[np.maximum(j, 0)], np.nan)
-        if atr_pct is not None:
-            a = np.asarray(atr_pct, float)[pool[ev]]
+        if atr_ev is not None:
+            a = np.asarray(atr_ev, float)
             good = np.isfinite(a) & (a > 0)
             if good.sum() >= 2:
                 sugg.update({
@@ -482,10 +469,138 @@ def study_events(m1: pd.DataFrame, bars_index: pd.DatetimeIndex, entry, filter_o
                     "tp_atr": float(np.quantile(mfe[good, k] / a[good], TP_QUANTILE)),
                     "sl_atr": float(np.quantile(-mae[good, k] / a[good], SL_QUANTILE))})
         sugg["note"] = "suggestions from MFE/MAE quantiles (not optimized); fix before the exit campaign"
-    return {**base, "table": rows, "p_signal": p_signal, "best_primary_horizon": int(horizons[best_j]),
-            "info_horizon": info_h, "saturation_horizon": sat_h, "profile": profile,
-            "suggestion": sugg,
+    return {"p_signal": p_signal, "best_primary_horizon": int(horizons[best_j]), "info_horizon": info_h,
+            "saturation_horizon": sat_h, "profile": profile, "suggestion": sugg}
+
+
+def _event_atr(arr: dict, atr_pct, bm: int):
+    """이벤트별 결정 봉 ATR 비율 (study_events 와 같은 규칙: 없으면 1분봉에서 결정 봉을 만들어 계산)."""
+    if atr_pct is None:
+        db = decision_bars(arr["m1"], bm)
+        j = db.index.get_indexer(arr["bidx"])
+        atr_all = _atr_pct(db)
+        atr_pct = np.where(j >= 0, atr_all[np.maximum(j, 0)], np.nan)
+    return np.asarray(atr_pct, float)[arr["pool"][arr["ev"]]]
+
+
+def study_events(m1: pd.DataFrame, bars_index: pd.DatetimeIndex, entry, filter_ok, bar_minutes: int,
+                 horizons=DEFAULT_HORIZONS, primary_horizons=DEFAULT_PRIMARY,
+                 cost_round_trip=0.0, n_null: int = DEFAULT_N_NULL, seed: int = 0,
+                 min_gap_min: float = DEFAULT_MIN_GAP_MIN, start=None, end=None,
+                 stratify: str = "hour_vol", atr_pct=None, min_events: int = DEFAULT_MIN_EVENTS) -> dict:
+    """결정 봉 배열 수준의 이벤트 스터디.
+
+    m1: 1분봉(open/high/low/close[, filled]). bars_index: 결정 봉 시작 시각. entry: 진입 bool 배열,
+    filter_ok: 필터 AND & complete bool 배열 (bars_index 와 같은 길이). start/end: 결정 시각 t 범위 [start, end).
+    atr_pct: 결정 봉 ATR/close (제안용, 없으면 제안의 ATR 배수 생략).
+    """
+    t0 = time.time()
+    horizons, primary = _validate_study_args(horizons, primary_horizons, stratify)
+    costs = normalize_costs(cost_round_trip)
+    bm = int(bar_minutes)
+    arr = _event_arrays(m1, bars_index, entry, filter_ok, bm, horizons, min_gap_min, start, end, stratify)
+    n, ev_times = arr["n"], arr["ev_times"]
+    base = {
+        "bar_minutes": bm, "horizons": horizons, "primary_horizons": primary,
+        "min_gap_min": float(min_gap_min), "n_null": int(n_null), "seed": int(seed),
+        "stratify": stratify, "costs": costs, "n_pool": arr["n_pool"],
+        "n_raw_triggers": arr["n_raw_triggers"], "n_events": n,
+        "event_rate": float(arr["n_raw_triggers"] / arr["n_pool"]) if arr["n_pool"] else 0.0,
+        "first_event": ev_times[0].isoformat() if n else None,
+        "last_event": ev_times[-1].isoformat() if n else None,
+        "vol_tercile_edges": [float(x) for x in arr["edges"]], "min_events": int(min_events),
+        "enough_events": n >= int(min_events),
+    }
+    if n < 2:
+        rows = [{"horizon": h, "n": n, "mean": float("nan"), "z": float("nan"), "p_value": 1.0}
+                for h in horizons]
+        return {**base, "table": rows, "p_signal": 1.0, "best_primary_horizon": primary[0],
+                "info_horizon": None, "saturation_horizon": None, "profile": "no events",
+                "suggestion": None, "runtime_sec": round(time.time() - t0, 3)}
+    rng = np.random.default_rng(seed)
+    null_means, comp_ev = _null_means(arr, n_null, len(horizons), rng)
+    rows = _horizon_rows(arr["F"][arr["ev"]], arr["ev_t_min"], null_means, arr["mfe"], arr["mae"], horizons,
+                         costs, n_null)
+    summ = _signal_summary(rows, horizons, primary, arr["mfe"], arr["mae"], bm,
+                           _event_atr(arr, atr_pct, bm))
+    return {**base, "table": rows, **summ,
             "strata_events": {int(g): int(v) for g, v in enumerate(comp_ev) if v},
+            "runtime_sec": round(time.time() - t0, 3)}
+
+
+def study_events_pooled(assets: list[dict], bar_minutes: int, horizons=DEFAULT_HORIZONS,
+                        primary_horizons=DEFAULT_PRIMARY, cost_round_trip=0.0, n_null: int = DEFAULT_N_NULL,
+                        seed: int = 0, min_gap_min: float = DEFAULT_MIN_GAP_MIN, start=None, end=None,
+                        stratify: str = "hour_vol", min_events: int = DEFAULT_MIN_EVENTS) -> dict:
+    """다자산 유니버스(PLAN D15) 풀링 이벤트 스터디 — 같은 신호를 자산마다 같은 규칙으로 정의하고 이벤트를 합친다.
+
+    assets: [{"symbol", "m1", "bars_index", "entry", "filter_ok", "atr_pct"(선택)}].
+    - 적격 집합·층(KST 시 × 그 자산의 변동성 3분위)·군집 제거는 **자산마다** (자산 간 군집 제거 없음).
+    - 귀무는 **자산별 매칭**: 자산 a 의 이벤트 수·층 구성대로 자산 a 의 적격 집합에서 추출(seed 는 자산마다 다름) →
+      풀링 귀무 평균 = Σ_a n_a·귀무평균_a / N (신호 풀링 평균과 같은 가중).
+    - HAC 표준오차는 풀링 이벤트를 시각순으로 놓고 달력 시간 커널을 적용 → 같은 시각의 자산 간 이벤트는 가중 1
+      (자산 간 동시 상관을 같은 자산 안의 겹침처럼 보수적으로 처리).
+    - 신호 p·정보 지평·청산 제안은 풀링 표 기준, 자산별 표·p 는 `per_asset` 에 보고만 한다.
+    선별 판정(BH/Holm·최소 이벤트·순평균)은 풀링 결과로 — 신호 구성 하나 = 시도 1회."""
+    t0 = time.time()
+    horizons, primary = _validate_study_args(horizons, primary_horizons, stratify)
+    costs = normalize_costs(cost_round_trip)
+    bm = int(bar_minutes)
+    arrs, per = [], {}
+    for i, a in enumerate(assets):
+        arr = _event_arrays(a["m1"], a["bars_index"], a["entry"], a["filter_ok"], bm, horizons, min_gap_min,
+                            start, end, stratify)
+        arr["symbol"] = a["symbol"]
+        arr["atr_ev"] = _event_atr(arr, a.get("atr_pct"), bm) if arr["n"] >= 2 else None
+        if arr["n"] >= 2:
+            arr["null_means"], arr["comp_ev"] = _null_means(arr, n_null, len(horizons),
+                                                            np.random.default_rng([int(seed), i]))
+        arrs.append(arr)
+    use = [a for a in arrs if a["n"] >= 2]
+    N = int(sum(a["n"] for a in arrs))
+    n_pool = int(sum(a["n_pool"] for a in arrs))
+    n_raw = int(sum(a["n_raw_triggers"] for a in arrs))
+    all_times = [t for a in arrs for t in a["ev_times"]]
+    base = {
+        "bar_minutes": bm, "horizons": horizons, "primary_horizons": primary,
+        "min_gap_min": float(min_gap_min), "n_null": int(n_null), "seed": int(seed),
+        "stratify": stratify, "costs": costs, "n_pool": n_pool, "n_raw_triggers": n_raw, "n_events": N,
+        "event_rate": float(n_raw / n_pool) if n_pool else 0.0,
+        "first_event": min(all_times).isoformat() if all_times else None,
+        "last_event": max(all_times).isoformat() if all_times else None,
+        "min_events": int(min_events), "enough_events": N >= int(min_events),
+        "universe": [a["symbol"] for a in arrs], "pooling": "events pooled across assets; null matched per asset",
+    }
+    for a in arrs:      # 자산별 (보고 전용)
+        d = {"n_events": a["n"], "n_pool": a["n_pool"], "n_raw_triggers": a["n_raw_triggers"],
+             "vol_tercile_edges": [float(x) for x in a["edges"]]}
+        if a["n"] >= 2:
+            rws = _horizon_rows(a["F"][a["ev"]], a["ev_t_min"], a["null_means"], a["mfe"], a["mae"], horizons,
+                                costs, n_null)
+            sm = _signal_summary(rws, horizons, primary, a["mfe"], a["mae"], bm, None)
+            d.update(p_signal=sm["p_signal"], info_horizon=sm["info_horizon"],
+                     best_primary_horizon=sm["best_primary_horizon"],
+                     table=[{k: r.get(k) for k in ("horizon", "mean", "excess", "z", "p_value")} for r in rws])
+        else:
+            d.update(p_signal=1.0, info_horizon=None, table=[])
+        per[a["symbol"]] = d
+    if N < 2 or not use:
+        rows = [{"horizon": h, "n": N, "mean": float("nan"), "z": float("nan"), "p_value": 1.0} for h in horizons]
+        return {**base, "table": rows, "p_signal": 1.0, "best_primary_horizon": primary[0], "info_horizon": None,
+                "saturation_horizon": None, "profile": "no events", "suggestion": None, "per_asset": per,
+                "runtime_sec": round(time.time() - t0, 3)}
+    t_all = np.concatenate([a["ev_t_min"] for a in use])
+    order = np.argsort(t_all, kind="stable")
+    Fe = np.concatenate([a["F"][a["ev"]] for a in use])[order]
+    mfe = np.concatenate([a["mfe"] for a in use])[order]
+    mae = np.concatenate([a["mae"] for a in use])[order]
+    atr_ev = np.concatenate([a["atr_ev"] for a in use])[order]
+    Nu = int(sum(a["n"] for a in use))
+    null_means = sum(a["n"] * a["null_means"] for a in use) / Nu
+    rows = _horizon_rows(Fe, t_all[order], null_means, mfe, mae, horizons, costs, n_null)
+    summ = _signal_summary(rows, horizons, primary, mfe, mae, bm, atr_ev)
+    return {**base, "table": rows, **summ, "per_asset": per,
+            "strata_events": {a["symbol"]: {int(g): int(v) for g, v in enumerate(a["comp_ev"]) if v} for a in use},
             "runtime_sec": round(time.time() - t0, 3)}
 
 
@@ -549,6 +664,11 @@ class ScreenTemplate:
     segment: str = "dev"
     raw: dict = field(default_factory=dict)
     aux: list = field(default_factory=list)   # 보조 데이터 (data.aux, 실시간 수신 가능한 것만: campaign.LIVE_AUX)
+    universe: tuple = ("BTC-KRW",)            # 자산 유니버스 (D15) — 기본 [data.symbol]
+
+    @property
+    def multi_asset(self) -> bool:
+        return len(self.universe) > 1
 
     @classmethod
     def from_yaml(cls, path, registry: Registry = REGISTRY) -> ScreenTemplate:
@@ -556,12 +676,12 @@ class ScreenTemplate:
 
     @classmethod
     def from_dict(cls, d: dict, registry: Registry = REGISTRY) -> ScreenTemplate:
-        from btc_quant.research.campaign import LIVE_AUX, CampaignError, _block_grid, get_cost
+        from btc_quant.research.campaign import LIVE_AUX, CampaignError, _block_grid, get_cost, template_universe
 
         if not isinstance(d, dict):
             raise CampaignError("template must be a mapping")
         allowed = {"name", "hypothesis", "data", "bar_minutes", "signals", "study", "costs",
-                   "correction", "budget", "family", "segment"}
+                   "correction", "budget", "family", "segment", "universe"}
         extra = set(d) - allowed
         if extra:
             raise CampaignError(f"unknown screen template keys {sorted(extra)}")
@@ -582,6 +702,7 @@ class ScreenTemplate:
             raise CampaignError(f"screen aux {aux}: duplicates or the target exchange {exchange!r} itself")
         if d.get("segment", "dev") != "dev":
             raise CampaignError("signal screens run on the dev segment only (PLAN §5)")
+        universe = template_universe(d)
         sigs_raw = d.get("signals")
         if not isinstance(sigs_raw, list) or not sigs_raw:
             raise CampaignError("signals must be a non-empty list of {entry, filters}")
@@ -625,14 +746,14 @@ class ScreenTemplate:
         if not isinstance(budget, int) or budget <= 0:
             raise CampaignError("budget must be a positive integer")
         tpl = cls(name=name, hypothesis={k: hyp[k] for k in ("text", "rationale", "success_criteria")},
-                  exchange=exchange, symbol=str(data.get("symbol", "BTC-KRW")),
+                  exchange=exchange, symbol=universe[0],
                   timeframe=str(data.get("timeframe", "1m")), bar_minutes=bm, signals=sigs,
                   horizons=horizons, primary_horizons=primary,
                   min_gap_min=float(st.get("min_gap_min", pre["min_gap_min"])),
                   n_null=int(st.get("n_null", DEFAULT_N_NULL)), seed=int(st.get("seed", 0)),
                   min_events=int(st.get("min_events", DEFAULT_MIN_EVENTS)), stratify=stratify,
                   costs=costs, method=method, alpha=alpha, budget=budget,
-                  family=(str(d["family"]) if d.get("family") else None), raw=d, aux=aux)
+                  family=(str(d["family"]) if d.get("family") else None), raw=d, aux=aux, universe=universe)
         configs = tpl.configs()
         keys = [_config_key(e, fs) for e, fs in configs]
         if len(set(keys)) != len(keys):
@@ -681,6 +802,8 @@ class ScreenTemplate:
         names = {f.name for f in dataclasses.fields(StrategySpec)}
         if "timeframe" in names:
             kw["timeframe"] = tf_name(self.bar_minutes)
+        if "universe" in names and len(self.universe) and tuple(self.universe) != ("BTC-KRW",):
+            kw["universe"] = tuple(self.universe)
         tmp = StrategySpec("x", entry, ex, tuple(filters), **kw)
         return StrategySpec(f"{self.name}_sig{self.bar_minutes}m_{tmp.logic_hash()[:10]}", entry, ex,
                             tuple(filters), **kw)
@@ -688,7 +811,8 @@ class ScreenTemplate:
     def to_record(self) -> dict:
         return {"kind": KIND, "name": self.name, "bar_minutes": self.bar_minutes,
                 "data": {"exchange": self.exchange, "symbol": self.symbol, "timeframe": self.timeframe,
-                         **({"aux": list(self.aux)} if self.aux else {})},
+                         **({"aux": list(self.aux)} if self.aux else {}),
+                         **({"universe": list(self.universe)} if tuple(self.universe) != ("BTC-KRW",) else {})},
                 "signals": [{"entry": {"block": e.block, "grid": e.grid},
                              "filters": [[{"block": f.block, "grid": f.grid} for f in fs] for fs in fsets]}
                             for e, fsets in self.signals],
@@ -748,7 +872,10 @@ def _summary_metrics(st: dict, primary_cost: str) -> dict:
             "suggestion": st["suggestion"], "bar_minutes": st["bar_minutes"],
             "primary_horizons": st["primary_horizons"], "min_gap_min": st["min_gap_min"],
             "n_null": st["n_null"], "stratify": st["stratify"],
-            "horizons": [{k: r.get(k) for k in keep} for r in st["table"]]}
+            "horizons": [{k: r.get(k) for k in keep} for r in st["table"]],
+            **({"universe": st["universe"],
+                "per_asset": {sym: {k: v.get(k) for k in ("n_events", "p_signal", "info_horizon")}
+                              for sym, v in st["per_asset"].items()}} if st.get("per_asset") else {})}
 
 
 def prior_screen_pvalues(ledger, families: set[str], exclude_campaign: str | None = None) -> list[dict]:
@@ -773,13 +900,13 @@ def prior_screen_pvalues(ledger, families: set[str], exclude_campaign: str | Non
     return uniq
 
 
-def dev_aux_context(env, tpl: ScreenTemplate) -> Context:
+def dev_aux_context(env, tpl: ScreenTemplate, symbol: str | None = None) -> Context:
     """선별 템플릿 data.aux 의 Dev 보조 1분봉 → regularize(clean_wicks) → `campaign.aux_context`
-    (결정 주기 봉 `to_tf`, ffill 없음 — research/campaign.py·paper 와 같은 구성)."""
+    (결정 주기 봉 `to_tf`, ffill 없음 — research/campaign.py·paper 와 같은 구성). symbol: 유니버스 자산(기본 tpl.symbol)."""
     from btc_quant.research.campaign import CampaignError, aux_context, prepare_m1
     aux_m1 = {}
     for a in tpl.aux:
-        raw = env.data.read("dev", a, tpl.symbol, tpl.timeframe)
+        raw = env.data.read("dev", a, symbol or tpl.symbol, tpl.timeframe)
         if raw.empty:
             raise CampaignError(f"no {a} aux data on dev")
         aux_m1[a] = prepare_m1(raw, a)
@@ -811,10 +938,16 @@ def screen(template, root=None, env=None, include_prior: bool = True, save: bool
     log = progress or (lambda s: None)
     n_cfg = tpl.check_budget()                      # 원장 쓰기 전에 거부
     configs = tpl.configs()
-    if ctx is None and tpl.aux:                     # data.aux: 캠페인·페이퍼와 같은 구성의 ctx (Dev, 원장 쓰기 전)
+    multi = len(tpl.universe) > 1
+    ctxs = None
+    if multi:                                       # 다자산: 자산별 보조 ctx (같은 심볼의 보조 거래소)
+        ctxs = {sym: (dev_aux_context(env, tpl, sym) if tpl.aux else None) for sym in tpl.universe}
+    elif ctx is None and tpl.aux:                   # data.aux: 캠페인·페이퍼와 같은 구성의 ctx (Dev, 원장 쓰기 전)
         ctx = dev_aux_context(env, tpl)
     start, end = env.data.segment_bounds("dev")
     snap = snapshot_id(tpl.exchange, tpl.symbol, tpl.timeframe, start, end, data_root=env.data.data_root)
+    for sym in tpl.universe[1:]:
+        snap += f"|{sym}:" + snapshot_id(tpl.exchange, sym, tpl.timeframe, start, end, data_root=env.data.data_root)
     commit = git_commit(env.code_root)
     pver = run_params(env)                          # 파라미터·비용 모델 버전 (docs/PARAMS.md §4)
     period = {"segment": "dev", "start": start.isoformat(), "end": end.isoformat()}
@@ -825,9 +958,13 @@ def screen(template, root=None, env=None, include_prior: bool = True, save: bool
         hyp_id, grid=tpl.to_record(), budget=n_cfg, cost_models=[tpl.costs["primary"], tpl.costs["grade"]],
         period={**period, "data_snapshot": snap}, family=families[0] if len(families) == 1 else None,
         note=f"{KIND} {tpl.name}: {n_cfg} signal configs × 1 trial (event study, no exits); "
-             f"primary horizons {tpl.primary_horizons}, {tpl.method} α={tpl.alpha}")
+             f"primary horizons {tpl.primary_horizons}, {tpl.method} α={tpl.alpha}"
+             + (f"; universe {list(tpl.universe)} (events pooled, null matched per asset)" if multi else ""))
     log(f"registered {hyp_id} / {camp_id}: {n_cfg} signal configs")
 
+    if multi:
+        return _screen_universe(tpl, env, configs, ctxs, start, end, snap, commit, pver, period, hyp_id, camp_id,
+                                n_cfg, include_prior, save, log)
     if m1 is None:
         m1 = load_segment(env, "dev", tpl.exchange, tpl.symbol, tpl.timeframe)
     else:
@@ -854,6 +991,56 @@ def screen(template, root=None, env=None, include_prior: bool = True, save: bool
         log(f"  {i + 1}/{n_cfg} {st['label']}: n={st['n_events']} p={st['p_signal']:.3g} "
             f"info_h={st['info_horizon']} ({time.time() - t0:.1f}s)")
 
+    return _finish_screen(tpl, env, configs, studies, snap, commit, pver, period, hyp_id, camp_id, n_cfg,
+                          families, include_prior, save, log)
+
+
+def _screen_universe(tpl, env, configs, ctxs, start, end, snap, commit, pver, period, hyp_id, camp_id, n_cfg,
+                     include_prior, save, log):
+    """다자산 선별: 자산별 Dev 1분봉·결정 봉·블록 캐시 → 신호 구성마다 `study_events_pooled`."""
+    from btc_quant.research.campaign import load_segment
+    syms = list(tpl.universe)
+    m1s = {sym: load_segment(env, "dev", tpl.exchange, sym, tpl.timeframe) for sym in syms}
+    bars = {sym: decision_bars(m1s[sym], tpl.bar_minutes) for sym in syms}
+    atrs = {sym: _atr_pct(bars[sym]) for sym in syms}
+    caches: dict = {sym: {} for sym in syms}
+
+    def ev(sym, ref):
+        k = json.dumps([ref.block, ref.params, int(tpl.bar_minutes)], sort_keys=True, default=str)
+        if k not in caches[sym]:
+            caches[sym][k] = REGISTRY.evaluate(ref, bars[sym], ctxs.get(sym) or Context()).to_numpy(bool)
+        return caches[sym][k]
+    cost_map = {tpl.costs["primary"]: tpl.costs["primary"], tpl.costs["grade"]: tpl.costs["grade"]}
+    studies = []
+    t0 = time.time()
+    for i, (e, fs) in enumerate(configs):
+        assets = []
+        for sym in syms:
+            fok = bars[sym]["complete"].to_numpy(bool).copy()
+            for f in fs:
+                fok &= ev(sym, f)
+            assets.append({"symbol": sym, "m1": m1s[sym], "bars_index": bars[sym].index, "entry": ev(sym, e),
+                           "filter_ok": fok, "atr_pct": atrs[sym]})
+        st = study_events_pooled(assets, tpl.bar_minutes, horizons=tpl.horizons,
+                                 primary_horizons=tpl.primary_horizons, cost_round_trip=cost_map,
+                                 n_null=tpl.n_null, seed=tpl.seed + i, min_gap_min=tpl.min_gap_min,
+                                 start=start, end=end, stratify=tpl.stratify, min_events=tpl.min_events)
+        st["entry"] = {"block": e.block, "params": dict(e.params)}
+        st["filters"] = [{"block": f.block, "params": dict(f.params)} for f in fs]
+        st["label"] = _label(e, fs)
+        st["family"] = tpl.family_of(e)
+        studies.append(st)
+        log(f"  {i + 1}/{n_cfg} {st['label']}: n={st['n_events']} "
+            f"({', '.join(f'{k}:{v['n_events']}' for k, v in st['per_asset'].items())}) p={st['p_signal']:.3g} "
+            f"info_h={st['info_horizon']} ({time.time() - t0:.1f}s)")
+    families = sorted({tpl.family_of(e) for e, _ in configs})
+    return _finish_screen(tpl, env, configs, studies, snap, commit, pver, period, hyp_id, camp_id, n_cfg,
+                          families, include_prior, save, log)
+
+
+def _finish_screen(tpl, env, configs, studies, snap, commit, pver, period, hyp_id, camp_id, n_cfg, families,
+                   include_prior, save, log) -> ScreenResult:
+    from btc_quant.research.campaign import record_runs_batch, run_param_fields
     # ---- 다중검정: 이번 선별 + (선택) 같은 계열의 이전 선별
     prior = prior_screen_pvalues(env.ledger, set(families), exclude_campaign=camp_id) if include_prior else []
     p_now = [s["p_signal"] for s in studies]
@@ -880,6 +1067,8 @@ def screen(template, root=None, env=None, include_prior: bool = True, save: bool
                      "z": brow.get("z"), f"net_bp[{pc}]": net * 1e4,
                      f"net_bp[{tpl.costs['grade']}]": brow.get(f"mean_net[{tpl.costs['grade']}]", np.nan) * 1e4,
                      "info_h": st["info_horizon"], "profile": st["profile"],
+                     **({f"n_events[{sym}]": v["n_events"] for sym, v in st["per_asset"].items()}
+                        if st.get("per_asset") else {}),
                      "significant": bool(r), "passed": passed, "fail_reason": reason})
     table = pd.DataFrame(rows)
     decision = {"method": tpl.method, "alpha": tpl.alpha, "m_current": len(p_now), "m_prior": len(prior),
@@ -957,7 +1146,10 @@ def render_screen_markdown(res: ScreenResult) -> str:
     tpl, d = res.template, res.decision
     lines = [f"# 신호 선별 {res.campaign_id} — {tpl.name}", "",
              f"- 가설 {res.hypothesis_id}: {tpl.hypothesis['text']}",
-             f"- 데이터: {tpl.exchange} {tpl.symbol} {tpl.timeframe} (Dev), 결정 봉 {tpl.bar_minutes}분",
+             (f"- 데이터: {tpl.exchange} {tpl.symbol} {tpl.timeframe} (Dev), 결정 봉 {tpl.bar_minutes}분"
+              if len(tpl.universe) <= 1 else
+              f"- 데이터: {tpl.exchange} 유니버스 {list(tpl.universe)} {tpl.timeframe} (Dev), 결정 봉 {tpl.bar_minutes}분 "
+              "— 자산별 이벤트 풀링, 귀무는 자산별 매칭(D15)"),
              (f"- 지평 {tpl.horizons}, 사전등록 주 지평 {tpl.primary_horizons}, 최소 간격 {tpl.min_gap_min:g}분, "
               f"귀무 {tpl.n_null}회 ({tpl.stratify} 층화)"),
              f"- 판정 규칙: {d['rule']}",
@@ -973,6 +1165,13 @@ def render_screen_markdown(res: ScreenResult) -> str:
     lines += ["", "## 신호별 상세", ""]
     for st in res.studies:
         lines += [render_study_markdown(st), ""]
+        if st.get("per_asset"):
+            lines += ["자산별 (보고 전용 — 판정은 풀링 결과):", "",
+                      "| 자산 | 이벤트 | 적격 | 신호 p | 정보 지평 |", "|---|---|---|---|---|"]
+            for sym, v in st["per_asset"].items():
+                lines.append(f"| {sym} | {v['n_events']} | {v['n_pool']} | {_f(v.get('p_signal'), 4)} | "
+                             f"{v.get('info_horizon')} |")
+            lines.append("")
     lines += ["", ("> 선별 통과 = 정보가 있다는 1차 증거일 뿐. 전략화(원칙적 청산 4~6 패턴) 후 G0~G6 를 다시 거친다. "
                    "선별 시도는 같은 계열의 시도 수에 누적된다.")]
     return "\n".join(lines)

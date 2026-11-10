@@ -14,7 +14,14 @@
 전략별 리스크 한도·등급: 스펙 파일 옆 `<스펙 파일명>.risk.yaml` (없으면 기본값 = config/gates.yaml 의 하한).
     grade: A|B
     limits: {daily_loss: -0.03, weekly_loss: -0.06, max_drawdown: -0.12, max_trades_per_day: 5, ...}
+    sleeve_limits: {XRP-KRW: {...}, ...}     # 다자산 스펙만 (D15) — 없으면 슬리브도 limits 를 쓴다
   (evaluation.gates.risk_limits_from_validation 의 키 daily_loss_limit/weekly_loss_limit/drawdown_limit 도 허용)
+
+다자산 스펙 (PLAN D15, spec.universe 예: BTC/XRP/ETH-KRW): 자산(슬리브)마다 트레이더 1개 — 키 `<id>_v<ver>@<SYM>`,
+기록 디렉터리 `<out>/<id>_v<ver>@<SYM>/`, 초기 자산 = 명목 금액/N, 슬리브 리스크 한도(`sleeve_limits`) — 와 포트폴리오
+리스크 묶음(`trader.SleeveGroup`, 한도 = `limits`, 상태 `<out>/portfolio_<id>_v<ver>.risk.json`). 수집기는 필요한 모든
+심볼을 구독하고(코인원 체결·호가 + 업비트 참조가/보조 1분봉, 심볼별), 1분봉·워밍업 REST·호가·참조가 괴리는 심볼별이다.
+단일 자산(BTC-KRW) 전략만 있으면 이전과 같은 구성·같은 키·같은 기록.
 """
 from __future__ import annotations
 
@@ -42,7 +49,22 @@ from btc_quant.strategy.spec import StrategySpec
 from .bars import (DEFAULT_WARMUP_DAYS, MAX_WARMUP_DAYS, M1History, MinuteBarBuilder, fetch_warmup,
                    minute_ts, required_lookback_bars, spec_aux, window_minutes)
 from .fills import DEFAULT_NOTIONAL
-from .trader import PaperTrader, strategy_key
+from .trader import PaperTrader, SleeveGroup, strategy_key
+
+DEFAULT_SYMBOL = "BTC-KRW"
+
+
+def _market(sym: str) -> str:
+    a, q = sym.split("-")
+    return f"{q}-{a}"
+
+
+def sleeve_key(key: str, sym: str) -> str:
+    return f"{key}@{sym}"
+
+
+def slot_symbols(spec: StrategySpec) -> list[str]:
+    return list(getattr(spec, "universe", (DEFAULT_SYMBOL,)) or (DEFAULT_SYMBOL,))
 
 log = logging.getLogger("btc_quant.paper.service")
 
@@ -79,6 +101,11 @@ class StrategySlot:
     grade: str = "B"
     limits: RiskLimits = DEFAULT_LIMITS
     source: str = ""
+    sleeve_limits: dict = field(default_factory=dict)   # 다자산: {심볼: RiskLimits} (없으면 limits)
+
+    @property
+    def multi_asset(self) -> bool:
+        return slot_symbols(self.spec) != [DEFAULT_SYMBOL]
 
     @property
     def key(self) -> str:
@@ -113,6 +140,14 @@ def load_risk_meta(path: Path | None, grade: str, limits: RiskLimits) -> tuple[s
     return str(d.get("grade", grade)).upper(), limits_from_dict(d.get("limits"), limits)
 
 
+def load_sleeve_limits(path: Path | None, base: RiskLimits) -> dict[str, RiskLimits]:
+    """risk.yaml `sleeve_limits` (다자산 스펙, 파이프라인이 슬리브 Val 수익으로 같은 §7 공식) → {심볼: RiskLimits}."""
+    if path is None or not Path(path).exists():
+        return {}
+    d = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+    return {str(k): limits_from_dict(v, base) for k, v in (d.get("sleeve_limits") or {}).items()}
+
+
 def slots_from_specs(paths: list[str | Path], grade: str = "B", risk_path: str | Path | None = None
                      ) -> list[StrategySlot]:
     base_grade, base_limits = load_risk_meta(Path(risk_path) if risk_path else None, grade, DEFAULT_LIMITS)
@@ -120,7 +155,7 @@ def slots_from_specs(paths: list[str | Path], grade: str = "B", risk_path: str |
     for p in paths:
         spec = StrategySpec.from_yaml(p)
         g, lim = load_risk_meta(sidecar_path(Path(p)), base_grade, base_limits)
-        out.append(StrategySlot(spec, "spec", g, lim, str(p)))
+        out.append(StrategySlot(spec, "spec", g, lim, str(p), load_sleeve_limits(sidecar_path(Path(p)), lim)))
     return out
 
 
@@ -147,7 +182,8 @@ def slots_from_registry(root: str | Path | None = None, grade: str = "B") -> lis
     out = []
     for role, p in entries:
         g, lim = load_risk_meta(sidecar_path(p), grade, DEFAULT_LIMITS)
-        out.append(StrategySlot(StrategySpec.from_yaml(p), role, g, lim, str(p)))
+        out.append(StrategySlot(StrategySpec.from_yaml(p), role, g, lim, str(p),
+                                load_sleeve_limits(sidecar_path(p), lim)))
     return out
 
 
@@ -218,27 +254,62 @@ class PaperService:
         if self.cfg.cost not in costs:
             raise ValueError(f"unknown cost model {self.cfg.cost!r}; one of {sorted(costs)}")
         self.cost = costs[self.cfg.cost]
+        self._costs = costs
         self.cfg.out.mkdir(parents=True, exist_ok=True)
-        # 업비트 보조 데이터(ctx.aux["upbit"]): 필요한 전략이 있을 때만 업비트 1분봉 이력을 만든다
+        # 심볼: 전략 유니버스의 합집합 (단일 자산 BTC 전략만 있으면 ["BTC-KRW"] — 이전과 같음)
+        order = {"BTC-KRW": 0, "XRP-KRW": 1, "ETH-KRW": 2}
+        self.symbols: list[str] = sorted({sym for s in slots for sym in slot_symbols(s.spec)},
+                                         key=lambda x: (order.get(x, 9), x))
+        self.primary = self.symbols[0]
+        # 업비트 보조 데이터(ctx.aux["upbit"]): 필요한 전략이 있을 때만 업비트 1분봉 이력을 만든다 (심볼별)
         self.need_upbit = any("upbit" in spec_aux(s.spec) for s in slots)
         if self.need_upbit and "upbit" not in self.cfg.exchanges:
             raise ValueError("a strategy needs upbit aux data but upbit stream is disabled")
-        self.aux_builders: dict[str, MinuteBarBuilder] = {}
-        self.aux_hist: dict[str, M1History] = {}
-        if self.need_upbit:
-            self.aux_builders["upbit"] = MinuteBarBuilder(self.cfg.grace_seconds)
-            self.aux_hist["upbit"] = M1History(max_rows=1, exchange="upbit")   # 크기는 아래에서 재설정
+        need_aux_syms = {sym for s in slots if "upbit" in spec_aux(s.spec) for sym in slot_symbols(s.spec)}
+        self.aux_builders_by: dict[str, dict[str, MinuteBarBuilder]] = {sym: {} for sym in self.symbols}
+        self.aux_hist_by: dict[str, dict[str, M1History]] = {sym: {} for sym in self.symbols}
+        for sym in need_aux_syms:
+            self.aux_builders_by[sym]["upbit"] = MinuteBarBuilder(self.cfg.grace_seconds)
+            self.aux_hist_by[sym]["upbit"] = M1History(max_rows=1, exchange="upbit")   # 크기는 아래에서 재설정
+        self.aux_builders = self.aux_builders_by[self.primary]      # 단일 자산 호환 별칭
+        self.aux_hist = self.aux_hist_by[self.primary]
         self.traders: dict[str, PaperTrader] = {}
+        self.trader_sym: dict[str, str] = {}
+        self.groups: dict[str, SleeveGroup] = {}
         for s in slots:
-            self.traders[s.key] = self._make_trader(s)
+            if not s.multi_asset:
+                self.traders[s.key] = self._make_trader(s)
+                self.trader_sym[s.key] = DEFAULT_SYMBOL
+                continue
+            syms = slot_symbols(s.spec)
+            gkey = s.key
+            gpath = self.cfg.out / f"portfolio_{gkey}.risk.json"
+            kill_dir = Path(self.cfg.runtime_dir)
+            grisk = (RiskManager.load(gpath, s.limits, strategy_id=f"{gkey}@portfolio", grade=s.grade,
+                                      kill_dir=kill_dir) if gpath.exists()
+                     else RiskManager(s.limits, f"{gkey}@portfolio", s.grade, kill_dir=kill_dir))
+            grp = SleeveGroup(gkey, grisk, [sleeve_key(gkey, x) for x in syms], gpath)
+            self.groups[gkey] = grp
+            for sym in syms:
+                k = sleeve_key(gkey, sym)
+                self.traders[k] = self._make_trader(s, symbol=sym, group=grp, n_sleeves=len(syms))
+                self.trader_sym[k] = sym
         self.lookback_min = max(t.window_min for t in self.traders.values())
-        self.builder = MinuteBarBuilder(self.cfg.grace_seconds)
-        self.hist = M1History(max_rows=self.lookback_min + 2 * 1440, exchange="coinone")   # 체결 venue
-        for h in self.aux_hist.values():
-            h.max_rows = self.hist.max_rows
+        max_rows = self.lookback_min + 2 * 1440
+        self.builders = {sym: MinuteBarBuilder(self.cfg.grace_seconds) for sym in self.symbols}
+        self.hists = {sym: M1History(max_rows=max_rows, exchange="coinone") for sym in self.symbols}   # 체결 venue
+        self.builder = self.builders[self.primary]                  # 단일 자산 호환 별칭
+        self.hist = self.hists[self.primary]
+        for d in self.aux_hist_by.values():
+            for h in d.values():
+                h.max_rows = max_rows
         self.ready = False
-        self.pending: list = []
-        self.aux_pending: dict[str, list] = {}
+        self.pending_by: dict[str, list] = {sym: [] for sym in self.symbols}
+        self.pending = self.pending_by[self.primary]
+        self.aux_pending_by: dict[str, dict[str, list]] = {sym: {} for sym in self.symbols}
+        self.aux_pending = self.aux_pending_by[self.primary]
+        self.books: dict[str, dict | None] = {sym: None for sym in self.symbols}
+        self.refs: dict[str, tuple[float | None, float | None]] = {sym: (None, None) for sym in self.symbols}
         self.book: dict | None = None
         self.ref_price: float | None = None
         self.ref_recv: float | None = None
@@ -259,33 +330,47 @@ class PaperService:
         self.collector.add_listener(self.on_event)
 
     # ------------------------------------------------------------------ 구성
-    def _make_trader(self, s: StrategySlot) -> PaperTrader:
-        out = self.cfg.out / s.key
+    def _make_trader(self, s: StrategySlot, symbol: str | None = None, group: SleeveGroup | None = None,
+                     n_sleeves: int = 1) -> PaperTrader:
+        """symbol 이 있으면 다자산 스펙의 슬리브 트레이더 (키 `<key>@<SYM>`, 명목/N, 슬리브 한도, 포트폴리오 묶음)."""
+        key = s.key if symbol is None else sleeve_key(s.key, symbol)
+        limits = s.limits if symbol is None else s.sleeve_limits.get(symbol, s.limits)
+        out = self.cfg.out / key
         out.mkdir(parents=True, exist_ok=True)
         rp = out / "risk.json"
         kill_dir = Path(self.cfg.runtime_dir)
         if rp.exists():
-            risk = RiskManager.load(rp, s.limits, strategy_id=s.key, grade=s.grade, kill_dir=kill_dir)
+            risk = RiskManager.load(rp, limits, strategy_id=key, grade=s.grade, kill_dir=kill_dir)
         else:
-            risk = RiskManager(s.limits, s.key, s.grade, kill_dir=kill_dir)
+            risk = RiskManager(limits, key, s.grade, kill_dir=kill_dir)
         lb = required_lookback_bars(s.spec, default_days=self.cfg.warmup_days,
                                     max_days=self.cfg.max_warmup_days)
-        tr = PaperTrader(s.spec, self.cost, risk, s.grade, out_dir=out, initial_equity=self.cfg.notional,
-                         lookback_bars=lb, clock=self.clock, aux_hist=self.aux_hist)
+        aux = self.aux_hist_by[symbol] if symbol is not None else self.aux_hist
+        cost = self.cost
+        if symbol is not None and symbol != DEFAULT_SYMBOL:   # 자산별 비용 모델 `<name>@<SYM>` 이 있으면 (D15)
+            cost = self._costs.get(f"{self.cfg.cost}@{symbol}", self.cost)
+        tr = PaperTrader(s.spec, cost, risk, s.grade, key=key, out_dir=out,
+                         initial_equity=self.cfg.notional / max(int(n_sleeves), 1),
+                         lookback_bars=lb, clock=self.clock, aux_hist=aux, group=group, symbol=symbol)
         restored = tr.load_state()
         (out / "spec.yaml").write_text(s.spec.to_yaml(), encoding="utf-8")
-        (out / "meta.json").write_text(json.dumps({
-            "key": s.key, "role": s.role, "grade": s.grade, "source": s.source, "cost": self.cost.name,
-            "limits": {f.name: getattr(s.limits, f.name) for f in fields(RiskLimits)},
-            "timeframe": s.spec.timeframe, "lookback_bars": lb, "aux": list(spec_aux(s.spec)),
-            "restored": restored}, ensure_ascii=False, indent=1))
-        log.info("trader %s (%s, grade %s, timeframe %s, lookback %d bars, %s)", s.key, s.role, s.grade,
+        meta = {"key": key, "role": s.role, "grade": s.grade, "source": s.source, "cost": cost.name,
+                "limits": {f.name: getattr(limits, f.name) for f in fields(RiskLimits)},
+                "timeframe": s.spec.timeframe, "lookback_bars": lb, "aux": list(spec_aux(s.spec)),
+                "restored": restored}
+        if symbol is not None:
+            meta.update(symbol=symbol, strategy_key=s.key, universe=slot_symbols(s.spec), n_sleeves=int(n_sleeves),
+                        sleeve_weight=1.0 / max(int(n_sleeves), 1),
+                        portfolio_limits={f.name: getattr(s.limits, f.name) for f in fields(RiskLimits)})
+        (out / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1))
+        log.info("trader %s (%s, grade %s, timeframe %s, lookback %d bars, %s)", key, s.role, s.grade,
                  s.spec.timeframe, lb, "restored" if restored else "fresh")
         return tr
 
     def _make_collector(self) -> Collector:
         cc = CollectorConfig(exchanges=self.cfg.exchanges, root=self.cfg.data_root,
-                             heartbeat_path=None, gaps_path=self.cfg.out / "collector_gaps.jsonl")
+                             heartbeat_path=None, gaps_path=self.cfg.out / "collector_gaps.jsonl",
+                             symbols=tuple(self.symbols) if self.symbols != [DEFAULT_SYMBOL] else None)
         c = Collector(cc, notifier=self.notifier)
         if not self.cfg.record:
             c.sink = NullSink()
@@ -329,26 +414,37 @@ class PaperService:
     # ------------------------------------------------------------------ 데이터 수신
     def on_event(self, ex: str, kind: str, row: dict) -> None:
         now = self.clock()
+        sym = row.get("symbol", DEFAULT_SYMBOL)   # 다중 심볼 수집기는 행에 symbol 을 붙인다 (단일 = BTC-KRW)
+        if sym not in self.books:
+            return
         try:
             if ex == "coinone" and kind == "orderbook":
-                self.book = row
+                self.books[sym] = row
+                if sym == self.primary:
+                    self.book = row
             elif ex == "upbit" and kind == "trades":
-                self.ref_price, self.ref_recv = float(row["price"]), now
-                if "upbit" in self.aux_builders and self.builder.next_minute is not None:
-                    self.aux_builders["upbit"].on_trade(row["ts_exchange"], row["price"], row["qty"])
+                self.refs[sym] = (float(row["price"]), now)
+                if sym == self.primary:
+                    self.ref_price, self.ref_recv = float(row["price"]), now
+                ab = self.aux_builders_by[sym]
+                if "upbit" in ab and self.builders[sym].next_minute is not None:
+                    ab["upbit"].on_trade(row["ts_exchange"], row["price"], row["qty"])
             elif ex == "coinone" and kind == "trades":
                 if self.first_trade_wall is None:
                     self._start_bars(int(now // 60) + 1, now)
-                self.builder.on_trade(row["ts_exchange"], row["price"], row["qty"])
-                ref = (self.ref_price if self.ref_recv is not None
-                       and now - self.ref_recv <= self.cfg.ref_max_age else None)
+                self.builders[sym].on_trade(row["ts_exchange"], row["price"], row["qty"])
+                rp, rr = self.refs[sym]
+                ref = rp if rr is not None and now - rr <= self.cfg.ref_max_age else None
                 dt = datetime.fromtimestamp(now, timezone.utc)
-                for tr in self.traders.values():
+                book = self.books[sym]
+                for key, tr in self.traders.items():
+                    if self.trader_sym[key] != sym:
+                        continue
                     if ref is None and tr.risk.s.last_ref_price is not None:
                         # 참조가가 오래됨 → 괴리 판정 중단 (오래된 참조가로 PAUSE 가 걸려 있지 않도록)
                         tr.risk.s.last_ref_price = tr.risk.s.last_deviation = None
                     tr.risk.on_market_data(dt, price=row["price"], ref_price=ref)
-                    tr.on_price(row["ts_exchange"], row["price"], self.book)
+                    tr.on_price(row["ts_exchange"], row["price"], book)
                 self.process(now)
         except Exception:
             self.errors += 1
@@ -356,41 +452,63 @@ class PaperService:
 
     def _start_bars(self, minute: int, now: float) -> None:
         self.first_trade_wall = now
-        self.builder.start_at(minute)
-        for b in self.aux_builders.values():
+        for b in self.builders.values():          # 모든 심볼이 같은 분부터 (첫 체결이 어느 심볼이든)
             b.start_at(minute)
+        for d in self.aux_builders_by.values():
+            for b in d.values():
+                b.start_at(minute)
 
     def process(self, now: float | None = None) -> int:
         """닫을 수 있는 분을 닫아 트레이더에 전달. 처리한 봉 수.
         보조(업비트) 봉을 먼저 닫아 이력에 넣으므로 결정 시점에 같은 분까지의 보조 데이터가 준비된다."""
         now = self.clock() if now is None else now
-        for k, b in self.aux_builders.items():
-            aux_bars = b.on_time(now)
+        n = 0
+        for sym in self.symbols:
+            for k, b in self.aux_builders_by[sym].items():
+                aux_bars = b.on_time(now)
+                if not self.ready:
+                    self.aux_pending_by[sym].setdefault(k, []).extend(aux_bars)
+                else:
+                    for bar in aux_bars:
+                        self.aux_hist_by[sym][k].append(bar)
+            bars = self.builders[sym].on_time(now)
             if not self.ready:
-                self.aux_pending.setdefault(k, []).extend(aux_bars)
-            else:
-                for bar in aux_bars:
-                    self.aux_hist[k].append(bar)
-        bars = self.builder.on_time(now)
-        if not self.ready:
-            self.pending += bars
-            return 0
-        return self._feed(bars)
+                self.pending_by[sym] += bars
+                continue
+            n += self._feed(bars, sym)
+        return n
 
-    def _feed(self, bars) -> int:
+    def _feed(self, bars, sym: str | None = None) -> int:
+        sym = sym or self.primary
+        hist, book = self.hists[sym], self.books[sym]
         n = 0
         for bar in bars:
-            for nb in self.hist.append(bar):
+            for nb in hist.append(bar):
                 n += 1
                 for key, tr in self.traders.items():
+                    if self.trader_sym[key] != sym:
+                        continue
                     try:
-                        self._handle_events(key, tr.on_bar(nb, self.hist, self.book, live=True))
+                        self._handle_events(key, tr.on_bar(nb, hist, book, live=True))
                     except Exception as e:
                         self.errors += 1
                         log.exception("trader %s failed on bar %s", key, nb.ts)
                         self.notify(f"[paper] {key} 처리 오류: {type(e).__name__}: {e}", "warning")
+        self._drain_groups()
         self.bars_processed += n
         return n
+
+    def _drain_groups(self) -> None:
+        """포트폴리오 리스크 묶음의 정지·해제 이벤트 → 알림·기록 (다자산 스펙)."""
+        for gkey, g in self.groups.items():
+            evs = g.risk.drain_events()
+            if not evs:
+                continue
+            self._handle_events(f"{gkey}@portfolio",
+                                [{**{k: v for k, v in e.items() if k != "type"}, "type": "risk_event",
+                                  "event": e.get("type")} for e in evs])
+            with contextlib.suppress(Exception):
+                g.save()
 
     # ------------------------------------------------------------------ 워밍업
     async def warmup(self) -> None:
@@ -409,35 +527,42 @@ class PaperService:
         if wait > 0:
             await asyncio.sleep(wait)
         end = minute_ts(m0)
-        log.info("warm-up: fetching %d min of coinone 1m candles up to %s", self.lookback_min, end)
-        raw = await self._fetch_retry(end, "coinone")
-        for k in self.aux_hist:
-            araw = await self._fetch_retry(end, k)
-            self.aux_hist[k].seed(araw)
-            for bar in self.aux_pending.pop(k, []):
-                self.aux_hist[k].append(bar)
-            log.info("warm-up %s: %d bars → %s", k, len(self.aux_hist[k]), self.aux_hist[k].last_ts)
-        n = self.hist.seed(raw)
-        log.info("warm-up: %d bars (%s → %s)", n, self.hist.first_ts, self.hist.last_ts)
+        n = 0
+        for sym in self.symbols:
+            log.info("warm-up: fetching %d min of coinone %s 1m candles up to %s", self.lookback_min, sym, end)
+            raw = await self._fetch_retry(end, "coinone", sym)
+            for k, h in self.aux_hist_by[sym].items():
+                araw = await self._fetch_retry(end, k, sym)
+                h.seed(araw)
+                for bar in self.aux_pending_by[sym].pop(k, []):
+                    h.append(bar)
+                log.info("warm-up %s %s: %d bars → %s", k, sym, len(h), h.last_ts)
+            hist = self.hists[sym]
+            n_sym = hist.seed(raw)
+            n = n_sym if sym == self.primary else n
+            log.info("warm-up %s: %d bars (%s → %s)", sym, n_sym, hist.first_ts, hist.last_ts)
         for key, tr in self.traders.items():
+            sym = self.trader_sym[key]
             try:
-                self._handle_events(key, tr.attach(self.hist, self.book))
+                self._handle_events(key, tr.attach(self.hists[sym], self.books[sym]))
             except Exception:
                 self.errors += 1
                 log.exception("attach failed for %s", key)
         self.ready = True
-        pending, self.pending = self.pending, []
-        self._feed(pending)
+        for sym in self.symbols:
+            pending, self.pending_by[sym] = self.pending_by[sym], []
+            self._feed(pending, sym)
+        self.pending = self.pending_by[self.primary]
         self.notify(f"[paper] 시작: {', '.join(f'{s.key}({s.role},{s.grade})' for s in self.slots)} "
                     f"/ 워밍업 {n}봉, 비용 {self.cost.name}")
 
-    async def _fetch_retry(self, end: pd.Timestamp, exchange: str) -> pd.DataFrame:
+    async def _fetch_retry(self, end: pd.Timestamp, exchange: str, symbol: str = DEFAULT_SYMBOL) -> pd.DataFrame:
         fetch = self.fetch.get(exchange) if isinstance(self.fetch, dict) else (
             self.fetch if exchange == "coinone" else None)
         attempt = 0
         while True:
             try:
-                raw = await asyncio.to_thread(fetch_warmup, end, self.lookback_min, "KRW-BTC", fetch,
+                raw = await asyncio.to_thread(fetch_warmup, end, self.lookback_min, _market(symbol), fetch,
                                               exchange)
                 if raw is not None and len(raw):
                     return raw
@@ -446,9 +571,9 @@ class PaperService:
                 err = f"{type(e).__name__}: {e}"
             attempt += 1
             delay = min(60.0, 5.0 * 2 ** (attempt - 1))
-            log.warning("warm-up fetch %s failed (%s); retry %d in %.0fs", exchange, err, attempt, delay)
+            log.warning("warm-up fetch %s %s failed (%s); retry %d in %.0fs", exchange, symbol, err, attempt, delay)
             if attempt == 3:
-                self.notify(f"[paper] 워밍업 REST({exchange}) 실패 3회: {err}", "warning")
+                self.notify(f"[paper] 워밍업 REST({exchange} {symbol}) 실패 3회: {err}", "warning")
             await asyncio.sleep(delay)
 
     # ------------------------------------------------------------------ 하트비트·요약
@@ -472,6 +597,8 @@ class PaperService:
             "ref_price": self.ref_price,
             "data_age": {ex: round(c.last_message_age(ex, "trades", now=now), 3) for ex in c.stats},
             "traders": traders,
+            **({"symbols": list(self.symbols),
+                "portfolios": {k: g.status(dt) for k, g in self.groups.items()}} if self.groups else {}),
         }
 
     def write_heartbeat(self) -> None:
@@ -552,6 +679,9 @@ class PaperService:
             for tr in self.traders.values():
                 with contextlib.suppress(Exception):
                     tr.save_state()
+            for g in self.groups.values():
+                with contextlib.suppress(Exception):
+                    g.save()
             with contextlib.suppress(Exception):
                 self.write_heartbeat()
             self.notify(f"[paper] 종료 (봉 {self.bars_processed}, 오류 {self.errors})", "warning")
@@ -702,8 +832,9 @@ def build_report(key_dir: Path, start=None, end=None, m1: pd.DataFrame | None = 
     minutes = (int((end - start) / pd.Timedelta("1min")) + window_minutes(lb, spec.tf_min)
                + spec.exit.max_hold_min + 5)
     fetch_end = end + pd.Timedelta(minutes=spec.exit.max_hold_min + 5)
+    sym = (_read_json(key_dir / "meta.json") or {}).get("symbol") or DEFAULT_SYMBOL   # 다자산 슬리브 = 그 자산
     if m1 is None:
-        raw = fetch_warmup(fetch_end, minutes, fetch=fetch)
+        raw = fetch_warmup(fetch_end, minutes, _market(sym), fetch=fetch)
         m1 = quality.prepare_venue_m1(raw, "coinone")
     ctx = None
     keys = spec_aux(spec)
@@ -711,7 +842,7 @@ def build_report(key_dir: Path, start=None, end=None, m1: pd.DataFrame | None = 
         aux_m1 = dict(aux_m1 or {})
         for k in keys:
             if k not in aux_m1:
-                aux_m1[k] = quality.prepare_venue_m1(fetch_warmup(fetch_end, minutes, exchange=k), k)
+                aux_m1[k] = quality.prepare_venue_m1(fetch_warmup(fetch_end, minutes, _market(sym), exchange=k), k)
         ctx = Context(aux={k: to_tf(aux_m1[k], spec.tf_min) for k in keys})
     bt = run_reference(spec, m1, cost, start, end, ctx=ctx).trades
     trades = [t for t in read_jsonl(key_dir / "trades.jsonl")

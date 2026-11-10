@@ -212,6 +212,30 @@ class ResearchTools:
             raise ToolFailure("not_found", f"{q} does not exist")
         return q
 
+    @staticmethod
+    def _with_universe(d: dict[str, Any], universe: list[str] | None) -> dict[str, Any]:
+        """도구 인자 universe (PLAN D15: BTC-KRW/XRP-KRW/ETH-KRW 중) → 템플릿 `universe`. 템플릿에 이미 다른 값이 있으면
+        거부(어느 쪽이 사전등록된 것인지 모호). None = 템플릿 그대로(없으면 기본 [BTC-KRW])."""
+        if universe is None:
+            return d
+        from btc_quant.research.universe import UniverseError, normalize_universe
+        try:
+            u = list(normalize_universe(universe))
+        except UniverseError as e:
+            raise ToolFailure("invalid_argument", str(e)) from None
+        if d.get("universe") is not None:
+            try:
+                same = list(normalize_universe(d["universe"])) == u
+            except UniverseError as e:
+                raise ToolFailure("invalid_template", str(e)) from None
+            if not same:
+                raise ToolFailure("invalid_argument", f"universe argument {u} != template universe {d['universe']}")
+        d = dict(d)
+        d["universe"] = u
+        if (d.get("data") or {}).get("symbol") not in (None, *u):
+            raise ToolFailure("invalid_argument", f"template data.symbol {d['data']['symbol']!r} not in universe {u}")
+        return d
+
     def _template_dict(self, template) -> dict[str, Any]:
         if isinstance(template, dict):
             return copy.deepcopy(template)
@@ -267,7 +291,7 @@ class ResearchTools:
 
     @tool
     def get_data_summary(self, exchanges: list[str] | None = None, timeframe: str = "1m",
-                         segments: list[str] | None = None) -> dict[str, Any]:
+                         segments: list[str] | None = None, symbols: list[str] | None = None) -> dict[str, Any]:
         """커버리지 요약 (dev/val/forward). 잠금 구간은 읽지 않고 상태(개봉 횟수)만."""
         import pandas as pd
         env = self.env()
@@ -286,6 +310,9 @@ class ResearchTools:
                                        tf.name.split("=", 1)[1]))
         if exchanges:
             series = [s for s in series if s[0] in exchanges]
+        if symbols:
+            want = {str(x).upper() for x in symbols}
+            series = [s for s in series if s[1].upper() in want]
         series = [s for s in series if s[2] == timeframe]
         now = pd.Timestamp.now(tz="UTC")
         bounds = {s: env.data.segment_bounds(s, now=now) for s in segs}
@@ -372,14 +399,14 @@ class ResearchTools:
     @tool
     def power_check(self, n_grid: int | None = None, template: dict | str | None = None,
                     family: str | None = None, target_sharpe: float | None = None,
-                    n_days: int | None = None) -> dict[str, Any]:
+                    n_days: int | None = None, universe: list[str] | None = None) -> dict[str, Any]:
         import pandas as pd
 
         from btc_quant.research.power import budget_report
         env = self.env()
         if template is not None:
             from btc_quant.research.campaign import CampaignTemplate
-            t = CampaignTemplate.from_dict(self._template_dict(template))
+            t = CampaignTemplate.from_dict(self._with_universe(self._template_dict(template), universe))
             n_grid = t.n_specs()
             family = family or t.family
             target_sharpe = target_sharpe if target_sharpe is not None else t.power.get("target_sharpe")
@@ -402,9 +429,9 @@ class ResearchTools:
 
     # ========================================================== 선별·캠페인
     @tool
-    def screen_signals(self, template: dict | str) -> dict[str, Any]:
+    def screen_signals(self, template: dict | str, universe: list[str] | None = None) -> dict[str, Any]:
         from btc_quant.research.campaign import load_screen_template, run_screen
-        d = self._template_dict(template)
+        d = self._with_universe(self._template_dict(template), universe)
         tpl = load_screen_template(d)
         n = tpl.check_budget()
         needs: dict[str, int] = {}
@@ -416,6 +443,7 @@ class ResearchTools:
         res = run_screen(tpl, env=self.env(), progress=self.log)
         table = [_scalars(r) for r in res.table.to_dict("records")]
         return {"campaign_id": res.campaign_id, "hypothesis_id": res.hypothesis_id, "n_configs": n,
+                "universe": list(tpl.universe),
                 "n_passed": res.decision.get("n_passed"), "decision": _scalars(res.decision, 1000),
                 "configs": table, "passed": [r["label"] for r in table if r.get("passed")],
                 "lessons_facts": getattr(res, "lesson_facts", None), "weekly_budget_before": budget,
@@ -425,11 +453,11 @@ class ResearchTools:
 
     @tool
     def create_and_run_campaign(self, template: dict | str, max_candidates: int = 5,
-                                repeat_justification: str = "") -> dict[str, Any]:
+                                repeat_justification: str = "", universe: list[str] | None = None) -> dict[str, Any]:
         from btc_quant.research.campaign import CampaignTemplate, run_campaign
         from btc_quant.research.pipeline import run_pipeline
         from btc_quant.research.report import write_reports
-        d = self._template_dict(template)
+        d = self._with_universe(self._template_dict(template), universe)
         tpl = CampaignTemplate.from_dict(d)
         n_specs = tpl.check_budget()                           # 격자 > 템플릿 예산 → 거부
         if not tpl.screen_gated:
@@ -473,6 +501,8 @@ class ResearchTools:
         out: dict[str, Any] = {
             "campaign_id": campaign_id, "hypothesis_id": camp.get("hypothesis_id"), "family": camp.get("family"),
             "kind": grid.get("kind", "strategy_campaign"), "registered": camp.get("ts"), "budget": camp.get("budget"),
+            "universe": list(grid.get("universe") or (grid.get("data") or {}).get("universe")
+                             or [(grid.get("data") or {}).get("symbol") or "BTC-KRW"]),
             "hypothesis": {k: hyp.get(k) for k in ("text", "rationale", "success_criteria")},
             "facts": [{"id": f["id"], "outcome": f.get("outcome"), "taxonomy": f.get("taxonomy")}
                       for f in book.facts(campaign_id=campaign_id)],
@@ -555,6 +585,9 @@ class ResearchTools:
             "gates_dev": {g: _scalars(gates[g]) for g in GATES_DEV if g in gates},
             "G4_exposure_aware": _scalars((gates.get("G4") or {}).get("exposure_aware")) or None,
             "dev_passed": c.get("dev_passed"), "first_failed": c.get("first_failed"),
+            **({"universe": c.get("universe"),
+                "per_asset_dev": {k: _scalars(v) for k, v in (c.get("per_asset") or {}).items()}}
+               if c.get("per_asset") else {}),
             "G6_val": _outcome(g6.get("passed")) if isinstance(g6, dict) else "not evaluated",
             "G6_outcome": (g6.get("outcome") or _outcome(g6.get("passed"))) if isinstance(g6, dict)
             else "not evaluated",      # pass | fail | budget_exhausted | engine_mismatch (pipeline_public.json)

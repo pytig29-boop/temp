@@ -129,6 +129,26 @@ configs_evaluated, segment="dev")`(연구 모드에서는 MCP `log_exploration`)
 "exploration"`, 캠페인 폴더 없음) + runs `configs_evaluated` 줄(스펙 없음) → `trials_count(family)` 와 주간 예산에 더해진다.
 Dev 만 허용. 상세 docs/AI_RESEARCH.md §7.1.
 
+### 다자산 유니버스 (`universe`, PLAN D15 — 2026-11-10)
+```yaml
+universe: [BTC-KRW, XRP-KRW, ETH-KRW]   # 고정 3자산 중 부분집합. 생략 = [data.symbol] (기본 BTC-KRW, 이전과 동일)
+data: {exchange: coinone, timeframe: 1m, aux: [upbit]}   # data.symbol 은 생략(주면 유니버스 안에 있어야 함)
+```
+- 같은 스펙을 자산마다 같은 빠른 엔진으로 실행(자산별 Dev 1분봉 `prepare_m1`, 보조 데이터는 **같은 심볼**의 업비트)하고
+  슬리브(1/N) 일간 수익의 평균 = 포트폴리오 일간 수익으로 모든 지표·관문(G1 거래 수 = 자산 합계)을 계산한다.
+  스펙 하나 = 원장 시도 1회(유니버스는 파라미터가 아님 → 격자·예산·DSR 시도 수 그대로).
+- 스펙 dict·logic_hash 에 `universe` 가 들어간다(기본값이 아닐 때만) — 같은 규칙이라도 BTC 단독과 3자산은 다른 전략이며
+  Val 사용도 따로 센다. 오답노트 유사 탐색에서 유니버스가 다르면 `exact` 가 아니라 `same_blocks`.
+- 저장물: `results.parquet` 에 자산별 열 `asset.<SYM>.{n_trades, sharpe_w, total_return}`, 원장 runs.metrics.per_asset
+  (자산별 거래 수·Sharpe·수익·MDD·기대값), manifest `universe`·`sleeves`·`data.by_symbol`, 스냅샷 id 에 자산별 `|<SYM>:snap-…`.
+- 파이프라인: G2 귀무 = 자산별 random_entry(자산별 p 를 그 자산 거래 수에 보정, 같은 seed) → 포트폴리오 가중 Sharpe 분포,
+  G0 인과성 = 자산마다, G6 = 자산별 빠른·기준 엔진(모두 일치해야) → 포트폴리오(MC MDD = 거래당 슬리브 순수익/N),
+  견고성 = 자산별로 흔들고 포트폴리오로 판정(거래소 재현은 자산별 업비트), B&H = 동일 비중 3자산.
+  후보 `per_asset`(Dev)·리포트 'Per-asset' 표는 정보 전용. 자산별 Val 은 사람용 pipeline.json·리포트에만.
+  risk.yaml: `limits` = 포트폴리오, `sleeve_limits` = 슬리브별(같은 §7 공식).
+- 선별 게이트는 같은 유니버스로 풀링한 선별만 인정(docs/SIGNAL_STUDY.md §9b). MCP `screen_signals` /
+  `create_and_run_campaign` / `power_check` 는 `universe` 인자도 받는다.
+
 ## 무엇이 어디에 저장되나
 
 `research/campaigns/<campaign_id>/` (campaign_id = 원장 id, 예: `camp-000001`)

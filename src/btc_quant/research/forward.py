@@ -48,6 +48,10 @@
   네트워크 오류) 그 날 기록을 남기지 않고(재실행 때 다시 시도) 리포트에 warmup_unavailable 로만 표시한다.
 - 레지스트리 전략(validated/challenger)은 기존 규칙(Forward 데이터만, 일수 워밍업) 그대로다.
 
+다자산 유니버스 (PLAN D15): 스펙의 `universe`(예: BTC/XRP/ETH-KRW)마다 Forward 1분봉을 받아(수집도 자산별) 같은
+엔진으로 실행하고 슬리브 평균 = 포트폴리오로 기록한다(캠페인·파이프라인과 같은 회계). B&H = 동일 비중. 원장 레코드에
+`universe`·`per_asset`(자산별 거래 수·수익)이 붙는다. 기본 유니버스 [BTC-KRW] 는 이전과 같은 호출·같은 기록.
+
 기대 구간 (vs backtest)
 - 원장의 Dev 실행(같은 logic_hash, 전략 캠페인의 primary 비용) 지표 mean_daily·std_daily·
   trades_per_day 로 n일 누적 수익의 정규근사 구간 n·μ ± z·σ·√n (z: G8.pnl_band 양측, 기본 90%),
@@ -73,6 +77,7 @@ from btc_quant.params import gate_config_for_campaign
 from btc_quant.registry.strategies import key_of
 from btc_quant.strategy.blocks import REGISTRY
 
+from . import universe as U
 from .campaign import (
     DEFAULT_COSTS,
     HALF_LIFE_DAYS,
@@ -81,6 +86,7 @@ from .campaign import (
     aux_context,
     config_root,
     get_cost,
+    get_sleeve_cost,
     git_commit,
     prepare_m1,
     run_params,
@@ -105,22 +111,35 @@ Fetcher = Callable[[str, pd.Timestamp, pd.Timestamp], pd.DataFrame]
 
 
 # ============================================================== 수집
-def rest_fetcher(exchange: str, start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
-    """기존 REST 수집기로 [start, end) 1분봉 (KRW-BTC)."""
+def rest_fetcher(exchange: str, start: pd.Timestamp, end: pd.Timestamp, symbol: str = SYMBOL) -> pd.DataFrame:
+    """기존 REST 수집기로 [start, end) 1분봉 (기본 KRW-BTC; symbol = 유니버스 자산 BTC-KRW/XRP-KRW/ETH-KRW)."""
+    market = U.market_code(symbol)
     if exchange == "coinone":
         from btc_quant.data import coinone
-        return coinone.fetch_candles("KRW-BTC", 1, start, end, progress=False)
+        return coinone.fetch_candles(market, 1, start, end, progress=False)
     if exchange in ("upbit", "bithumb"):
         from btc_quant.data import upbit
-        return upbit.fetch_candles(exchange, "KRW-BTC", 1, start.to_pydatetime(), end.to_pydatetime(),
+        return upbit.fetch_candles(exchange, market, 1, start.to_pydatetime(), end.to_pydatetime(),
                                    progress=False)
     raise ValueError(f"no REST fetcher for {exchange!r}")
 
 
-def _stored_last(env: ResearchEnv, exchange: str, start, end) -> tuple[pd.Timestamp | None, int]:
+def _call_fetcher(fetcher: Fetcher, exchange: str, start, end, symbol: str = SYMBOL) -> pd.DataFrame:
+    """기본 심볼은 이전 시그니처 그대로 (exchange, start, end), 다른 자산은 symbol= 키워드를 붙인다."""
+    if symbol == SYMBOL:
+        return fetcher(exchange, start, end)
+    return fetcher(exchange, start, end, symbol=symbol)
+
+
+def _series_key(exchange: str, symbol: str) -> str:
+    """수집·커버리지 키: 기본 심볼은 거래소 이름 그대로(이전 형식), 다른 자산은 '<거래소>:<심볼>'."""
+    return exchange if symbol == SYMBOL else f"{exchange}:{symbol}"
+
+
+def _stored_last(env: ResearchEnv, exchange: str, start, end, symbol: str = SYMBOL) -> tuple[pd.Timestamp | None, int]:
     """Forward 구간 [start, end) 안의 저장된 마지막 봉 시각과 행 수 (DataAccess 경유)."""
     try:
-        df = env.data.read_range(start, end, exchange, SYMBOL, TIMEFRAME)
+        df = env.data.read_range(start, end, exchange, symbol, TIMEFRAME)
     except _NO_DATA:
         return None, 0
     if df.empty:
@@ -129,35 +148,39 @@ def _stored_last(env: ResearchEnv, exchange: str, start, end) -> tuple[pd.Timest
 
 
 def fetch_forward(env: ResearchEnv, exchanges, fwd_start: pd.Timestamp, window_end: pd.Timestamp,
-                  fetcher: Fetcher | None = None, log: Callable[[str], None] = lambda s: None) -> dict:
-    """저장소에 없는 Forward 1분봉을 받아 추가. 요청 시작은 항상 >= fwd_start (잠금 구간 미접근)."""
+                  fetcher: Fetcher | None = None, log: Callable[[str], None] = lambda s: None,
+                  symbols=(SYMBOL,)) -> dict:
+    """저장소에 없는 Forward 1분봉을 받아 추가. 요청 시작은 항상 >= fwd_start (잠금 구간 미접근).
+    symbols: 추적 전략들의 유니버스 자산 합집합 (기본 BTC-KRW; 결과 키는 `_series_key`)."""
     from btc_quant.data.store import write_ohlcv
 
     fetcher = fetcher or rest_fetcher
     out = {}
-    for ex in exchanges:
-        last, _ = _stored_last(env, ex, fwd_start, window_end)
-        start = max(fwd_start, last + pd.Timedelta(minutes=1)) if last is not None else fwd_start
-        if start >= window_end:
-            out[ex] = {"fetched": 0, "note": "up to date"}
-            continue
-        try:
-            df = fetcher(ex, start, window_end)
-        except Exception as e:   # noqa: BLE001 — 예약 작업: 거래소 하나의 실패로 전체를 멈추지 않는다
-            out[ex] = {"fetched": 0, "error": f"{type(e).__name__}: {e}"}
-            log(f"fetch {ex} failed: {e}")
-            continue
-        if df is None or df.empty:
-            out[ex] = {"fetched": 0, "start": start.isoformat()}
-            continue
-        idx = pd.DatetimeIndex(df.index)
-        idx = idx.tz_localize("UTC") if idx.tz is None else idx.tz_convert("UTC")
-        df = df.set_axis(idx)
-        df = df[(df.index >= max(start, fwd_start)) & (df.index < window_end)]   # 이중 안전장치
-        if not df.empty:
-            write_ohlcv(df, ex, SYMBOL, TIMEFRAME, root=env.data.data_root)
-        out[ex] = {"fetched": len(df), "start": start.isoformat(), "end": window_end.isoformat()}
-        log(f"fetch {ex}: {len(df)} rows [{start}, {window_end})")
+    for sym in symbols:
+        for ex in exchanges:
+            key = _series_key(ex, sym)
+            last, _ = _stored_last(env, ex, fwd_start, window_end, sym)
+            start = max(fwd_start, last + pd.Timedelta(minutes=1)) if last is not None else fwd_start
+            if start >= window_end:
+                out[key] = {"fetched": 0, "note": "up to date"}
+                continue
+            try:
+                df = _call_fetcher(fetcher, ex, start, window_end, sym)
+            except Exception as e:   # noqa: BLE001 — 예약 작업: 거래소 하나의 실패로 전체를 멈추지 않는다
+                out[key] = {"fetched": 0, "error": f"{type(e).__name__}: {e}"}
+                log(f"fetch {key} failed: {e}")
+                continue
+            if df is None or df.empty:
+                out[key] = {"fetched": 0, "start": start.isoformat()}
+                continue
+            idx = pd.DatetimeIndex(df.index)
+            idx = idx.tz_localize("UTC") if idx.tz is None else idx.tz_convert("UTC")
+            df = df.set_axis(idx)
+            df = df[(df.index >= max(start, fwd_start)) & (df.index < window_end)]   # 이중 안전장치
+            if not df.empty:
+                write_ohlcv(df, ex, sym, TIMEFRAME, root=env.data.data_root)
+            out[key] = {"fetched": len(df), "start": start.isoformat(), "end": window_end.isoformat()}
+            log(f"fetch {key}: {len(df)} rows [{start}, {window_end})")
     return out
 
 
@@ -333,7 +356,7 @@ def spec_aux_keys(spec, registry=REGISTRY) -> list[str]:
 
 
 def forward_aux_context(env: ResearchEnv, spec, fwd_start: pd.Timestamp, window_end: pd.Timestamp,
-                        warm_raw: Callable[[str], pd.DataFrame] | None = None):
+                        warm_raw: Callable[[str], pd.DataFrame] | None = None, symbol: str = SYMBOL):
     """보조 데이터가 필요한 스펙의 ctx (필요 없으면 None).
 
     research/campaign.aux_context·페이퍼와 같은 구성: 보조 거래소 1분봉을 **Forward 구간만**
@@ -347,7 +370,7 @@ def forward_aux_context(env: ResearchEnv, spec, fwd_start: pd.Timestamp, window_
     aux_m1, rows = {}, {}
     for a in keys:
         try:
-            raw = env.data.read_range(fwd_start, window_end, a, SYMBOL, TIMEFRAME)
+            raw = env.data.read_range(fwd_start, window_end, a, symbol, TIMEFRAME)
         except _NO_DATA:
             raw = pd.DataFrame()
         if raw.empty:
@@ -390,14 +413,15 @@ class RestWarmup:
         self._cache: dict[tuple, pd.DataFrame] = {}
         self.calls: list[tuple[str, pd.Timestamp, pd.Timestamp]] = []
 
-    def get(self, exchange: str, start: pd.Timestamp, fwd_start: pd.Timestamp) -> pd.DataFrame:
+    def get(self, exchange: str, start: pd.Timestamp, fwd_start: pd.Timestamp,
+            symbol: str = SYMBOL) -> pd.DataFrame:
         if self.fetcher is None:
             raise WarmupUnavailable("REST warm-up disabled (--no-fetch)")
-        k = (exchange, start, fwd_start)
+        k = (exchange, start, fwd_start) if symbol == SYMBOL else (exchange, start, fwd_start, symbol)
         if k not in self._cache:
             self.calls.append(k)
             try:
-                df = self.fetcher(exchange, start, fwd_start)
+                df = _call_fetcher(self.fetcher, exchange, start, fwd_start, symbol)
             except Exception as e:   # noqa: BLE001 — 네트워크 오류 → 그 날 기록하지 않고 다음 실행에서 재시도
                 raise WarmupUnavailable(f"warm-up fetch {exchange} failed: {type(e).__name__}: {e}") from e
             if df is None or df.empty:
@@ -479,41 +503,62 @@ def evaluate(env: ResearchEnv, fs: ForwardStrategy, fwd_start: pd.Timestamp, win
     if window_end <= eval_start:
         return {**base, "status": "warming_up",
                 "days_until_eval": math.ceil((eval_start - window_end) / pd.Timedelta(days=1))}
-    try:
-        raw = env.data.read_range(fwd_start, window_end, fs.exchange, SYMBOL, TIMEFRAME)
-        if raw.empty:
-            raise CampaignError("no data")
-    except (*_NO_DATA, CampaignError):
-        return {**base, "status": "no_data"}
-    warm_raw = None
-    if rest:
-        w = warm if warm is not None else RestWarmup(None)
-
-        def warm_raw(ex: str) -> pd.DataFrame:
-            df = w.get(ex, warm_start, fwd_start)
-            wdesc.setdefault("warmup_rows", {})[ex] = len(df)      # 진단용 행 수만 (가격·성과 없음)
-            return df
-    try:
-        src = _join_warmup(warm_raw(fs.exchange), raw, fwd_start) if rest else raw
-        m1 = prepare_m1(src, fs.exchange)
-        if m1.index.max() < eval_start:
-            return {**base, "status": "no_data", "note": "no bars after warm-up"}
-        ctx, aux_rows = forward_aux_context(env, fs.spec, fwd_start, window_end, warm_raw)
-    except WarmupUnavailable as e:
-        return {**base, "status": "warmup_unavailable", "note": str(e), "_persist": False}
-    except CampaignError as e:
-        return {**base, "status": "no_data", "note": str(e)}
-    res = fast.run_fast(fs.spec, m1, get_cost(fs.cost, config_root(env)), eval_start, window_end, ctx=ctx)
-    _assert_forward_only(res, eval_start)
-    bh = _benchmark(m1, res.daily_returns.index, eval_start)
+    syms = list(getattr(fs.spec, "universe", (SYMBOL,)) or (SYMBOL,))
+    if len(syms) > 1 or syms[0] != SYMBOL:
+        base["universe"] = syms
+    w = (warm if warm is not None else RestWarmup(None)) if rest else None
+    sleeves, raws, m1s, aux_rows_all = {}, {}, {}, {}
+    cost = get_cost(fs.cost, config_root(env))
+    for sym in syms:
+        try:
+            raw = env.data.read_range(fwd_start, window_end, fs.exchange, sym, TIMEFRAME)
+            if raw.empty:
+                raise CampaignError("no data")
+        except (*_NO_DATA, CampaignError):
+            return {**base, "status": "no_data", **({"note": f"no {sym} data"} if len(syms) > 1 else {})}
+        warm_raw = None
+        if rest:
+            def warm_raw(ex: str, _sym=sym) -> pd.DataFrame:
+                df = w.get(ex, warm_start, fwd_start, _sym)
+                key = ex if _sym == SYMBOL else f"{ex}:{_sym}"
+                wdesc.setdefault("warmup_rows", {})[key] = len(df)      # 진단용 행 수만 (가격·성과 없음)
+                return df
+        try:
+            src = _join_warmup(warm_raw(fs.exchange), raw, fwd_start) if rest else raw
+            m1 = prepare_m1(src, fs.exchange)
+            if m1.index.max() < eval_start:
+                return {**base, "status": "no_data", "note": "no bars after warm-up"}
+            ctx, aux_rows = forward_aux_context(env, fs.spec, fwd_start, window_end, warm_raw, symbol=sym)
+        except WarmupUnavailable as e:
+            return {**base, "status": "warmup_unavailable", "note": str(e), "_persist": False}
+        except CampaignError as e:
+            return {**base, "status": "no_data", "note": str(e)}
+        c_sym = cost if len(syms) == 1 else get_sleeve_cost(fs.cost, sym, config_root(env))
+        res = fast.run_fast(fs.spec, m1, c_sym, eval_start, window_end, ctx=ctx)
+        _assert_forward_only(res, eval_start)
+        sleeves[sym], raws[sym], m1s[sym] = res, raw, m1
+        if aux_rows:
+            aux_rows_all.update(aux_rows if sym == SYMBOL else {f"{k}:{sym}": v for k, v in aux_rows.items()})
+    res = U.portfolio_result(sleeves)
+    if len(syms) == 1:
+        bh = _benchmark(m1s[syms[0]], res.daily_returns.index, eval_start)
+    else:
+        parts = {sym: _benchmark(m1s[sym], res.daily_returns.index, eval_start) for sym in syms}
+        bh = None if any(v is None for v in parts.values()) else U.combine_daily(parts)
     met = M.summarize(res, HALF_LIFE_DAYS, benchmark=bh)
+    raw0 = raws[syms[0]]
     out = {**base, "status": "ok", "n_days": met["n_days"], "n_trades": met["n_trades"],
            "net_return": met["total_return"], "sharpe": met["sharpe"], "mean_daily": met["mean_daily"],
            "max_dd": met["max_dd"], "expectancy": met["expectancy"], "win_rate": met["win_rate"],
-           "data_rows": len(raw), "data_last_ts": pd.Timestamp(raw.index.max()).isoformat()}
+           "data_rows": len(raw0) if len(syms) == 1 else int(sum(len(r) for r in raws.values())),
+           "data_last_ts": pd.Timestamp(min(r.index.max() for r in raws.values())).isoformat()}
     out.update({k: met[k] for k in BENCH_KEYS if k in met})
-    if aux_rows:
-        out["aux_rows"] = aux_rows
+    if len(syms) > 1:
+        out["per_asset"] = {sym: {"n_trades": int(len(r.trades)),
+                                  "net_return": float((1 + r.daily_returns).prod() - 1),
+                                  "data_rows": len(raws[sym])} for sym, r in sleeves.items()}
+    if aux_rows_all:
+        out["aux_rows"] = aux_rows_all
     exp = expectation_band(env, fs.logic_hash, fs.cost, met["n_days"], band)
     out["expected"] = exp
     out["within_band"] = (None if exp is None
@@ -554,11 +599,13 @@ def run_forward(root: str | Path | None = None, env: ResearchEnv | None = None, 
     window_end = min(day + pd.Timedelta(days=1), fwd_end)     # Forward 에 끝이 지정된 경우(롤링 후) 그 끝까지
     if window_end <= fwd_start:
         raise ValueError(f"as-of {as_of_s} is before the forward segment start {fwd_start.date()}")
-    fetched = fetch_forward(env, exchanges, fwd_start, window_end, fetcher, log) if fetch else None
     pver = run_params(env)                     # params_version + cost_versions (docs/PARAMS.md §4)
     tracked = resolve_strategies(env, states)
     watch, watch_errors = ([], []) if watchlist is False else resolve_watchlist(
         env, None if watchlist in (None, True) else watchlist, skip_keys={fs.key for fs in tracked})
+    symbols = [SYMBOL] + sorted({s for fs in tracked + watch for s in getattr(fs.spec, "universe", ())} - {SYMBOL},
+                                key=lambda x: (U.FIXED_ASSETS.index(x) if x in U.FIXED_ASSETS else 99, x))
+    fetched = fetch_forward(env, exchanges, fwd_start, window_end, fetcher, log, symbols) if fetch else None
     for e in watch_errors:
         log(f"watchlist: {e['key']}: {e['error']}")
     if warmup_fetcher is None and fetch:
@@ -582,7 +629,8 @@ def run_forward(root: str | Path | None = None, env: ResearchEnv | None = None, 
         new += int(created)
         results.append(env.ledger.get("forward_results", rid))
         log(f"{fs.key}: {rec['status']}")
-    coverage = {ex: _coverage(env, ex, fwd_start, window_end) for ex in exchanges}
+    coverage = {_series_key(ex, sym): _coverage(env, ex, fwd_start, window_end, sym)
+                for sym in symbols for ex in exchanges}
     summary = {"as_of": as_of_s, "forward_start": fwd_start.isoformat(), "window_end": window_end.isoformat(),
                "warmup_days": warmup, "states": list(states), "fetch": fetched, "coverage": coverage,
                "n_strategies": len(results), "n_new": new, "results": results,
@@ -594,8 +642,8 @@ def run_forward(root: str | Path | None = None, env: ResearchEnv | None = None, 
     return summary
 
 
-def _coverage(env: ResearchEnv, ex: str, start, end) -> dict:
-    last, n = _stored_last(env, ex, start, end)
+def _coverage(env: ResearchEnv, ex: str, start, end, symbol: str = SYMBOL) -> dict:
+    last, n = _stored_last(env, ex, start, end, symbol)
     expected = int((end - start) / pd.Timedelta(minutes=1))
     return {"rows": n, "last_ts": last.isoformat() if last is not None else None,
             "expected_rows": expected}

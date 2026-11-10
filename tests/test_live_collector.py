@@ -205,3 +205,42 @@ def test_cli_kill_resume(tmp_path, monkeypatch):
     assert (tmp_path / "FLATTEN").exists()
     assert main(["resume", "--runtime", str(tmp_path)]) == 0
     assert not (tmp_path / "FLATTEN").exists()
+
+
+# ---- 다중 심볼 (PLAN D15) ------------------------------------------------------------------
+
+def test_multi_symbol_subscriptions_parse_and_partitions(tmp_path):
+    syms = wc.parse_symbols("BTC-KRW, xrp-krw,ETH-KRW")
+    assert syms == ("BTC-KRW", "XRP-KRW", "ETH-KRW") and wc.parse_symbols("") is None
+    with pytest.raises(ValueError):
+        wc.parse_symbols("BTCUSDT")
+    co = wc.CoinoneAdapter(symbols=syms)
+    subs = [json.loads(m) for m in co.subscribe_messages()]
+    assert len(subs) == 6 and {(m["channel"], m["topic"]["target_currency"]) for m in subs} == {
+        (ch, a) for ch in ("TRADE", "ORDERBOOK") for a in ("BTC", "XRP", "ETH")}
+    xrp = {**CO_TRADE, "data": {**CO_TRADE["data"], "target_currency": "XRP", "price": "3100"}}
+    [(k, r)] = co.parse(json.dumps(xrp), 1.0)
+    assert r["symbol"] == "XRP-KRW" and r["price"] == 3100.0
+    up = wc.UpbitAdapter(symbols=syms)
+    sub = json.loads(up.subscribe_messages()[0])
+    assert next(d for d in sub if d.get("type") == "trade")["codes"] == ["KRW-BTC", "KRW-XRP", "KRW-ETH"]
+    [(k, r)] = up.parse(json.dumps({**UP_TRADE, "code": "KRW-ETH"}).encode(), 1.0)
+    assert r["symbol"] == "ETH-KRW"
+    # 기본(단일 BTC) 어댑터는 행에 symbol 을 붙이지 않는다 (이전과 같은 행·파일)
+    [(k, r)] = wc.CoinoneAdapter().parse(json.dumps(CO_TRADE), 1.0)
+    assert "symbol" not in r
+    # 수집기: 심볼별 파티션, 파일에 symbol 열 없음, 호가 샘플링은 심볼별
+    eth_book = {**UP_BOOK, "code": "KRW-ETH"}
+    msgs = [json.dumps({**UP_TRADE, "code": c}).encode() for c in ("KRW-BTC", "KRW-XRP", "KRW-ETH")]
+    msgs += [json.dumps(UP_BOOK).encode(), json.dumps(eth_book).encode()]
+    c = wc.Collector(_cfg(tmp_path, symbols=syms), ws_connect=make_connect([FakeWS(msgs)]))
+    seen = []
+    c.add_listener(lambda ex, kind, row: seen.append((kind, row.get("symbol"))))
+    summary = asyncio.run(c.run(duration=1.0, install_signals=False))
+    assert ("trades", "XRP-KRW") in seen and ("orderbook", "ETH-KRW") in seen
+    files = summary["files"]
+    by = {(p.split("/symbol=")[1].split("/")[0], p.split("/symbol=")[1].split("/")[1]) for p in files}
+    assert {("BTC-KRW", "trades"), ("XRP-KRW", "trades"), ("ETH-KRW", "trades"),
+            ("BTC-KRW", "orderbook"), ("ETH-KRW", "orderbook")} <= by
+    df = pd.read_parquet(next(p for p in files if "/symbol=XRP-KRW/trades/" in p))
+    assert "symbol" not in df.columns and len(df) == 1

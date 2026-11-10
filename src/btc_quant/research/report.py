@@ -148,6 +148,15 @@ def render(campaign_id: str, root: str | Path | None = None, env: ResearchEnv | 
     L.append(f"- Data: {tpl.exchange} {tpl.symbol} {tpl.timeframe}, segment `{tpl.segment}` "
              f"[{man['period']['start']}, {man['period']['end']}), {man['data']['rows_1m']:,} 1m rows "
              f"(filled {man['data']['filled_frac']:.2%}) — read via DataAccess, `prepare_m1` (venue clean_wicks k={_wk(tpl.exchange)} → regularize → gap warm-up)")
+    if len(tpl.universe) > 1 or man.get("universe"):
+        bys = (man.get("data") or {}).get("by_symbol") or {}
+        L.append(f"- **Universe {list(tpl.universe)}** (PLAN D15): the same spec on every asset, pooled as ONE strategy "
+                 "— equal fixed sleeves (1/N), independent position per asset, portfolio daily return = mean of "
+                 "sleeve returns; gates use the portfolio series and pooled trades (G1 = sum over assets); "
+                 "1 ledger trial per spec. Per-asset rows below are information only.")
+        for sym, v in bys.items():
+            L.append(f"  - {sym}: {v.get('rows_1m', 0):,} 1m rows (filled {v.get('filled_frac', 0):.2%})"
+                     + (f", aux rows {v.get('aux_rows_1m')}" if v.get("aux_rows_1m") else ""))
     L.append(f"- Entry `{tpl.entry.block}`: {tpl.entry.grid}")
     for i, fs in enumerate(tpl.filter_sets):
         desc = ", ".join(f"`{f.block}` {f.grid}" for f in fs) or "(no filter)"
@@ -191,9 +200,15 @@ def render(campaign_id: str, root: str | Path | None = None, env: ResearchEnv | 
     pcols = [c for c in prim.columns if c.startswith("entry.") or ("." in c and c.split(".")[0] in
              {f.block for fs in tpl.filter_sets for f in fs})]
     L.append(_table(prim.head(10).to_dict("records"), cols[:2] + pcols + [c for c in cols[2:] if c in prim.columns]))
+    acols = [c for c in prim.columns if c.startswith("asset.")]
+    if acols:
+        L.append("Per-asset breakdown of the top specs (Dev, primary cost; information only — gates use the pooled "
+                 "portfolio):\n")
+        L.append(_table(prim.head(10).to_dict("records"), ["spec_id", *acols]))
     bm = man.get("benchmark") or {}
     if bm.get("bh_total_return") is not None:
-        L.append(f"BTC buy & hold over the same Dev period (information only): total return "
+        kind = bm.get("kind") or "BTC buy & hold"
+        L.append(f"Buy & hold over the same Dev period ({kind}; information only): total return "
                  f"{_f(bm.get('bh_total_return'))}, Sharpe {_f(bm.get('bh_sharpe'))}, MDD {_f(bm.get('bh_max_dd'))}.\n")
     L.append(f"Distribution of weighted Sharpe over all {len(prim)} specs: "
              f"median {prim['sharpe_w'].median():.3f}, share > 0 {(prim['sharpe_w'] > 0).mean():.1%}, "
@@ -252,10 +267,21 @@ def render(campaign_id: str, root: str | Path | None = None, env: ResearchEnv | 
             if nb:
                 L.append("- G3 neighbors: " + ", ".join(f"{n['change']}→{_f(n['sharpe_w'], 2)}" for n in nb))
             L.append("")
-            L += benchmark_lines(m, "Dev, primary cost")
+            L += benchmark_lines(m, "Dev, primary cost", *([f"EW {len(tpl.universe)}-asset buy & hold"]
+                                                            if len(tpl.universe) > 1 else []))
+            if c.get("per_asset"):
+                L.append("Per-asset (Dev, primary cost; information only — gates use the pooled portfolio):\n")
+                L.append(_table([{"asset": k, **v} for k, v in c["per_asset"].items()],
+                                ["asset", "n_trades", "recent_n_trades", "sharpe_w", "sharpe", "total_return",
+                                 "max_dd", "expectancy", "win_rate"]))
+            if not agent and isinstance(c["gates"].get("G6"), dict) and c["gates"]["G6"].get("per_asset_val"):
+                L.append("Per-asset **Val** (HUMAN-ONLY, information only):\n")
+                L.append(_table([{"asset": k, **v} for k, v in c["gates"]["G6"]["per_asset_val"].items()],
+                                ["asset", "n_trades", "sharpe", "total_return", "max_dd", "expectancy"]))
             g6d = c["gates"].get("G6")
             if not agent and isinstance(g6d, dict) and g6d.get("benchmark_val"):
-                L += benchmark_lines(g6d["benchmark_val"], "**Val** — HUMAN-ONLY")
+                L += benchmark_lines(g6d["benchmark_val"], "**Val** — HUMAN-ONLY",
+                                     *([f"EW {len(tpl.universe)}-asset buy & hold"] if len(tpl.universe) > 1 else []))
             if c.get("yearly"):
                 L.append("Yearly (Dev, primary cost):\n")
                 L.append(_table(c["yearly"], ["year", "n_days", "total_return", "sharpe", "max_dd", "n_trades"]))
@@ -321,12 +347,13 @@ BH_DEV_ROWS = (("Total return", "total_return", "bh_total_return"),
                ("Max drawdown", "max_dd", "bh_max_dd"))
 
 
-def benchmark_lines(m: dict, label: str) -> list[str]:
-    """전략 vs BTC 매수보유(같은 기간·같은 거래소 close, 비용 없음) — 정보 전용, 관문 아님."""
+def benchmark_lines(m: dict, label: str, bh_name: str = "BTC buy & hold") -> list[str]:
+    """전략 vs BTC 매수보유(같은 기간·같은 거래소 close, 비용 없음) — 정보 전용, 관문 아님.
+    다자산 유니버스는 bh_name = 동일 비중 N자산 매수보유."""
     if m.get("bh_total_return") is None and m.get("exposure_days") is None:
         return []
     L = [f"Buy & hold reference ({label}; information only — not a gate):\n",
-         "| | strategy | BTC buy & hold |", "|---|---|---|"]
+         f"| | strategy | {bh_name} |", "|---|---|---|"]
     for name, a, b in BH_DEV_ROWS:
         L.append(f"| {name} | {_f(m.get(a))} | {_f(m.get(b))} |")
     L.append("")

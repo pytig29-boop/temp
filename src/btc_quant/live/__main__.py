@@ -1,6 +1,6 @@
 """실시간 운용 계층 CLI.
 
-  uv run python -m btc_quant.live collect --exchanges coinone,upbit [--duration 60]
+  uv run python -m btc_quant.live collect --exchanges coinone,upbit [--symbols BTC-KRW,XRP-KRW,ETH-KRW] [--duration 60]
   uv run python -m btc_quant.live healthcheck [--heartbeat runtime/collector.heartbeat]
   uv run python -m btc_quant.live kill [--flatten] [--reason "..."]
   uv run python -m btc_quant.live resume
@@ -28,13 +28,14 @@ def _setup_logging(level: str) -> None:
 def cmd_collect(a) -> int:
     cfg = ws_collector.CollectorConfig(
         exchanges=ws_collector.parse_exchanges(a.exchanges), root=Path(a.root),
+        symbols=ws_collector.parse_symbols(a.symbols),
         ob_interval=a.ob_interval, stale_seconds=a.stale_seconds,
         flush_seconds=a.flush_seconds,
         heartbeat_path=Path(a.heartbeat) if a.heartbeat else None,
         gaps_path=Path(a.gaps) if a.gaps else None)
     n = notify.from_env()
     c = ws_collector.Collector(cfg, notifier=n)
-    n.send(f"collector 시작: {','.join(cfg.exchanges)}")
+    n.send(f"collector 시작: {','.join(cfg.exchanges)} / {','.join(cfg.symbols or (cfg.symbol,))}")
     summary = asyncio.run(c.run(duration=a.duration or None))
     print(json.dumps(summary, ensure_ascii=False, indent=1))
     n.send(f"collector 종료 ({summary['elapsed']}s)")
@@ -82,6 +83,8 @@ def main(argv: list[str] | None = None) -> int:
 
     c = sub.add_parser("collect", help="공개 WebSocket 체결·호가 수집")
     c.add_argument("--exchanges", default="coinone,upbit")
+    c.add_argument("--symbols", default=None,
+                   help="쉼표 구분 심볼 (예: BTC-KRW,XRP-KRW,ETH-KRW — D15). 기본: BTC-KRW 하나 (이전과 같음)")
     c.add_argument("--duration", type=float, default=0, help="초; 0이면 무기한")
     c.add_argument("--root", default="data/raw")
     c.add_argument("--ob-interval", type=float, default=1.0)

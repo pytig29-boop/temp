@@ -100,6 +100,13 @@ docker compose -f deploy/docker-compose.yml up -d --build
 
 ---
 
+### 다중 심볼 수집 (PLAN D15, 2026-11-10)
+`python -m btc_quant.live collect --exchanges coinone,upbit --symbols BTC-KRW,XRP-KRW,ETH-KRW` — 한 연결에서 심볼마다 구독
+(코인원: 심볼별 TRADE·ORDERBOOK, 업비트: codes 목록), 저장은 `data/raw/exchange=<ex>/symbol=<SYM>/{trades,orderbook}/…`
+(심볼별 파티션, 파일 스키마는 같음). 호가 디스크 샘플링(1초 1개)은 (거래소, 심볼)별. `--symbols` 를 생략하면 BTC-KRW 하나
+(이전과 같음). **이미 실행 중인 수집기는 재시작해야 새 심볼을 받는다** (docker-compose `collector` command 에 `--symbols` 추가).
+디스크 사용량은 심볼 수에 비례(XRP·ETH 체결 빈도는 BTC 와 비슷하거나 더 많을 수 있음 — 1주 후 실측 확인).
+
 ## 4. 로그 로테이션
 
 - 컨테이너 로그: compose 에 `json-file` 드라이버 `max-size: 20m`, `max-file: 5` 설정(서비스당 최대 100 MB).
@@ -253,6 +260,14 @@ docker compose -f deploy/docker-compose.yml up -d --build
 | `<id>_v<ver>/heartbeat.json`, `spec.yaml`, `meta.json` | 전략별 상태 스냅샷, 운용 중 스펙 사본, 등급·한도·lookback |
 
 크기: 결정 288행/일(1분 주기 전략은 1,440행/일) + 거래 수 → 전략당 하루 수백 KB~수 MB. 월 1회 백업 후 오래된 jsonl 을 압축 보관.
+
+### 다자산 스펙 (PLAN D15)
+스펙에 `universe`(예: BTC/XRP/ETH-KRW)가 있으면 자산(슬리브)마다 트레이더 하나: 키·디렉터리 `<id>_v<ver>@<SYM>`, 초기 자산 =
+`--notional`/N, 슬리브 리스크 한도 = risk.yaml `sleeve_limits.<SYM>`(없으면 `limits`). 포트폴리오 리스크 묶음
+(`runtime/paper/portfolio_<id>_v<ver>.risk.json`)은 슬리브 평가자산 합계로 `limits`(일/주/누적 낙폭·하루 거래 수)를 판정하고,
+슬리브는 자기 한도와 포트폴리오 한도를 모두 통과해야 진입한다. 포트폴리오 누적 낙폭(사람 정지)·청산 스위치는 모든 슬리브를
+청산한다. 데이터 지연·참조가 괴리는 자산별(슬리브)로만 본다. 서비스의 수집기는 필요한 모든 심볼을 구독하고 워밍업 REST 도
+심볼별로 받는다. `paper report --key <id>_v<ver>@<SYM>` 은 그 자산 1분봉으로 백테스트와 비교한다.
 
 ### 리스크 한도·등급
 스펙 파일 옆 `<스펙 파일명>.risk.yaml` 에 둔다 (예: `strategies/challenger/foo_v2.risk.yaml`):

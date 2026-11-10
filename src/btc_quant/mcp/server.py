@@ -37,7 +37,9 @@ DESCRIPTIONS = {
                     "and template checks (derived-family inheritance).",
     "screen_signals": "Run a pre-registered signal screen (event study vs matched null, no exits) on Dev from a "
                       "screen template (mapping or YAML path in the repo). Enforces the weekly trial budget; records "
-                      "ledger runs and lessons facts; returns per-config pass/fail.",
+                      "ledger runs and lessons facts; returns per-config pass/fail. Optional universe (subset of "
+                      "BTC-KRW, XRP-KRW, ETH-KRW; PLAN D15) pools events across assets with a per-asset matched "
+                      "null — one trial per signal config.",
     "power_check": "Power calculator: minimum annual Sharpe that can pass G5 (DSR) for a planned grid size or "
                    "campaign template, given the family's accumulated trials; compares with target_sharpe.",
     "create_and_run_campaign": "Pre-register and run a screen-gated strategy campaign from a template, then the "
@@ -45,7 +47,9 @@ DESCRIPTIONS = {
                                "Refuses before any ledger write if the grid exceeds the template budget or the "
                                "weekly family budget, a signal config did not pass a recorded screen, the strict "
                                "power check fails (power.target_sharpe required), or the grid exactly repeats a "
-                               "prior campaign without repeat_justification.",
+                               "prior campaign without repeat_justification. Optional universe (subset of BTC-KRW, "
+                               "XRP-KRW, ETH-KRW; PLAN D15): the same spec on every asset, equal sleeves, gates on "
+                               "the pooled portfolio, per-asset results reported; one trial per spec.",
     "list_campaigns": "List campaigns and screens in the ledger (newest first) with family, budget and verdict.",
     "get_campaign_report": "Structured summary of a campaign or screen: grid/power/screen linkage, Dev funnel and "
                            "per-candidate Dev gates, robustness and ablation, G6 as pass/fail only, lessons facts.",

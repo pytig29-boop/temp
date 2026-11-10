@@ -69,6 +69,12 @@ claude -p --agent researcher "research-campaign skill로 다음 가설 캠페인
 템플릿 인자(`template`)는 dict 또는 **저장소 안의** YAML 경로(`research/campaign_templates/x.yaml`)다.
 형식은 `research/campaigns/README.md`, 선별은 `docs/SIGNAL_STUDY.md`.
 
+### 다자산 유니버스 인자 (PLAN D15, 2026-11-10)
+`screen_signals`, `create_and_run_campaign`, `power_check` 는 선택 인자 `universe`(BTC-KRW·XRP-KRW·ETH-KRW 의 부분집합)를
+받는다 — 템플릿의 `universe` 키와 같은 의미(둘 다 주면 같아야 함). 같은 스펙을 자산마다 실행하고 포트폴리오(동일 슬리브)로
+관문을 판정하며 스펙 하나 = 시도 1회(주간 예산·검정력 계산 그대로). 결과의 `universe`·후보 `per_asset_dev`(Dev 자산별, 정보 전용)
+가 추가된다. 자산별 Val 은 반환하지 않는다(G6 결과 코드만). `get_data_summary` 는 `symbols` 필터를 받는다.
+
 ## 4. 안전 속성
 
 ### 4.1 의도적으로 없는 도구 (사람 전용)

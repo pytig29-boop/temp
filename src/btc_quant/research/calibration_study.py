@@ -38,6 +38,12 @@
    G4 변형은 복사한 원장에서 파이프라인을 다시 돌리고(보정 프로세스 안에서만 check_g4 를 감싼 반사실), 국면 검사 방식은
    같은 결과에 사후 적용(robustness.regime_verdict). 상위 후보 전부의 Dev 견고성 조건부 진단 포함.
    리포트 research/reports/calibration_regime_check_*.md.
+9. Val 길이·저회전 (기본 꺼짐, `--val-months N [--val-end D]`, `--full-low` / `--full-vlow`, `--markets`, `--strengths`):
+   `Layout.with_val_months` 가 val_end 를 고정한 채 Val 을 N 개월로 바꾼다(Dev 는 그만큼 짧아짐). 같은 seed·같은
+   데이터 구간이면 Val 6 vs 12 를 **같은 시장끼리 짝지어** 비교할 수 있다(엣지 표는 `--edge-from` 재사용).
+   저회전 시나리오(`5m_low` 하루 ≤ 1회, `5m_vlow` ≤ 0.33회): 5분봉 donchian(288)(직전 1일 고가) 돌파 후 1일/3일
+   σ 비례 드리프트를 **평균 중립**으로 심는다(`_gen_regime` 의 보정, 국면 드리프트 0) — 긴 보유 드리프트가 B&H 를
+   폭주시키고 무작위 진입 귀무(G2)까지 같이 벌게 만드는 것을 막는다. 리포트 research/reports/val_length_design_*.md.
 
 모드
 - quick: 짧은 구간(Dev 8개월·Val 2개월), 시장 2개(귀무 1 + 심은 1), 귀무 100개(→ config G2.null_runs 도
@@ -113,6 +119,25 @@ GRIDS_1M: dict[str, dict] = {
                       "max_hold_min": [20]}},
 }
 
+# ---- 저회전 시나리오 (기본 꺼짐: --full-low / --full-vlow). 5분봉 donchian(288) 돌파(직전 1일 고가) 확정 뒤
+# hold 봉 동안 σ 비례 드리프트, 평균 중립(gen_scenario_market). S*_low = 1일 보유(하루 ≤ 1회 거래),
+# S*_vlow = 3일 보유(≤ 0.33회). 격자 = lookback {144, 288, 576} × SL × TP × 보유 1개 (12 스펙, S* 포함).
+LOW_SCENARIOS: dict[str, dict] = {
+    "5m_low": {"plant_bar": 5, "plant_lookback": 288, "plant_hold": 288},
+    "5m_vlow": {"plant_bar": 5, "plant_lookback": 288, "plant_hold": 864},
+}
+PLANTED_SPEC_LOW = StrategySpec("planted_low", BlockRef("donchian_breakout", {"lookback": 288}),
+                                ExitSpec(6.0, 10.0, 1440))
+PLANTED_SPEC_VLOW = StrategySpec("planted_vlow", BlockRef("donchian_breakout", {"lookback": 288}),
+                                 ExitSpec(10.0, 20.0, 4320))
+GRIDS_LOW: dict[str, dict] = {
+    "l12": {"entry": {"lookback": [144, 288, 576]}, "filters": [[]],
+            "exits": {"sl_pct": [4.0, 6.0], "tp_pct": [6.0, 10.0], "max_hold_min": [1440]}},
+    "v12": {"entry": {"lookback": [144, 288, 576]}, "filters": [[]],
+            "exits": {"sl_pct": [6.0, 10.0], "tp_pct": [10.0, 20.0], "max_hold_min": [4320]}},
+}
+LOW_PILOT_KS = (0.0, 0.003, 0.005, 0.007, 0.009, 0.011, 0.014, 0.018)
+
 # ---- 누적 원장 시나리오: 같은 시장·같은 원장(같은 family)에서 캠페인 10개를 차례로. 앞 9개는 S* 를 포함하지
 # 않는 그럴듯한 변형(일부는 같은 돌파 신호의 다른 청산·필터 → 심은 시장에서 엣지와 상관), 마지막 = g12(S* 포함).
 _EX12 = {"sl_pct": [0.6, 1.0], "tp_pct": [0.8, 1.2], "max_hold_min": [60]}
@@ -139,20 +164,23 @@ CUM_SEQUENCE = ("c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8", "c9", "g12")
 
 
 def grid_def(grid: str) -> dict:
-    for d in (GRIDS, GRIDS_1M, CUM_GRIDS, GRIDS_REGIME):
+    for d in (GRIDS, GRIDS_1M, CUM_GRIDS, GRIDS_REGIME, GRIDS_LOW):
         if grid in d:
             return d[grid]
     raise KeyError(grid)
 
 
 def scenario_spec(scenario: str) -> StrategySpec:
-    return PLANTED_SPEC_1M if scenario == "1m_atr" else PLANTED_SPEC
+    return {"1m_atr": PLANTED_SPEC_1M, "5m_low": PLANTED_SPEC_LOW,
+            "5m_vlow": PLANTED_SPEC_VLOW}.get(scenario, PLANTED_SPEC)
 
 
 def plant_params(scenario: str, plant_lookback: int = PLANT_LOOKBACK) -> dict:
     """gen_market 의 심기 인자 (plant_lookback, plant_bar, plant_hold)."""
     if scenario == "1m_atr":
         return dict(PLANT_1M)
+    if scenario in LOW_SCENARIOS:
+        return dict(LOW_SCENARIOS[scenario])
     return {"plant_bar": 5, "plant_lookback": int(plant_lookback), "plant_hold": PLANT_HOLD5}
 
 
@@ -175,6 +203,22 @@ class Layout:
     @property
     def dev_years(self) -> float:
         return (pd.Timestamp(self.val_start) - pd.Timestamp(self.dev_start)).days / 365.25
+
+    @property
+    def val_months(self) -> float:
+        return (pd.Timestamp(self.val_end) - pd.Timestamp(self.val_start)).days / (365.25 / 12)
+
+    def with_val_months(self, months: int, val_end: str | None = None) -> "Layout":
+        """Val 길이를 months 개월로 바꾼 분할 (기본 꺼짐 — `--val-months`). val_end(기본 = 지금 값)는 고정하고
+        val_start 를 앞당긴다 → Dev 가 그만큼 짧아진다(합계 고정). 데이터 구간(data_start..val_end)이 같으면 같은
+        seed 의 시장이 같으므로 Val 길이별 결과를 시장끼리 짝지어 비교할 수 있다. Dev 는 최소 90일."""
+        ve = pd.Timestamp(val_end or self.val_end)
+        vs = ve - pd.DateOffset(months=int(months))
+        if int(months) < 1 or vs < pd.Timestamp(self.dev_start) + pd.Timedelta(days=90):
+            raise ValueError(f"val_months={months} leaves Dev < 90 days (dev_start {self.dev_start})")
+        le = max(pd.Timestamp(self.lockbox_end), ve + pd.Timedelta(days=7))
+        f = "%Y-%m-%d"
+        return Layout(self.data_start, self.dev_start, vs.strftime(f), ve.strftime(f), le.strftime(f))
 
 
 FULL_LAYOUT = Layout("2020-12-01", "2021-01-01", "2025-11-01", "2026-05-01", "2026-11-09")   # 실제 분할과 같은 길이
@@ -243,6 +287,35 @@ def m1_config(jobs: int = 4) -> StudyConfig:
                        n_null_decay=0, n_null=1000, jobs=jobs, scenario="1m_atr", seed0=7000,
                        pilot_ks=(0.0, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.1, 0.12), pilot_seeds=3,
                        pilot_years=3.0)
+
+
+def low_config(jobs: int = 4, scenario: str = "5m_low") -> StudyConfig:
+    """저회전 엣지(기본 꺼짐, --full-low / --full-vlow): S*_low(1일 보유) 또는 S*_vlow(3일 보유)의 참 비용후
+    Sharpe 별 검정력 + 귀무. Val 길이 비교(--val-months)와 함께 쓴다."""
+    if scenario not in LOW_SCENARIOS:
+        raise ValueError(scenario)
+    return StudyConfig(f"full-{scenario.split('_')[1]}", FULL_LAYOUT, strengths=(0.0, 1.0, 2.0, 3.0),
+                       n_null_markets=8, n_planted_markets=8, grid="l12" if scenario == "5m_low" else "v12",
+                       decay_grids=(), decay_strength=2.0, n_decay_markets=0, n_null_decay=0, n_null=1000,
+                       jobs=jobs, scenario=scenario, seed0=13_000 if scenario == "5m_low" else 15_000,
+                       pilot_ks=LOW_PILOT_KS, pilot_seeds=4, pilot_years=6.0)
+
+
+def apply_overrides(cfg: StudyConfig, val_months: int = 0, val_end: str | None = None, markets: int = 0,
+                    strengths: tuple[float, ...] | None = None) -> StudyConfig:
+    """CLI 의 기본 꺼짐 선택지: Val 길이(val_months > 0), 세기·시장 수 덮어쓰기(markets > 0 이면 격자 크기·손익분기
+    실험은 끔). 0/None = 그대로."""
+    if val_end and not val_months:
+        raise ValueError("--val-end needs --val-months")
+    if val_months:
+        cfg.layout = cfg.layout.with_val_months(val_months, val_end)
+        cfg.mode = f"{cfg.mode}-val{int(val_months)}m"
+    if strengths:
+        cfg.strengths = tuple(float(x) for x in strengths)
+    if markets:
+        cfg.n_null_markets = cfg.n_planted_markets = int(markets)
+        cfg.decay_grids, cfg.n_decay_markets, cfg.n_null_decay, cfg.n_breakeven_markets = (), 0, 0, 0
+    return cfg
 
 
 def cumulative_config(jobs: int = 4) -> StudyConfig:
@@ -477,6 +550,28 @@ def gen_regime_market(start: str, val_start: str, end: str, seed: int, k_edge: f
                          index=idx), sched)
 
 
+def gen_scenario_market(start: str, end: str, seed: int, k_edge: float, scenario: str = "5m",
+                        plant_lookback: int = PLANT_LOOKBACK) -> pd.DataFrame:
+    """시나리오별 1분봉 시장. 기존 시나리오(5m, 1m_atr) = gen_market 그대로. 저회전(LOW_SCENARIOS) = 같은 GARCH·꼬리·
+    계절성에 긴 보유 드리프트를 평균 중립으로 심은 시장(`_gen_regime`, 국면 드리프트 0·엣지 배수 1). start 는 자정 정렬."""
+    pp = plant_params(scenario, plant_lookback)
+    if scenario not in LOW_SCENARIOS:
+        return gen_market(start, end, seed, k_edge, **pp)
+    idx = pd.date_range(start, end, freq="1min", tz="UTC", inclusive="left", name="ts")
+    minute0 = int(idx[0].value // 60_000_000_000)
+    if minute0 % 1440:
+        raise ValueError("start must be midnight-aligned")
+    n_days = len(idx) // 1440 + 2
+    h_target = ANNUAL_VOL ** 2 / (365 * 24)
+    o, h, lo, c = _gen_regime(len(idx), minute0, int(seed), float(k_edge), int(pp["plant_lookback"]),
+                              int(pp["plant_hold"]), h_target, GARCH_ALPHA, GARCH_BETA, season_profile(), T_DF, WICK,
+                              int(pp["plant_bar"]), np.zeros(n_days), np.ones(n_days))
+    rng = np.random.default_rng(seed)
+    vol = rng.lognormal(0.0, 0.5, len(idx))
+    return pd.DataFrame({"open": o, "high": h, "low": lo, "close": c, "volume": vol, "quote_volume": vol * c},
+                        index=idx)
+
+
 def _engine_m1(df: pd.DataFrame) -> pd.DataFrame:
     from .campaign import prepare_m1
     return prepare_m1(df, "coinone")      # 합성 시장 = 파이프라인에서 coinone 으로 저장 (make_root) → 같은 준비
@@ -507,7 +602,7 @@ def _pilot_one(args) -> tuple[float, int, float, float]:
     k, seed, years, plb, scenario = args
     start = pd.Timestamp("2010-01-01", tz="UTC")
     end = start + pd.Timedelta(days=round(365.25 * years))
-    m1 = _engine_m1(gen_market(str(start), str(end), seed, k, **plant_params(scenario, plb)))
+    m1 = _engine_m1(gen_scenario_market(str(start), str(end), seed, k, scenario, plb))
     st = planted_stats(m1, start + pd.Timedelta(days=3), end, scenario_spec(scenario))
     return k, seed, st["sharpe"], st["trades_per_day"]
 
@@ -557,7 +652,7 @@ def make_root(tmp: Path, layout: Layout, seed: int, k_edge: float, plant_lookbac
     from btc_quant.data.store import write_ohlcv
     (tmp / "config").mkdir(parents=True, exist_ok=True)
     (tmp / "config" / "splits.yaml").write_text(yaml.safe_dump(layout.splits()))
-    df = gen_market(layout.data_start, layout.val_end, seed, k_edge, **plant_params(scenario, plant_lookback))
+    df = gen_scenario_market(layout.data_start, layout.val_end, seed, k_edge, scenario, plant_lookback)
     write_ohlcv(df, "coinone", "BTC-KRW", "1m", root=tmp / "data" / "raw")
     return tmp
 
@@ -1969,6 +2064,8 @@ def main(argv=None) -> int:
     m.add_argument("--full-smooth", action="store_true", help="완만한 엣지(plant_lookback=24) 검정력만")
     m.add_argument("--full-1m", action="store_true", help="1분 결정·ATR 청산 단기(20분) 고회전 엣지")
     m.add_argument("--cumulative", action="store_true", help="누적 원장: 시장마다 캠페인 10개를 한 원장에서")
+    m.add_argument("--full-low", action="store_true", help="저회전 엣지(1일 보유, 하루 ≤ 1회) 검정력·귀무")
+    m.add_argument("--full-vlow", action="store_true", help="초저회전 엣지(3일 보유, 하루 ≤ 0.33회) 검정력·귀무")
     m.add_argument("--regime", action="store_true",
                    help="국면 전환 시장: 현재 관문 vs 노출 인식 변형(exposure_aware) 오탐·검정력 (PLAN D14 초안)")
     ap.add_argument("--regime-quick", action="store_true", help="--regime 의 테스트용 짧은 설정")
@@ -1982,6 +2079,12 @@ def main(argv=None) -> int:
     ap.add_argument("--no-diag", action="store_true", help="--rcheck 조건부 진단 생략")
     ap.add_argument("--rcheck-beta", type=int, default=0, metavar="N",
                     help="베타 탐침: 귀무 국면 시장 N 개(+ 표준 귀무 30)에서 저회전 롱 스펙의 G2·알파·국면 검사 조건부 진단")
+    ap.add_argument("--val-months", type=int, default=0, metavar="N",
+                    help="(기본 꺼짐) Val 을 N 개월로: val_end 고정, Dev 가 그만큼 짧아짐 (Layout.with_val_months)")
+    ap.add_argument("--val-end", default=None, help="--val-months 와 함께: Val 끝 날짜(YYYY-MM-DD, 기본 = 실제 분할)")
+    ap.add_argument("--markets", type=int, default=0, metavar="N",
+                    help="(기본 꺼짐) 세기마다 시장 N 개(귀무 포함), 격자 크기·손익분기 실험 끔")
+    ap.add_argument("--strengths", default=None, help="(기본 꺼짐) 목표 Sharpe 목록, 쉼표 (예: 0,1,2,3)")
     ap.add_argument("--edge-from", default=None, help="이전 결과 json 의 edge_map 재사용(같은 설정일 때만)")
     ap.add_argument("--jobs", type=int, default=min(4, os.cpu_count() or 1))
     ap.add_argument("--out", default=None, help="markdown report path")
@@ -2027,7 +2130,10 @@ def main(argv=None) -> int:
         return 0
     cfg = (full_config(a.jobs) if a.full else smooth_config(a.jobs) if a.full_smooth
            else m1_config(a.jobs) if a.full_1m else cumulative_config(a.jobs) if a.cumulative
+           else low_config(a.jobs, "5m_low") if a.full_low else low_config(a.jobs, "5m_vlow") if a.full_vlow
            else quick_config(a.jobs))
+    cfg = apply_overrides(cfg, a.val_months, a.val_end, a.markets,
+                          tuple(float(x) for x in a.strengths.split(",")) if a.strengths else None)
     edge = json.loads(Path(a.edge_from).read_text(encoding="utf-8"))["edge_map"] if a.edge_from else None
     res = run_study(cfg, edge=edge)
     if a.json:
