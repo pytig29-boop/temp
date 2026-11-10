@@ -112,7 +112,7 @@ close, 비용 없음)와의 비교를 붙인다(`metrics.benchmark_metrics`, `su
 
 ### 노출 인식 관문 변형 (`exposure_aware`, **기본 OFF**, PLAN D14 초안 — 사람 승인 대기)
 `config/gates.yaml` `exposure_aware.enabled: false` 인 동안 G4/G6 판정은 그대로이고, 변형 결과는 G4/G6 세부의
-`exposure_aware` 에 **shadow(정보)** 로만 남는다(리포트에 "shadow, OFF — information only"). 설계·보정은 docs/PARAMS.md §8.
+`exposure_aware` 에 **shadow(정보)** 로만 남는다(리포트에 "shadow, OFF — information only"). 설계·보정은 docs/PARAMS.md §6.
 - G4 변형: 쉬는 창(시장 참여일 < `neutral_max_exposure`)을 양수 비율 분모에서 제외. 비중립 창 ≥ `min_active_windows`,
   Dev 시장 참여일 ≥ `min_dev_exposure`. 기존 통과 OR 변형 통과. 최근 12개월 Sharpe > 0 은 그대로.
 - G6 변형('쉬어서 피함' 경로): 기존 조건 OR [Val 시장 참여일 ≤ `flat_max_exposure`, B&H Val 수익 < 0, Val 수익 ≥

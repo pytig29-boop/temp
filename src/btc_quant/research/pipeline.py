@@ -54,6 +54,13 @@
   paper.service.load_risk_meta 형식: grade, limits{daily_loss, weekly_loss, max_drawdown, max_trades_per_day,
   expected_fee_rate}).
 - 오답노트: run 끝에서 `lessons.record_facts_from_pipeline(out, root=…)` (멱등).
+- 매수보유(B&H) 기준(정보 전용, PLAN D14): 후보 Dev 지표에 `metrics.benchmark_metrics`(노출·B&H 대비·capture·최악 B&H
+  낙폭 구간)를 붙이고(관문 설정의 중립 임계값으로 다시 계산 → G4 변형/shadow 입력), G6 세부에 Val B&H 비교
+  `benchmark_val`(사람 전용 — 에이전트 사본은 G6 결과 코드만).
+- 노출 인식 G4/G6 변형(`gates.yaml exposure_aware`, 기본 OFF): 꺼져 있으면 G4/G6 세부의 `exposure_aware` 에 shadow 만.
+  켜져 있으면 G6 '쉼' 경로(path="flat")는 Val Holm 을 요구하지 않는다(사용은 그대로 k번째로 기록).
+- Val 재사용 = 이전 결정: 같은 logic_hash 재평가는 지금 설정의 판정 AND 이전 Holm AND **이전 최종 결정** → 나중에
+  승인된 기준으로도 이전 G6 실패를 같은 Val 에서 뒤집을 수 없다.
 """
 from __future__ import annotations
 

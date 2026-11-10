@@ -47,7 +47,7 @@ G6:
     cap: 20                    # 20회 사용 시 Val 은퇴 → dev 편입, 새 Val 필요 (val_id 는 splits.yaml 의 val_id, 없으면 구간 경계로 생성)
     n_boot: 2000
     seed: 0
-# 노출 인식 관문 변형 (PLAN D14 초안 — 사람 승인 전, 기본 OFF; docs/PARAMS.md §8). 전부 class ② (config/params.yaml).
+# 노출 인식 관문 변형 (PLAN D14 초안 — 사람 승인 전, 기본 OFF; docs/PARAMS.md §6). 전부 class ② (config/params.yaml).
 # enabled: false 인 동안 G4/G6 판정은 위의 기존 규칙 그대로다. 파이프라인은 변형 결과를 정보(shadow)로만 기록한다.
 # 켜기 = class ② 기준 변경(btc_quant.params.criteria, 합성 보정 근거만) + 사람 승인 → 승인 이후 등록되는 캠페인부터.
 # 변형은 기존 규칙의 상위 집합이다(기존 통과 = 변형 통과). 엣지 증거(G1·G2·G3·G5)와 잠금(G7)·전진(G8)은 그대로.

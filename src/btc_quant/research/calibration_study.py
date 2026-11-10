@@ -28,6 +28,11 @@
 6. 누적 원장 (`--cumulative`): 시장마다 한 원장·한 family 에서 CUM_SEQUENCE 캠페인 10개(마지막 g12 가 S* 포함)를
    차례로 → 누적 시도(N_family → G5 DSR 의 N)와 Val 사용(k → 누적 Holm 문턱)의 효과. seed 는 full 과 짝.
 
+7. 국면 전환 시장 (`--regime`, PLAN D14 초안): 상승·하락·횡보 국면(수개월, Val 국면 seed%3 순환)에서 귀무·국면 조건부
+   엣지(무필터 S*, 필터 S*_f)·하락 음수 엣지(S*_f) 시장마다 캠페인 1회 → 관문 변형(현재 / exposure_aware ON / 완화)별로
+   복사한 원장에서 파이프라인 → 오탐률(전체·하락 Val)·검정력 비교. `--g6-stage N`: 귀무 국면 시장에서 Dev 관문을
+   건너뛰고 상위 후보를 모두 Val 에 올려 G6 단계 조건부 통과율을 잰다. 리포트 research/reports/calibration_regime_*.md.
+
 모드
 - quick: 짧은 구간(Dev 8개월·Val 2개월), 시장 2개(귀무 1 + 심은 1), 귀무 100개(→ config G2.null_runs 도
   100 으로 낮춤; 테스트용 구조 점검이지 수치 결론용 아님). 수 초~수십 초.

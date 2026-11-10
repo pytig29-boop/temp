@@ -281,7 +281,7 @@ Sharpe ≤ 0 이면 떨어뜨린다. **거버넌스**: 최근 한 후보가 G6 �
 | 합성 국면 보정 | ✅ 실행 | `calibration_study --regime`: 상승·하락·횡보 국면(수개월), Val 국면 순환(⅓ 하락), 귀무 30 · 무필터 국면 엣지 6 · 필터 국면 엣지 30 시장 × (현재·변형·완화 변형). 결과: 오탐 0/30 (하락 Val 0/10) 모두 같음, S*_f 검정력 23% → 23% (Sharpe 2). **목표(검정력 증가) 미달 → 제안 없음**. 근거 `research/reports/calibration_regime_20261110.md`, `research/reports/criteria_gates_exposure_aware_enabled_20261110_regime.md` |
 | 탐색 시도 기록 | ✅ 반영 | MCP `log_exploration` / `research.exploration.log_exploration`: 사이드 계산을 원장 시도로(계열 N·주간 예산), Dev 만, 연구 모드 직접 호출 차단. researcher·skill 필수 규칙 |
 
-변형이 검정력을 못 올린 이유(합성 근거, §8 docs/PARAMS.md): ① 현실적인 추세 필터(60일 EMA)는 하락 국면에서도 새서 Val
+변형이 검정력을 못 올린 이유(합성 근거, §6 docs/PARAMS.md): ① 현실적인 추세 필터(60일 EMA)는 하락 국면에서도 새서 Val
 시장 참여일이 대개 25% 를 넘는다 — '쉼' 경로가 적용되는 하락 Val 이 드물다. ② 적용돼도 그 후보는 견고성 묶음의 국면 검사
 (한 국면 손익 비중 > 70%)에서 떨어진다 — 롱 온리 국면 의존을 막는 또 하나의 장치. ③ 필터 전략의 G4 실패(현재 규칙 10건)에서 중립 창은
 드물다(53창 중 0~12개, 중앙값 3.5) — 실패는 비중립 창의 음수 Sharpe 또는 최근 12개월 조건 몫이고, 변형이 구제한 것은 1건. 다음 검토 후보(사람 결정): 최근 12개월

@@ -62,7 +62,7 @@ claude -p --agent researcher "research-campaign skill로 다음 가설 캠페인
 | `request_lockbox_eval` | 잠금(G7) 평가 **요청** 기록(validated/challenger + skeptic `VERDICT: SURVIVES`) — 열지 않음 | `research/lockbox_requests/` | (사람: `admin_cli approve-lockbox`) |
 | `registry_status` | 전략 상태, 잠금 개봉 사용/상한, 대기 중 요청, Val 사용 예산(횟수) | – | `StrategyRegistry().status()`, `lockbox_status`, `val_status` |
 | `params_status` | params_version·검증·현재 비용 모델 버전·대기 제안 | – | `python -m btc_quant.params status` |
-| `propose_criterion` | class ② 관문 기준 제안(합성 보정만, anti-goalpost) → 사람 승인 대기 제안 파일 | `research/param_proposals/`, 리포트 | `params.criteria.propose_criterion` |
+| `propose_criterion` | class ② 관문 기준 제안(합성 보정만, anti-goalpost) → 사람 승인 대기 제안 파일. `study="regime"`(국면 전환 합성 시장, `max_fpr_bearish_val`·`min_power_gain` 목표) 는 노출 인식 변형용 | `research/param_proposals/`, 리포트 | `params.criteria.propose_criterion` |
 | `forward_status` | 전진 인큐베이션 현황(최근 일일 기록, ok 일수, 기대 구간 안 비율) | – | `Ledger().forward_results` |
 | `log_exploration` | 사이드 계산(Dev 연도별·국면별 이벤트 스터디, 손으로 돌린 변형 등)을 **시도로 기록**: 원장 hypotheses·campaigns(`grid.kind = exploration`)·runs `configs_evaluated` 줄 → 계열 시도 수(G5 DSR 의 N)·주간 예산에 반영. Dev 만(val/lockbox 거부). 예산 초과여도 기록하고 경고. **researcher 는 모든 사이드 계산마다 필수** | 원장 | `research.exploration.log_exploration` (연구 모드 Bash 직접 호출·`Ledger().record_exploration` 은 hook 이 거부) |
 
