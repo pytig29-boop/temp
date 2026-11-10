@@ -208,3 +208,65 @@ def test_spec_api_and_structure():
     json.dumps(out, default=str)
     with pytest.raises(ValueError):
         R.robustness_suite(spec, m1, "2023-01-01", "2024-01-01", checks=("nope",))
+
+
+# ---------------------------------------------------------------- 국면 검사 판정 방식 (class ② robustness.regime_mode)
+def _always_long_regime_case():
+    days = 360
+    idx = pd.date_range(START, periods=days * 1440, freq="1min", name="ts")
+    rng = np.random.default_rng(21)
+    r = rng.normal(0, SIG, len(idx))
+    regime = np.repeat(np.resize([0.012, 0.0, -0.008], days // 40 + 1), 40)[:days]
+    r += np.repeat(regime / 1440, 1440)
+    m1 = _frame(r, idx, 21)
+    return m1, R.Candidate.from_signals(_signal_fn(_times(idx, 5)), 20.0, 20.0, 1440, name="always_long")
+
+
+def test_regime_mode_default_is_pnl_share():
+    assert R.DEFAULT_THRESHOLDS["regime_mode"] == "pnl_share" == R.REGIME_MODE
+    assert R.load_thresholds({})["regime_mode"] == "pnl_share"
+    assert R.load_thresholds()["regime_mode"] == "pnl_share"               # config/gates.yaml 기본값 = 현재 동작
+    assert R.load_thresholds()["regime_dominant_min_excess"] == 0.0
+    th = R.load_thresholds({"robustness": {"regime_mode": "informational"}})
+    assert th["regime_mode"] == "informational" and th["regime_max_pnl_share"] == R.REGIME_MAX_PNL_SHARE
+
+
+def test_regime_modes_on_beta_only_strategy():
+    m1, cand = _always_long_regime_case()
+    outs = {mode: R.run_suite(cand, m1, START, _end(m1), checks=("regime",),
+                              thresholds={"regime_mode": mode})["checks"]["regime"]
+            for mode in R.REGIME_MODES}
+    cur = outs["pnl_share"]
+    assert cur["mode"] == "pnl_share" and not cur["passed"] and cur["trend"]["flag"]
+    # 지배 국면(상승) 안 노출-맞춤 B&H 대비 초과수익은 정보로 늘 보고 — 상시 롱은 베타일 뿐: 초과는 0 근처
+    # (일간 잡음 수준; ≥ 0 이면 dominant_alpha 국면 판정은 통과할 수 있다 → 베타는 알파 검사(t ≥ 2)가 막는다)
+    t = cur["trend"]
+    assert t["dominant"] == "up" and t["dominant_exposure"] > 0.9
+    assert abs(t["dominant_excess_vs_matched_bh_annual"]) < 0.5 * t["dominant_mean_annual"]
+    da = R.run_suite(cand, m1, START, _end(m1), checks=("regime", "alpha"),
+                     thresholds={"regime_mode": "dominant_alpha"})
+    assert not da["passed"] and "alpha" in da["failed"]
+    info = outs["informational"]
+    assert info["passed"] and info["informational"] and info["trend"]["flag"]   # 표시만, 판정 제외
+    # 판정 사후 재계산(보정 연구용) = check_regime 판정
+    for mode, o in outs.items():
+        assert R.regime_verdict(o, {**R.DEFAULT_THRESHOLDS, "regime_mode": mode}) == o["passed"]
+
+
+def test_regime_dim_flag_dominant_alpha_rule():
+    base = {"total_pnl_log": 0.5, "max_pnl_share": 0.85, "dominant_excess_vs_matched_bh_annual": 0.10}
+    th = dict(R.DEFAULT_THRESHOLDS)
+    assert R.regime_dim_flag(base, th)                                     # 현재: 비중 85% > 70% → 표시
+    assert not R.regime_dim_flag(base, {**th, "regime_max_pnl_share": 0.90})
+    da = {**th, "regime_mode": "dominant_alpha"}
+    assert not R.regime_dim_flag(base, da)                                 # 지배 국면 초과 ≥ 0 → 통과
+    assert R.regime_dim_flag({**base, "dominant_excess_vs_matched_bh_annual": -0.01}, da)
+    assert R.regime_dim_flag({**base, "dominant_excess_vs_matched_bh_annual": None}, da)   # 값 없음 → 표시
+    assert R.regime_dim_flag({**base, "total_pnl_log": -0.1}, da)          # 총손익 ≤ 0 은 어떤 방식이든 표시
+    assert not R.regime_dim_flag({**base, "max_pnl_share": 0.5, "dominant_excess_vs_matched_bh_annual": -1}, da)
+    assert R.regime_dim_flag(base, {**da, "regime_dominant_min_excess": 0.2})
+    with pytest.raises(ValueError):
+        R.regime_dim_flag(base, {**th, "regime_mode": "nope"})
+    chk = {"trend": base, "vol": {**base, "max_pnl_share": 0.4}}
+    assert not R.regime_verdict(chk, th) and R.regime_verdict(chk, da)
+    assert R.regime_verdict(chk, {**th, "regime_mode": "informational"})

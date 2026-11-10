@@ -32,6 +32,12 @@
    엣지(무필터 S*, 필터 S*_f)·하락 음수 엣지(S*_f) 시장마다 캠페인 1회 → 관문 변형(현재 / exposure_aware ON / 완화)별로
    복사한 원장에서 파이프라인 → 오탐률(전체·하락 Val)·검정력 비교. `--g6-stage N`: 귀무 국면 시장에서 Dev 관문을
    건너뛰고 상위 후보를 모두 Val 에 올려 G6 단계 조건부 통과율을 잰다. 리포트 research/reports/calibration_regime_*.md.
+8. 롱 온리 기준 2종 (`--rcheck`, `--rcheck-quick`): 같은 국면 시장(+ 추가 귀무 국면 시장, 표준 귀무 시장)에서
+   견고성 '국면' 검사 방식(RCHECK_MODES: 비중 0.70/0.80/0.90, 지배 국면 노출-맞춤 B&H 초과 ≥ 0, 정보 전용) ×
+   G4 '최근 12개월' 변형(G4_RECENT_VARIANTS: Sharpe > 0 OR 최근 참여일 < 10%/25% 이면서 총수익 ≥ −2%) 의 오탐·검정력.
+   G4 변형은 복사한 원장에서 파이프라인을 다시 돌리고(보정 프로세스 안에서만 check_g4 를 감싼 반사실), 국면 검사 방식은
+   같은 결과에 사후 적용(robustness.regime_verdict). 상위 후보 전부의 Dev 견고성 조건부 진단 포함.
+   리포트 research/reports/calibration_regime_check_*.md.
 
 모드
 - quick: 짧은 구간(Dev 8개월·Val 2개월), 시장 2개(귀무 1 + 심은 1), 귀무 100개(→ config G2.null_runs 도
