@@ -417,3 +417,28 @@ def test_research_bypass_script_file_scanned(tmp_path):
 ])
 def test_research_readonly_and_mcp_uncovered_api_allowed(tmp_path, cmd):
     assert run("Bash", {"command": cmd}, tmp_path=tmp_path) is None, cmd
+
+
+# ---- forward watchlist (human-only, user decision 2026-11-10) -----------------
+@pytest.mark.parametrize("tool", ["Write", "Edit", "MultiEdit"])
+def test_forward_watchlist_write_denied(tmp_path, tool):
+    out = run(tool, {"file_path": abs_(tmp_path, "config/forward_watchlist.yaml")}, tmp_path=tmp_path)
+    assert denied(out) and "watchlist" in out["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+@pytest.mark.parametrize("cmd", [
+    "echo '- key: x' >> config/forward_watchlist.yaml",
+    "sed -i 's/reason/x/' config/forward_watchlist.yaml",
+    "cp /tmp/w.yaml config/forward_watchlist.yaml",
+    "python -c \"open('config/forward_watchlist.yaml','w').write('')\"",
+])
+def test_forward_watchlist_bash_write_denied(tmp_path, cmd):
+    assert denied(run("Bash", {"command": cmd}, tmp_path=tmp_path)), cmd
+
+
+def test_forward_watchlist_read_allowed(tmp_path):
+    assert not denied(run("Read", {"file_path": abs_(tmp_path, "config/forward_watchlist.yaml")}, tmp_path=tmp_path))
+    assert not denied(run("Bash", {"command": "cat config/forward_watchlist.yaml"}, tmp_path=tmp_path))
+    # 관찰 목록 일일 실행(run_forward)은 연구 모드에서 직접 실행 불가 (원장 쓰기)
+    assert denied(run("Bash", {"command": "python -c 'from btc_quant.research.forward import run_forward'"},
+                      tmp_path=tmp_path))

@@ -10,6 +10,7 @@ logs/research_tool_calls.jsonl and the call is denied when it:
   1. writes to a protected path (approved strategies, gates/splits/risk config,
      the ledger, the lessons notebook records, approval records, the parameter
      registry config/params.yaml + config/costs.yaml and research/param_approvals,
+     the human-only forward watchlist config/forward_watchlist.yaml,
      engine/evaluation/registry/data code,
      raw data, the Claude config itself, the audit log);
   2. runs the human-only admin CLI (approve-lockbox / activate / rollback, and
@@ -89,6 +90,9 @@ PROTECTED_WRITE = [
     (r"config/params\.ya?ml", "the parameter registry changes only through btc_quant.params class rules + human approval (docs/PARAMS.md)"),
     (r"config/costs\.ya?ml", "cost models are versioned only by btc_quant.params calibrate (stricter) or human approval (looser)"),
     (r"research/param_approvals(/|$)", "parameter-change approvals are human-only (docs/PARAMS.md)"),
+    # 전진 관찰 목록 (사용자 결정 2026-11-10): 사람만 전략을 올리고 내린다. 관찰 전용 — 승격·리스크·페이퍼와 무관
+    (r"config/forward_watchlist", "the forward watchlist (config/forward_watchlist*) is human-only: a human places a "
+     "strategy under observation; it is never promotion (research/forward.py)"),
     (r"src/btc_quant/(backtest|evaluation|registry|data)(/|$)", "engine/gates/registry/data code is not AI-editable (PLAN §3.3)"),
     (r"data/raw(/|$)", "raw market data is written only by the collectors"),
     (r"\.claude/(settings[^/\s'\"]*\.json|hooks|agents|skills)(/|$)", "the research guard configuration cannot be changed from a research session"),

@@ -1463,6 +1463,25 @@ def run_rcheck_study(cfg: RcheckStudyConfig, progress=print, edge: dict | None =
             "params_version": pv.get("params_version"), "cost_versions": pv.get("cost_versions")}
 
 
+def rcheck_runner_from_results(runs: list[dict], value_to_mode: dict, g4_variant: str = "current"):
+    """--rcheck 결과(같은 코드·같은 seed)를 params.criteria.propose_criterion(study="regime") 의 runner 로.
+    value_to_mode = {후보 값: RCHECK_MODES 이름} (예: {"pnl_share": "current", "dominant_alpha": "dom_alpha"}).
+    레코드의 any_validated/star_validated 를 그 방식의 사후 판정으로 바꿔 넘긴다. 없는 seed 면 KeyError."""
+    from btc_quant.params.criteria import _vname, regime_runs_to_value_runs
+    idx = {(int(r["seed"]), r["kind"]): r for r in runs if r["g4_variant"] == g4_variant}
+
+    def run(tasks: list[dict]) -> list[dict]:
+        out = []
+        for t in tasks:
+            r = idx[(int(t["seed"]), t["kind"])]
+            for v, mode in value_to_mode.items():
+                o = r["rcheck_modes"][mode]
+                out.append({**r, "variant": _vname(v), "any_validated": o["any_validated"],
+                            "star_validated": o["star_validated"]})
+        return regime_runs_to_value_runs(out, list(value_to_mode))
+    return run
+
+
 def rcheck_tables_markdown(result: dict) -> str:
     rows = result["summary"]["rows"]
     L = ["| G4 최근 조건 | 국면 검사 | 오탐 (귀무 전체) | 귀무 국면 | 표준 귀무 | 하락 Val 귀무 | 검정력 S*_f (Sharpe 2) | "

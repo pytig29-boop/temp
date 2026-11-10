@@ -69,6 +69,7 @@ claude -p "daily-report skill로 오늘 아침 리포트 작성"
 | `research/lessons/*.jsonl`, `research/lessons/.lock`, `research/lessons/LESSONS.md` (README.md 제외) | 오답노트 사실은 불변, 해석·표시·사후분석은 `btc_quant.research.lessons` API로만 추가, LESSONS.md는 생성물 |
 | `research/lockbox_approvals/**`, `research/activation_approvals/**` | 사람 승인 기록 |
 | `research/lockbox_requests/**` | 잠금 평가 요청은 MCP `request_lockbox_eval`(자격 검사)로만 기록 |
+| `config/forward_watchlist.yaml` | 전진 관찰 목록은 사람만 편집(사용자 결정 2026-11-10). 관찰 전용 — 승격·리스크·페이퍼와 무관. MCP 에도 편집 도구가 없다(`forward_status` 로 읽기만) |
 | `src/btc_quant/{backtest,evaluation,registry,data}/**` | 엔진·관문·레지스트리·데이터 코드는 AI 수정 불가 (§3.3) |
 | `data/raw/**` | 원천 데이터는 수집기만 기록 |
 | `.claude/{settings*.json,hooks,agents,skills}` | 연구 세션이 자기 감시 장치를 바꾸지 못하게 |

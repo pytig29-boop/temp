@@ -294,3 +294,41 @@ limits:             # evaluation.gates.risk_limits_from_validation 결과를 그
   (진입 허용은 서비스 최초 시작 시각부터).
 - `binance_*` 블록(실시간 바이낸스 피드 없음, `live_ready=False`)을 쓰는 전략은 시작을 거부한다.
 - 실주문은 없다. 수수료 변경 감지(B등급 정지)는 실거래 API 키 연동 후에야 의미가 있다.
+
+---
+
+## 12. 전진 인큐베이션 일일 실행 (`btc_quant.research.forward`, 관찰 목록 포함)
+
+매일 한 번, 마지막으로 완료된 UTC 날짜까지 Forward 구간(2026-11-09~)을 평가한다. 멱등이라 여러 번 돌려도
+같은 날의 원장 기록(`research/ledger/forward_results.jsonl`)은 한 줄이고 리포트(`research/reports/forward_<date>.md`)도 같다.
+
+```bash
+uv run python -m btc_quant.research.forward run              # REST 로 Forward 1분봉(코인원·업비트) 증분 수집 + 평가 + 리포트
+uv run python -m btc_quant.research.forward run --as-of 2026-11-12
+uv run python -m btc_quant.research.forward run --no-fetch   # 네트워크 없음 (관찰 목록은 warmup_unavailable, 기록 안 함)
+uv run python -m btc_quant.research.forward watchlist        # 관찰 목록 검증·목록 (읽기 전용)
+```
+
+대상: 레지스트리 validated·challenger(`config/gates.yaml` G8.forward_states) + **관찰 목록**
+`config/forward_watchlist.yaml`(사람만 편집; 연구 모드 guard 가 쓰기 거부). 관찰 목록 전략은 **관찰 전용**이다 —
+G6 등에서 떨어진 전략을 승격 없이 Forward 데이터에서 지켜볼 뿐, 관문·승격·리스크 한도·페이퍼/실거래와 무관하다.
+Val 이 롤링되면(새 `val_id`, 사람 편집) 새 Val 에서 정식 재평가할 수 있다.
+
+관찰 목록 워밍업: 페이퍼 서비스와 같이 Forward 시작 직전 REST 1분 캔들(=잠금 구간 가격)을 **메모리에서만** 지표 상태
+워밍업에 쓴다. 저장하지 않고, Forward 이전 거래·수익은 계산·기록·보고하지 않는다(성과 = Forward 시작 + 결정 봉 1개부터).
+레지스트리 전략은 기존 규칙(Forward 데이터만, 14일 또는 lookback 일수 워밍업) 그대로다.
+
+### 예약 (cron, PC/VPS)
+UTC 자정 직후 거래소 캔들이 확정된 뒤(예: 00:20 UTC = 09:20 KST) 하루 1회:
+
+```bash
+# crontab -e   (서버 시간대와 무관하게 UTC 로 지정)
+CRON_TZ=UTC
+20 0 * * *  cd ~/btc-quant && /usr/local/bin/uv run python -m btc_quant.research.forward run >> logs/forward.log 2>&1
+```
+
+- 실패해도(거래소 하나의 REST 오류) 나머지는 계속하고, 다음 날 실행이 빠진 날의 데이터를 증분으로 채운다.
+  빠진 날의 기록이 필요하면 `--as-of YYYY-MM-DD` 로 그 날을 다시 돌린다.
+- Windows PC 는 작업 스케줄러에서 같은 명령을 매일 09:20 KST 로 등록한다.
+- 클라우드(Claude Code 원격 세션)에서는 예약 작업이 **세션이 살아 있는 동안만** 돈다 — 상시 운용은 PC/VPS cron 으로.
+- 연구 모드(BTCQ_RESEARCH_MODE=1) 세션은 이 명령을 직접 실행할 수 없다(원장 쓰기; guard). 결과는 MCP `forward_status` 로 읽는다.

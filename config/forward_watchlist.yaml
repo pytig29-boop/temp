@@ -1,0 +1,43 @@
+# Forward watchlist — HUMAN-ONLY (user decision 2026-11-10).
+#
+# Strategies listed here are OBSERVATION ONLY: they are not promoted (e.g. they failed G6), gates do not change,
+# and watchlist status never implies promotion, risk sizing, or paper/live trading. The daily forward run
+# (python -m btc_quant.research.forward run) tests them on genuinely unseen Forward data (after 2026-11-09) and
+# records forward_results with state "watchlist". When Val is rolled (val cap reached -> new val_id from Forward
+# data, a human edit of config/splits.yaml), a watchlisted strategy can be formally re-evaluated on that new Val.
+#
+# Editing: humans only. The research-mode guard (.claude/hooks/guard.py) denies writes to this file and the btcq
+# MCP server has no tool to edit it. Each entry pins the spec's logic_hash; an entry whose spec does not hash to
+# it is not evaluated.
+#
+# Entry fields
+#   key              <spec id>_v<version>
+#   logic_hash       StrategySpec.logic_hash() of the spec
+#   spec | spec_path inline spec (StrategySpec.to_dict) or a path (relative to the repo root) to a spec YAML
+#   source_campaign  campaign that produced the spec (exchange / primary cost default from its grid)
+#   source_run       (optional) Dev ledger run the spec was copied from
+#   exchange, cost   (optional) override exchange / cost model
+#   added_by, added_at, reason
+entries:
+  - key: c3_vol_breakout_atrch_1h_hivol_atr_3247d3023d_v1
+    logic_hash: 3247d3023d70d1f7
+    source_campaign: camp-000017
+    source_run: run-000169          # Dev run, coinone_conservative (spec copied from the ledger run, not Val fields)
+    added_by: "user (chat decision 2026-11-10)"
+    added_at: "2026-11-10"
+    reason: "Dev survivor, failed G6 (val1); observation only"
+    spec:
+      id: c3_vol_breakout_atrch_1h_hivol_atr_3247d3023d
+      version: 1
+      timeframe: 1h
+      entry:
+        block: atr_channel_breakout
+        params: {span: 24, mult: 3.0}
+      filters:
+        - block: vol_regime
+          params: {window: 24, min_pct: 0.67}
+      exit:
+        stop_loss_atr: 2.0
+        take_profit_atr: 3.0
+        max_hold_min: 480
+        signal_exit: null
