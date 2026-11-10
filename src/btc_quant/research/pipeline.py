@@ -470,7 +470,7 @@ class Pipeline:
         ex = spec.exit
         out = {}
         for sym, c in self.caches.items():
-            p = c.prepared(spec.entry, spec.filters)
+            p = c.prepared(spec.entry, spec.filters, spec.exit.signal_exit)   # 신호 청산 포함 (캠페인과 같은 신호)
             _, _, si, ei = p.bounds(self.start, self.end)
             cost = self._cost(cost_name, sym)
             if spec.execution.is_default and not spec.is_sized:          # 시장가·전액 = 기존 호출 그대로

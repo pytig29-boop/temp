@@ -7,7 +7,8 @@ G5 는 `evaluation.selection.deflated_sharpe_ratio` 로 판정한다 (pipeline.P
 - `max_trials`: 목표 연율 Sharpe 로 DSR ≥ min_dsr 을 유지할 수 있는 최대 실질 시도 수 N.
 - `estimate_effective_trials`: 계획 격자의 실질 시도 수 추정 — pipeline 과 같은 식
       N_dsr = max(k_eff, n_family · k_eff / n_campaign)  ≈ (계열 기존 시도 + 격자) · 압축비
-  압축비(k_eff / 격자 크기) 는 저장된 pipeline.json 들의 campaign_stats 중앙값, 없으면 기본값.
+  압축비(k_eff / 격자 크기) 는 저장된 pipeline.json 들의 campaign_stats 중앙값, 없으면 기본값 — 단 하한 1/n_grid
+  (군집은 최소 1개라 실현 K/N ≥ 1/N; 작은 단일 군집 격자에서 이력 압축비가 N_dsr 를 과소추정하던 문제, pm-000007).
 - `power_table` / `budget_report`: CLI·리포트용 작은 표.
 
 V(시도 SR 분산) 기본값 = 1/n_days: 진짜 SR 이 모두 0 인 시도들의 표본 SR 분산(최소값). 실제 캠페인은
@@ -124,7 +125,10 @@ def estimate_effective_trials(n_grid: int, family: str | None = None, root: str 
     """계획 격자(n_grid 스펙)의 DSR 실질 시도 수 추정 — pipeline.campaign_stats 와 같은 식.
 
     k_eff ≈ max(1, ratio · n_grid);  N_dsr = max(k_eff, (n_family_prior + n_grid) · ratio).
-    ratio: 지정값 > 이력 중앙값(MIN_HISTORY 개 이상) > default_ratio.
+    ratio = max(기준 압축비, 1/n_grid); 기준 압축비: 지정값 > 이력 중앙값(MIN_HISTORY 개 이상) > default_ratio.
+    하한 1/n_grid (pm-000007): pipeline G5 는 캠페인의 실현 K/N 을 쓰고 K ≥ 1 이므로 K/N ≥ 1/n_grid 다. 스펙이 모두
+    한 군집에 묶이는 작은 격자(예: 4 스펙 → K/N = 0.25)에 이력 중앙값(예: 0.125)을 쓰면 N_dsr·필요 Sharpe 를
+    과소추정한다. 큰 격자(1/n_grid < 기준)에는 영향이 없다. 반환값의 ratio_base 는 하한 적용 전 값.
     """
     from btc_quant.registry.ledger import Ledger, repo_root
 
@@ -138,12 +142,16 @@ def estimate_effective_trials(n_grid: int, family: str | None = None, root: str 
         rt, src = float(np.median([h["ratio"] for h in hist])), f"history median of {len(hist)} campaigns"
     else:
         rt, src = float(default_ratio), (f"default {default_ratio} (history {len(hist)} < {MIN_HISTORY})")
+    base = rt
+    floor = 1.0 / max(int(n_grid), 1)
+    if floor > rt:
+        rt, src = floor, f"{src}; floored at 1/n_grid = {floor:.3g} (single-cluster small grid, pm-000007)"
     n_prior = int(ledger.trials_count(family=family)) if family else 0
     k_eff = max(1.0, rt * int(n_grid))
     n_dsr = max(k_eff, (n_prior + int(n_grid)) * rt)
     vs = [h["var_trial_sr"] for h in hist if h.get("var_trial_sr")]
     return {"n_grid": int(n_grid), "family": family, "n_family_prior": n_prior, "ratio": rt,
-            "ratio_source": src, "k_eff_est": k_eff, "n_trials_dsr": float(n_dsr),
+            "ratio_source": src, "ratio_base": base, "ratio_floor": floor, "k_eff_est": k_eff, "n_trials_dsr": float(n_dsr),
             "history": hist, "var_trial_sr_history_median": float(np.median(vs)) if vs else None}
 
 

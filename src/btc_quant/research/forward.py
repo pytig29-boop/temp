@@ -51,6 +51,10 @@
 다자산 유니버스 (PLAN D15): 스펙의 `universe`(예: BTC/XRP/ETH-KRW)마다 Forward 1분봉을 받아(수집도 자산별) 같은
 엔진으로 실행하고 슬리브 평균 = 포트폴리오로 기록한다(캠페인·파이프라인과 같은 회계). B&H = 동일 비중. 원장 레코드에
 `universe`·`per_asset`(자산별 거래 수·수익)이 붙는다. 기본 유니버스 [BTC-KRW] 는 이전과 같은 호출·같은 기록.
+자산별 비용 모델(`get_sleeve_cost`, D17), 부분 사이징(`spec.sizing`, D16 — 레코드에 `sizing`)도 캠페인과 같다.
+일간 수익 회계(PLAN D18)는 원천 캠페인 매니페스트 `daily_returns` 를 따른다(`campaign_manifest_accounting`):
+'mtm' 캠페인(예: camp-000030)의 스펙은 Forward 에서도 평가 기준(MTM) 일간 수익으로 기록하고(`accounting: mtm`),
+기대 구간의 원장 Dev 지표도 같은 회계다. 매니페스트가 없거나 D18 이전 캠페인은 'realized'(이전과 같은 기록).
 
 기대 구간 (vs backtest)
 - 원장의 Dev 실행(같은 logic_hash, 전략 캠페인의 primary 비용) 지표 mean_daily·std_daily·
@@ -88,6 +92,7 @@ from .campaign import (
     get_cost,
     get_sleeve_cost,
     git_commit,
+    manifest_accounting,
     prepare_m1,
     run_params,
 )
@@ -198,6 +203,22 @@ class ForwardStrategy:
     campaign_id: str | None
     warmup: str = "forward"          # "forward" (Forward 데이터만, 일수 워밍업) | "rest" (메모리 내 REST 워밍업)
     watch: dict | None = None        # 관찰 목록 메타데이터 (added_by, added_at, reason, source_campaign)
+    accounting: str = "realized"     # 일간 수익 회계 (PLAN D18) — 원천 캠페인 매니페스트 `daily_returns`
+
+
+def campaign_manifest_accounting(env: ResearchEnv, campaign_id: str | None) -> str:
+    """원천 캠페인의 일간 수익 회계 (매니페스트 `daily_returns`; 캠페인·매니페스트가 없거나 D18 이전 = 'realized').
+    Forward 수익·Sharpe·기대 구간(원장 Dev 지표)이 같은 회계가 되도록 캠페인·파이프라인과 같은 값을 쓴다."""
+    import json
+    if not campaign_id:
+        return "realized"
+    path = env.campaign_dir(str(campaign_id)) / "manifest.json"
+    if not path.exists():
+        return "realized"
+    try:
+        return manifest_accounting(json.loads(path.read_text(encoding="utf-8")))
+    except (OSError, ValueError):
+        return "realized"
 
 
 def _context(env: ResearchEnv, sid: str, version: int) -> dict:
@@ -222,7 +243,8 @@ def resolve_strategies(env: ResearchEnv, states=DEFAULT_STATES) -> list[ForwardS
             spec = env.registry.load(x["id"], x["version"])
             ctx = _context(env, x["id"], x["version"])
             out.append(ForwardStrategy(key_of(x["id"], x["version"]), x["id"], x["version"], st, spec,
-                                       spec.logic_hash(), ctx["exchange"], ctx["cost"], ctx["campaign_id"]))
+                                       spec.logic_hash(), ctx["exchange"], ctx["cost"], ctx["campaign_id"],
+                                       accounting=campaign_manifest_accounting(env, ctx["campaign_id"])))
     return out
 
 
@@ -315,7 +337,8 @@ def resolve_watchlist(env: ResearchEnv, path: str | Path | None = None,
         exchange = meta.get("exchange") or (grid.get("data") or {}).get("exchange") or "coinone"
         cost = meta.get("cost") or (grid.get("costs") or {}).get("primary") or DEFAULT_COSTS["primary"]
         out.append(ForwardStrategy(key, spec.id, spec.version, WATCHLIST_STATE, spec, spec.logic_hash(),
-                                   exchange, cost, meta["source_campaign"], warmup="rest", watch=meta))
+                                   exchange, cost, meta["source_campaign"], warmup="rest", watch=meta,
+                                   accounting=campaign_manifest_accounting(env, meta["source_campaign"])))
     return out, errors
 
 
@@ -497,6 +520,10 @@ def evaluate(env: ResearchEnv, fs: ForwardStrategy, fwd_start: pd.Timestamp, win
                        "warmup_days": warmup_days}}
     if wdesc:
         base["period"]["warmup"] = wdesc
+    if fs.accounting != "realized":
+        base["accounting"] = fs.accounting          # D18 이전 캠페인(realized)은 이전과 같은 레코드
+    if getattr(fs.spec, "sizing", None) is not None and not fs.spec.sizing.is_default:
+        base["sizing"] = {"entry_fraction": float(fs.spec.sizing.entry_fraction)}
     if fs.watch is not None:
         base["observation_only"] = True
         base["watchlist"] = {k: fs.watch[k] for k in ("added_by", "added_at", "reason", "source_campaign")}
@@ -534,7 +561,7 @@ def evaluate(env: ResearchEnv, fs: ForwardStrategy, fwd_start: pd.Timestamp, win
         except CampaignError as e:
             return {**base, "status": "no_data", "note": str(e)}
         c_sym = get_sleeve_cost(fs.cost, sym, config_root(env))     # 자산별 모델 (D17; BTC-KRW = `cost` 와 같은 모델)
-        res = fast.run_fast(fs.spec, m1, c_sym, eval_start, window_end, ctx=ctx)
+        res = fast.run_fast(fs.spec, m1, c_sym, eval_start, window_end, ctx=ctx, accounting=fs.accounting)
         _assert_forward_only(res, eval_start)
         sleeves[sym], raws[sym], m1s[sym] = res, raw, m1
         if aux_rows:

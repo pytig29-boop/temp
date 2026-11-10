@@ -16,7 +16,8 @@ from test_research_forward import FWD_START, NOW, env  # noqa: F401  (fixture)
 from btc_quant.backtest import fast
 from btc_quant.research import forward as F
 from btc_quant.research.campaign import get_cost, prepare_m1
-from btc_quant.strategy.spec import BlockRef, ExitSpec, StrategySpec
+from btc_quant.research.campaign import get_sleeve_cost
+from btc_quant.strategy.spec import BlockRef, ExitSpec, SizingSpec, StrategySpec
 
 KEY = "wl_atrch_1h_v1"
 
@@ -133,6 +134,12 @@ def test_repo_watchlist_file_is_valid():
     assert spec.logic_hash() == meta["logic_hash"] == "3247d3023d70d1f7"
     assert meta["added_by"] == "user (chat decision 2026-11-10)" and meta["source_campaign"] == "camp-000017"
     assert "observation only" in meta["reason"]
+    # camp-000030 대표 (3자산 유니버스, 절반 사이징; 스펙은 Dev 원장 실행 run-000253 에서 복사)
+    meta, spec = keys["c4_vol_breakout_atrch_1h_u3_half_4fc37395fd_v1"]
+    assert spec.logic_hash() == meta["logic_hash"] == "4fc37395fd5a8a50"
+    assert meta["source_campaign"] == "camp-000030" and meta["source_run"] == "run-000253"
+    assert meta["added_by"] == "user (chat decision 2026-11-10)" and "observation only" in meta["reason"]
+    assert spec.universe == ("BTC-KRW", "XRP-KRW", "ETH-KRW") and spec.sizing.entry_fraction == 0.5
 
 
 def test_mcp_has_no_watchlist_tool():
@@ -266,3 +273,73 @@ def test_cli_watchlist_listing(env, capsys):
     _write(env, [_entry(logic_hash="0000000000000000")])
     assert F.main(["watchlist", "--root", str(env.root)]) == 1
     assert "INVALID" in capsys.readouterr().out
+
+
+# ------------------------------------------------------------------ 유니버스 · 절반 사이징 · MTM (camp-000030 형태)
+UNI = ["BTC-KRW", "XRP-KRW", "ETH-KRW"]
+SCALE = {"BTC-KRW": 1.0, "XRP-KRW": 1 / 20_000, "ETH-KRW": 1 / 25}
+
+
+def test_watchlist_universe_half_sizing_mtm(env):
+    """3자산 유니버스 + entry_fraction 0.5 + MTM 회계 캠페인의 관찰 목록 스펙: 자산별 REST 워밍업, 자산별 비용,
+    절반 사이징, 원천 캠페인 매니페스트의 MTM 일간 수익 — 포트폴리오 = 슬리브 평균."""
+    import json
+    spec = StrategySpec("wl_u3_half", BlockRef("atr_channel_breakout", {"span": 24, "mult": 1.0}),
+                        ExitSpec(None, None, 480, stop_loss_atr=2.0, take_profit_atr=3.0), timeframe="1h",
+                        universe=tuple(UNI), sizing=SizingSpec(0.5))
+    key = F.key_of(spec.id, spec.version)
+    led = env.ledger
+    h = led.register_hypothesis("u3 half", "r", "c")
+    camp = led.create_campaign(h, {"data": {"exchange": "coinone"}, "universe": UNI, "sizing": {"entry_fraction": [0.5]},
+                                   "costs": {"primary": "coinone_conservative"}}, 1, ["coinone_conservative"],
+                               {"segment": "dev"}, family="vol_breakout")
+    d = env.campaign_dir(camp)
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "manifest.json").write_text(json.dumps({"campaign_id": camp, "daily_returns": "mtm"}))
+    assert F.campaign_manifest_accounting(env, camp) == "mtm"
+    assert F.campaign_manifest_accounting(env, None) == "realized"
+    _write(env, [_entry(spec, source_campaign=camp)])
+    data = {sym: _market(seed=21 + i) * SCALE[sym] for i, sym in enumerate(UNI)}
+    calls = []
+
+    def fake(exchange, start, end, symbol="BTC-KRW"):
+        calls.append((exchange, symbol, start, end))
+        x = data[symbol]
+        return x[(x.index >= start) & (x.index < end)].copy()
+    out = F.run_forward(env=env, fetcher=fake, now=NOW)
+    r = next(x for x in out["results"] if x["strategy_key"] == key)
+    assert r["status"] == "ok" and r["state"] == "watchlist" and r["observation_only"] is True
+    assert r["universe"] == UNI and set(r["per_asset"]) == set(UNI)
+    assert r["accounting"] == "mtm" and r["sizing"] == {"entry_fraction": 0.5}
+    lb, wmin = F.rest_warmup_window(spec)
+    # 자산마다 메모리 내 REST 워밍업 (끝 = Forward 시작), Forward 수집은 Forward 시작 이후만
+    warm = {(ex, sym) for ex, sym, st, en in calls if st < FWD_START}
+    assert warm == {("coinone", sym) for sym in UNI}
+    assert all(en == FWD_START for ex, sym, st, en in calls if st < FWD_START)
+    assert r["period"]["warmup"]["warmup_rows"] == {"coinone": wmin, "coinone:XRP-KRW": wmin,
+                                                    "coinone:ETH-KRW": wmin}
+    # 직접 계산: 자산별 비용 모델 · 절반 사이징 · MTM, 포트폴리오 = 슬리브 평균
+    eval_start = pd.Timestamp(r["period"]["eval_start"])
+    end = pd.Timestamp(out["window_end"])
+    mtm, real, n_tr = [], [], 0
+    for sym in UNI:
+        fwd = env.data.read_range(FWD_START, end, "coinone", sym, "1m")
+        x = data[sym]
+        m1 = prepare_m1(F._join_warmup(x[x.index < FWD_START].tail(wmin), fwd, FWD_START), "coinone")
+        c = get_sleeve_cost("coinone_conservative", sym)
+        res = fast.run_fast(spec, m1, c, eval_start, end, accounting="mtm")
+        assert len(res.trades) > 0 and (res.trades["weight"] == 0.5).all()
+        assert (pd.to_datetime(res.trades["entry_time"]) >= eval_start).all()
+        assert r["per_asset"][sym]["n_trades"] == len(res.trades)
+        n_tr += len(res.trades)
+        mtm.append(res.daily_returns.to_numpy())
+        real.append(res.daily_realized.to_numpy())
+    assert r["n_trades"] == n_tr
+    assert r["net_return"] == pytest.approx(float(np.prod(1 + np.mean(mtm, axis=0)) - 1), abs=1e-12)
+    # MTM 과 실현 기준이 실제로 다르다 → 회계 검사가 공허하지 않다
+    assert not np.allclose(np.mean(mtm, axis=0), np.mean(real, axis=0))
+    # 자산별 비용 모델이 BTC 와 다르다 (D17) → 자산별 비용 검사가 공허하지 않다
+    assert any(get_sleeve_cost("coinone_conservative", s).side_cost != get_cost("coinone_conservative").side_cost
+               or get_sleeve_cost("coinone_conservative", s).fee_rate != get_cost("coinone_conservative").fee_rate
+               for s in UNI[1:])
+    assert key in Path(out["report"]).read_text()

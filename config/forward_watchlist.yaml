@@ -41,3 +41,27 @@ entries:
         take_profit_atr: 3.0
         max_hold_min: 480
         signal_exit: null
+  - key: c4_vol_breakout_atrch_1h_u3_half_4fc37395fd_v1
+    logic_hash: 4fc37395fd5a8a50
+    source_campaign: camp-000030
+    source_run: run-000253          # Dev run, coinone_conservative (spec copied from the Dev ledger run, not pipeline.json)
+    added_by: "user (chat decision 2026-11-10)"
+    added_at: "2026-11-10"
+    reason: "Dev near-miss (failed G3/G5); observation only; BTC sleeve shares the rule that failed val1 in BTC-only form"
+    # 3-coin universe (equal fixed sleeves, per-asset cost models), half sizing, MTM daily returns (camp-000030
+    # manifest daily_returns: mtm — forward.py follows the source campaign's accounting)
+    spec:
+      id: c4_vol_breakout_atrch_1h_u3_half_4fc37395fd
+      version: 1
+      timeframe: 1h
+      universe: [BTC-KRW, XRP-KRW, ETH-KRW]
+      entry:
+        block: atr_channel_breakout
+        params: {span: 24, mult: 3.0}
+      filters: []
+      exit:
+        stop_loss_atr: 2.0
+        take_profit_atr: 3.0
+        max_hold_min: 480
+        signal_exit: null
+      sizing: {entry_fraction: 0.5}

@@ -142,6 +142,11 @@ family: breakout                    # 생략 시 진입 블록 이름
   N_dsr = max(k_eff, (계열 기존 시도 + n_grid)·압축비). 압축비 = 저장된 `pipeline.json` 들의
   k_eff/스펙 수 중앙값(3개 이상일 때), 없으면 기본 0.05(청산 변형 ×80 이 신호 조합당 ~2 군집으로 묶인다는
   가정의 두 배 — 이력이 쌓이면 교체).
+  **하한 1/n_grid (2026-11-10, pm-000007)**: 실제 압축비 = max(기준 압축비, 1/n_grid). pipeline G5 는 캠페인의
+  실현 K/N 을 쓰고 군집은 최소 1개라 K/N ≥ 1/n_grid 이다. 스펙이 한 군집에 묶이는 작은 격자(예: camp-000030/031,
+  4 스펙 → K/N 0.25)에 이력 중앙값(0.125)을 쓰면 N_dsr 를 절반(11.5 vs pipeline 23)으로 과소추정해 필요 Sharpe 가
+  ~0.1–0.15 낙관적이었다. 하한이 걸리면 `ratio_source` 에 "floored at 1/n_grid" 가 붙고 `ratio_base` 에 하한 전 값이
+  남는다. 큰 격자(1/n_grid < 기준)에는 영향이 없다. 관문(G5) 자체는 바뀌지 않는다 — 사전 추정만 pipeline 과 맞춘다.
 - V 기본값 = 1/n_days(진짜 SR 0인 시도들의 표본 SR 분산, 하한). 이력이 있으면 그 중앙값.
 - CLI: `uv run python -m btc_quant.research.power --days 1764 --grid 1280 --family donchian_breakout --target 2.0`
 

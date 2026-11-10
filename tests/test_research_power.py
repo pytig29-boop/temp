@@ -86,6 +86,34 @@ def test_effective_trials_default_and_history(tmp_path):
     assert "G5 통과 최소 연 Sharpe" in rep["markdown"]
 
 
+def test_effective_trials_small_grid_floor(tmp_path):
+    """pm-000007: 4 스펙 단일 군집 격자 — 실현 K/N = 1/4 ≥ 이력 중앙값 0.125 → 압축비 하한 1/n_grid."""
+    from btc_quant.strategy.spec import BlockRef, ExitSpec, StrategySpec
+
+    led = Ledger(tmp_path / "ledger")
+    camps = tmp_path / "campaigns"
+    for i, (n, k) in enumerate([(80, 10), (160, 20), (40, 5)]):        # 이력 중앙값 0.125
+        d = camps / f"camp-{i}"
+        d.mkdir(parents=True)
+        (d / "pipeline.json").write_text(json.dumps({"campaign_stats": {"n_campaign_specs": n, "k_eff_clusters": k}}))
+    h = led.register_hypothesis("t", "r", "s")
+    c = led.create_campaign(h, {}, 100, ["coinone_conservative"], "dev", family="fam")
+    for i in range(88):
+        sp = StrategySpec(f"s{i}", BlockRef("donchian_breakout", {"lookback": 48}), ExitSpec(0.5 + i, 1.0, 60))
+        led.record_run(c, sp, "coinone_conservative", "dev", "snap", "code", {})
+    est = P.estimate_effective_trials(4, family="fam", ledger=led, campaigns_dir=camps)
+    assert est["ratio_base"] == pytest.approx(0.125) and est["ratio"] == pytest.approx(0.25)
+    assert "1/n_grid" in est["ratio_source"] and est["ratio_floor"] == pytest.approx(0.25)
+    # pipeline G5 와 같은 값: N_family·K/N = (88 + 4)·1/4 = 23 (이전 추정 11.5)
+    assert est["n_trials_dsr"] == pytest.approx(23.0)
+    # 하한은 지정 압축비에도 적용, 큰 격자에는 영향 없음
+    assert P.estimate_effective_trials(4, ledger=led, campaigns_dir=camps, ratio=0.05)["ratio"] == pytest.approx(0.25)
+    big = P.estimate_effective_trials(1000, family="fam", ledger=led, campaigns_dir=camps)
+    assert big["ratio"] == big["ratio_base"] == pytest.approx(0.125) and "floored" not in big["ratio_source"]
+    small = P.budget_report(4, T, family="fam", ledger=led, campaigns_dir=camps, min_dsr=0.95, var_trial_sr=1 / T)
+    assert small["required_sharpe_ann"] == pytest.approx(P.required_sharpe(T, 23.0, 1 / T, min_dsr=0.95))
+
+
 def test_family_prior_trials_raise_requirement(tmp_path):
     from btc_quant.strategy.spec import BlockRef, ExitSpec, StrategySpec
 

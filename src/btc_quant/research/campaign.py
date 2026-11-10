@@ -50,6 +50,18 @@ PLAN §5.1 ①~③. 관문(④~⑥)은 `pipeline.py`, 리포트는 `report.py`.
   넘으면 원장에 쓰기 전에 CampaignError (MAX_PARAMS 는 바꾸지 않는다 — 보고 대상).
 - 신호 캐시는 `fast.prepare` 를 직접 쓰므로 사이징·사다리도 `simulate_*(sizing=…, ladder=…)` 로 명시해 넘긴다.
   G2 귀무 = 같은 사다리 구조 + 무작위 첫 진입 시각(독립 포지션 수 맞춤), G3 인접 = 분할 수·간격 격자 한 칸 포함.
+
+신호 청산 (`signal_exit`, 선택, 2026-11-10 — docs/MANAGED_HOLD.md "기본 롱 / 필터 청산")
+- 생략 = 신호 청산 없음(기존과 같은 스펙·해시·호출). 지정하면 모든 스펙의 `exit.signal_exit` 에 들어간다:
+    signal_exit: {block: <exit_signal 블록>, grid: {param: [값 1개], ...}, match_entry: [param, ...]}
+  `grid` 의 각 파라미터는 **값 1개**(고정; 격자를 넓히지 않는다 — 스펙 수·시도 수 불변). `match_entry` 의 파라미터는
+  진입 블록의 같은 이름 파라미터 값을 그대로 쓴다(예: 진입 trend_ema_4h(span=n) ↔ 청산 trend_ema_off(span=n)).
+  블록 기본 격자의 나머지 파라미터도 값이 1개여야 한다. 신호 청산 파라미터는 스펙 n_params 에 포함된다(보수적).
+- "추세가 살아 있는 동안 보유" = 진입 블록이 추세 중 계속 True(상태형) + 추세가 꺼지면 신호 청산 + 아주 넓은 SL/TP·
+  긴 max_hold. 엔진 의미론은 그대로(ENGINE_SPEC 상태 기계: 신호 청산은 결정 경계 시가, 청산 후 쿨다운 봉 1개).
+- 신호 캐시(`SignalCache.prepared(entry, filters, signal_exit)`)와 파이프라인 Dev 재계산(`Pipeline.dev_sleeves`)이 같은
+  청산 신호를 쓴다. G2 귀무(`nulls.RandomEntryNull`)는 이전처럼 신호 청산 없이 같은 SL/TP/만기 + 무작위 진입이다 —
+  기본 롱 전략에 대한 그 귀무의 적합성은 관문 검토 질문으로 남겨 둔다(docs/MANAGED_HOLD.md §5; 관문은 바꾸지 않음).
 """
 from __future__ import annotations
 
@@ -314,6 +326,7 @@ class CampaignTemplate:
     execution: dict = field(default_factory=dict)   # 집행 격자 (정규화된 dict; 빈 dict = 시장가)
     sizing: dict = field(default_factory=dict)      # 사이징 격자 {entry_fraction: [...]} (빈 dict = 전액)
     ladder: dict = field(default_factory=dict)      # 사다리 격자 (정규화된 dict; 빈 dict = 단일 진입)
+    signal_exit: dict = field(default_factory=dict)  # {block, params(고정), match_entry} (빈 dict = 신호 청산 없음)
 
     @property
     def tf_min(self) -> int:
@@ -343,7 +356,7 @@ class CampaignTemplate:
             raise CampaignError("template must be a mapping")
         allowed = {"name", "hypothesis", "data", "entry", "filters", "exits", "costs", "budget",
                    "family", "segment", "timeframe", "from_screen", "requires_screen_pass", "power", "universe",
-                   "execution", "sizing", "ladder"}
+                   "execution", "sizing", "ladder", "signal_exit"}
         extra = set(d) - allowed
         if extra:
             raise CampaignError(f"unknown template keys {sorted(extra)}")
@@ -371,6 +384,7 @@ class CampaignTemplate:
         execution = _execution_grid(d.get("execution"))
         sizing, ladder = _position_grid(d.get("sizing"), d.get("ladder"))
         entry = _block_grid(d.get("entry"), "entry", registry)
+        signal_exit = _signal_exit_grid(d.get("signal_exit"), entry, registry)
         fsets_raw = d.get("filters", [[]])
         if not isinstance(fsets_raw, list) or not fsets_raw:
             raise CampaignError("filters must be a non-empty list of filter sets ([] = no filter)")
@@ -440,7 +454,8 @@ class CampaignTemplate:
             power = {"target_sharpe": float(ts)}
         # 블록이 요구하는 보조 데이터는 data.aux 에 선언돼 있어야 한다
         need = sorted({r for b in [entry, *(f for fs in fsets for f in fs)]
-                       for r in registry.get(b.block).requires})
+                       for r in registry.get(b.block).requires}
+                      | (set(registry.get(signal_exit["block"]).requires) if signal_exit else set()))
         missing = [r for r in need if r not in aux]
         if missing:
             raise CampaignError(f"blocks require aux data {missing}; declare data.aux: {need} "
@@ -452,7 +467,8 @@ class CampaignTemplate:
                   family=str(d.get("family") or entry.block), segment=segment, raw=d,
                   decision_tf=tf, exit_mode=mode, atr_bars=int(atr_bars),
                   from_screen=from_screen.strip() if from_screen else None, requires_screen_pass=rsp,
-                  power=power, universe=universe, execution=execution, sizing=sizing, ladder=ladder)
+                  power=power, universe=universe, execution=execution, sizing=sizing, ladder=ladder,
+                  signal_exit=signal_exit)
         tpl.validate_specs(registry)
         return tpl
 
@@ -519,11 +535,21 @@ class CampaignTemplate:
         """fast.simulate_many(..., atr_bars=) 인자: ATR 모드면 ATR 창, 아니면 None."""
         return self.atr_bars if self.exit_mode == "atr" else None
 
-    def make_exit(self, sl: float, tp: float, hold: int) -> ExitSpec:
+    def exit_ref(self, entry: BlockRef) -> BlockRef | None:
+        """진입 BlockRef → 신호 청산 BlockRef (템플릿 `signal_exit`; 없으면 None). match_entry 파라미터는 진입 값."""
+        se = self.signal_exit
+        if not se:
+            return None
+        params = dict(se["params"])
+        for k in se.get("match_entry") or ():
+            params[k] = entry.params[k]
+        return BlockRef(se["block"], {k: params[k] for k in se["order"]})
+
+    def make_exit(self, sl: float, tp: float, hold: int, signal_exit: BlockRef | None = None) -> ExitSpec:
         if self.exit_mode == "atr":
             return ExitSpec(max_hold_min=int(hold), stop_loss_atr=float(sl), take_profit_atr=float(tp),
-                            atr_bars=int(self.atr_bars))
-        return ExitSpec(float(sl), float(tp), int(hold))
+                            atr_bars=int(self.atr_bars), signal_exit=signal_exit)
+        return ExitSpec(float(sl), float(tp), int(hold), signal_exit=signal_exit)
 
     def exit_values(self, ex: ExitSpec) -> dict[str, float]:
         """스펙의 청산 → {exit_key: 값} (G3 인접·결과표 열 이름)."""
@@ -545,7 +571,7 @@ class CampaignTemplate:
                   ladder: LadderSpec | None = None) -> StrategySpec:
         """sl/tp: 고정 % 모드는 %, ATR 모드는 ATR 배수. 결정 주기 = 템플릿 timeframe. execution: 집행 변형 (None = 시장가).
         sizing/ladder: 사이징·사다리 변형 (None = 전액 단일 진입)."""
-        ex = self.make_exit(sl, tp, hold)
+        ex = self.make_exit(sl, tp, hold, self.exit_ref(entry))
         xe = execution or MARKET
         sz = sizing or FULL
         tmp = StrategySpec("x", entry, ex, tuple(filters), timeframe=self.decision_tf, universe=self.universe,
@@ -614,6 +640,9 @@ class CampaignTemplate:
             rec["sizing"] = dict(self.sizing)
         if self.ladder:
             rec["ladder"] = dict(self.ladder)
+        if self.signal_exit:
+            rec["signal_exit"] = {"block": self.signal_exit["block"], "params": dict(self.signal_exit["params"]),
+                                  "match_entry": list(self.signal_exit.get("match_entry") or [])}
         return rec
 
 
@@ -746,6 +775,38 @@ def _value_list(v, where: str) -> list:
     return list(v)
 
 
+def _signal_exit_grid(d, entry: BlockGrid, registry: Registry) -> dict:
+    """템플릿 `signal_exit` → {block, params(고정 값), match_entry, order} ({} = 없음). 격자를 넓히지 않는다:
+    match_entry 가 아닌 파라미터는 값이 정확히 1개여야 한다."""
+    if d is None:
+        return {}
+    if not isinstance(d, dict) or "block" not in d:
+        raise CampaignError("signal_exit must be a mapping {block, grid?, match_entry?}")
+    extra = set(d) - {"block", "grid", "match_entry"}
+    if extra:
+        raise CampaignError(f"signal_exit: unknown keys {sorted(extra)}")
+    match = d.get("match_entry") or []
+    if not isinstance(match, list) or not all(isinstance(k, str) for k in match):
+        raise CampaignError("signal_exit.match_entry must be a list of parameter names")
+    bg = _block_grid({"block": d["block"], **({"grid": d["grid"]} if d.get("grid") else {})}, "exit_signal",
+                     registry)
+    bad = [k for k in match if k not in bg.grid or k not in entry.grid]
+    if bad:
+        raise CampaignError(f"signal_exit.match_entry {bad}: must be parameters of both {bg.block} and "
+                            f"the entry block {entry.block}")
+    if set(match) & set(d.get("grid") or {}):
+        raise CampaignError("signal_exit: a match_entry parameter cannot also be given in grid")
+    params = {}
+    for k, vals in bg.grid.items():
+        if k in match:
+            continue
+        if len(vals) != 1:
+            raise CampaignError(f"signal_exit {bg.block}.{k}: exactly one value (signal exits are fixed or tied "
+                                "to the entry via match_entry; they do not widen the grid)")
+        params[k] = vals[0]
+    return {"block": bg.block, "params": params, "match_entry": list(match), "order": list(bg.grid)}
+
+
 def _block_grid(d, kind: str, registry: Registry) -> BlockGrid:
     if not isinstance(d, dict) or "block" not in d:
         raise CampaignError(f"{kind} must be a mapping with 'block'")
@@ -809,9 +870,15 @@ class SignalCache:
         return pd.Series(self.block(entry) & self.filter_ok(filters), index=self.bars.index,
                          name="entry_ok")
 
-    def prepared(self, entry: BlockRef, filters) -> fast.Prepared:
-        return fast.prepare(self.m1, self.entry_ok(entry, filters), None, timeframe=self.timeframe,
-                            atr_bars=self.atr_bars, bars=self.bars)
+    def exit_sig(self, signal_exit: BlockRef | None) -> pd.Series | None:
+        """신호 청산 블록 값 (signals.build_signals 와 같은 exit_sig; None = 신호 청산 없음)."""
+        if signal_exit is None:
+            return None
+        return pd.Series(self.block(signal_exit), index=self.bars.index, name="exit_sig")
+
+    def prepared(self, entry: BlockRef, filters, signal_exit: BlockRef | None = None) -> fast.Prepared:
+        return fast.prepare(self.m1, self.entry_ok(entry, filters), self.exit_sig(signal_exit),
+                            timeframe=self.timeframe, atr_bars=self.atr_bars, bars=self.bars)
 
 
 def load_segment(env: ResearchEnv, segment: str, exchange: str, symbol: str, timeframe: str
@@ -1125,7 +1192,7 @@ def run_campaign(template: CampaignTemplate | str | Path, root: str | Path | Non
             for pc in pcombos]
     for ci, (entry, filters, set_idx, xe, (sz, lad)) in enumerate(loop):
         if ci == 0 or loop[ci - 1][:3] != (entry, filters, set_idx):
-            ps = {sym: caches[sym].prepared(entry, filters) for sym in syms}
+            ps = {sym: caches[sym].prepared(entry, filters, tpl.exit_ref(entry)) for sym in syms}
         xarg = None if (xe.is_default and lad is None and sz.is_default) else xe   # 기본 = 기존 호출 그대로
         pkw = {} if (lad is None and sz.is_default) else {"sizing": None if sz.is_default else sz, "ladder": lad}
         for cost_name in eval_costs:
@@ -1196,6 +1263,8 @@ def run_campaign(template: CampaignTemplate | str | Path, root: str | Path | Non
         "params": pver, "params_version": pver.get("params_version"), "cost_versions": pver.get("cost_versions"),
         "daily_returns": acct,
     }
+    if tpl.signal_exit:                     # 신호 청산 (없는 템플릿은 매니페스트가 이전과 같다)
+        manifest["signal_exit"] = tpl.to_record()["signal_exit"]
     if tpl.execution:                       # 지정가 집행 격자 (시장가 템플릿은 매니페스트가 이전과 같다)
         manifest["execution"] = {"grid": dict(tpl.execution), "n_variants": len(xcombos),
                                  "fill_model": {k: getattr(LIMIT_FILL_DEFAULT, k) for k in
