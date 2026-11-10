@@ -1,0 +1,65 @@
+# Cycle 3C (2026-11-10) S2 — KST-morning attention lag after overnight moves, with US-open placebo. Family vol_breakout (inherited; session-filtered momentum was already screened in this family at 5m, camp-000003).
+# Derived via lessons_derive_hypothesis (drv-000013 <- fact-000009); hypothesis block tagged by apply_derivation.
+name: c3c_vol_breakout_kst_morning_1h_screen
+family: vol_breakout
+data:
+  exchange: coinone
+  symbol: BTC-KRW
+  timeframe: 1m
+  aux: []
+bar_minutes: 60
+signals:
+- entry:
+    block: roc_threshold
+    params:
+      lookback: 12
+      thr_bp: 100
+  filters:
+  - - block: session_kst
+      params:
+        session: asia_open
+  - - block: session_kst
+      params:
+        session: us_open
+- entry:
+    block: roc_threshold
+    params:
+      lookback: 24
+      thr_bp: 100
+  filters:
+  - - block: session_kst
+      params:
+        session: asia_open
+study:
+  n_null: 1000
+  seed: 0
+  min_events: 300
+  stratify: hour_vol
+costs:
+  primary: coinone_conservative
+  grade: upbit_conservative
+correction:
+  method: bh
+  alpha: 0.1
+budget: 3
+hypothesis:
+  text: On Coinone BTC-KRW at 1h decisions at the KST morning (decision hour 09/10 KST, session_kst asia_open), an overnight
+    rise of >= 100 bp over the last 12 h / 24 h is followed by 4-24 h returns above a matched null drawn from the same morning
+    hours, net of coinone_conservative cost, and this excess is larger than for the same entry at the US open (placebo, us_open)
+    and than the unfiltered roc(12,100) config of screen c3c_vol_breakout_roc_volz_1h.
+  rationale: 'Mechanism (M2, directional variant argued here): the marginal participant on KRW venues is Korean retail, largely
+    inactive KST 02-08 while the US session moves price. Attention-constrained investors react with a lag (Barber-Odean 2008
+    attention-driven buying) when they return in the KST morning, so an overnight up-move is followed by domestic buying pressure
+    during 09-13 KST that lifts KRW prices (and the KRW premium) for hours. Counterparty: late domestic retail buyers who
+    chase the overnight move after our entry and to whom we sell; persists because attention limits are behavioural and KRW
+    capital controls slow offshore arbitrage of the premium (M5). What kills it: the marginal KRW buyer is now bots / institutions;
+    the excess is generic hourly momentum (placebo and unfiltered contrasts); cost; bear regimes for a long-only book. Evidence:
+    K-P0-3 (KST 09 volume/volatility concentration; lockbox exposed, Val exposed) motivates the session only and sets no grid
+    value; fact-000009 (Dev, lockbox none, Val none) shows generic 1h momentum information, which is exactly the confound
+    the contrasts test. Pre-registered contrast: the attention claim is supported only if an asia_open config passes AND its
+    excess at its best primary horizon exceeds both the us_open placebo''s excess and the unfiltered roc(12,100) excess of
+    screen S1. A strategy campaign is run only if this holds. Block-grid values only (session names are the block''s presets);
+    nothing computed on data before registration. [derived-from drv-000013 ← fact-000009; family vol_breakout]'
+  success_criteria: 'Per config: BH q=0.10 over the family''s screen configs, n_events >= 300, coinone_conservative net mean
+    > 0 at the best primary horizon (240/480/1440); attention claim additionally requires asia_open excess > us_open placebo
+    excess and > unfiltered roc(12,100) excess.'

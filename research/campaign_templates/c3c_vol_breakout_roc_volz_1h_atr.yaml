@@ -1,0 +1,64 @@
+# Cycle 3C strategy campaign, derived via lessons_derive_hypothesis (drv-000016 <- fact-000017, screen camp-000020).
+name: c3c_vol_breakout_roc_volz_1h_atr
+data:
+  exchange: coinone
+  symbol: BTC-KRW
+  timeframe: 1m
+  aux: []
+timeframe: 1h
+entry:
+  block: roc_threshold
+  grid:
+    lookback:
+    - 3
+    - 12
+    thr_bp:
+    - 100
+filters:
+- - block: volume_z
+    grid:
+      window:
+      - 48
+      min_z:
+      - 1.0
+exits:
+  mode: atr
+  sl_atr:
+  - 3.0
+  tp_atr:
+  - 2.0
+  - 4.0
+  max_hold_min:
+  - 1440
+  - 2880
+  atr_bars: 14
+from_screen: camp-000020
+power:
+  target_sharpe: 2.0
+costs:
+  primary: coinone_conservative
+  grade: upbit_conservative
+  stress: coinone_stress
+  grade_stress: upbit_stress
+budget: 8
+family: vol_breakout
+hypothesis:
+  text: 'Coinone BTC-KRW 1h: a >= 100 bp rise over 3 h or 12 h (roc_threshold) on abnormally high decision-bar volume (volume_z(48)
+    >= 1), with ATR exits (SL 3 ATR x TP 2 / 4 ATR, max hold 1440 min = information horizon or 2880 min low-turnover variant),
+    earns positive coinone_conservative net returns that pass G0-G5 on Dev and the robustness suite (incl. regime share <=
+    70%).'
+  rationale: 'Mechanism: volume-return dynamics (M3 variant): impulses on abnormal volume carry informed / forced (liquidation,
+    stop) / trend-following flow that continues; counterparty: counter-trend limit sellers and liquidity providers absorbing
+    the flow, late chasers at exit. Kills: bot-contaminated Coinone volume (P-D1), long-only bear regimes, Upbit cost (grade
+    B), generic momentum confound. Evidence (Dev only; lockbox none, Val none): screen camp-000020 (drv-000012): roc(3,100)&vz(48,1)
+    n 981, p 0.058, excess 28.8 bp z 2.07 @1440, net +43.0 bp (Upbit +29.0); roc(12,100)&vz(48,1) n 1419, p 0.075, excess
+    24.3 bp z 1.96 @1440, net +37.3 bp (Upbit +23.3); both beat their unfiltered siblings (8.3 / 16.9 bp at 1440), so the
+    pre-registered volume contrast is met. Info horizon 1440 (rising). Exit suggestions TP 2.19-2.20 ATR, SL 3.22-3.33 ATR
+    -> SL fixed at 3 ATR, TP bracketing at 2 / 4 ATR, hold 1440 (info horizon) and 2880 (rising profile; low-turnover variant
+    per pipeline_calibration.md). The min_z 2.0 configs (also passing, n 371 / 440) are excluded a priori on sample size:
+    with 24 h holds and one position, G1 (>= 300 Dev trades, recent-12m minimum) would bind. Pre-stated expectations: plausible
+    Sharpe from the screen is ~1.1-1.4 on excess (1.9-2.2 on net incl. drift, overlap ignored), i.e. near the DSR requirement
+    and below the ~2 needed for Val; predicted failure modes: G2 (weak z ~2), regime share (long-only up-trend tilt), G4 recent
+    12 months, PBO. No side calculations were run. [derived-from drv-000016 ← fact-000017; family vol_breakout]'
+  success_criteria: At least one spec passes G0-G6 and the Dev robustness suite. Refuted as a tradeable edge if no spec passes
+    G2 on Dev or the best Dev Sharpe_w < 1.0.

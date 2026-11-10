@@ -1,0 +1,60 @@
+# Cycle 3C (2026-11-10) S1 — volume-confirmed hourly impulse (M3 variant, volume-information mechanism). Family vol_breakout (inherited).
+# Derived via lessons_derive_hypothesis (drv-000012 <- fact-000009); hypothesis block tagged by apply_derivation.
+name: c3c_vol_breakout_roc_volz_1h_screen
+family: vol_breakout
+data:
+  exchange: coinone
+  symbol: BTC-KRW
+  timeframe: 1m
+  aux: []
+bar_minutes: 60
+signals:
+- entry:
+    block: roc_threshold
+    grid:
+      lookback:
+      - 3
+      - 12
+      thr_bp:
+      - 100
+  filters:
+  - []
+  - - block: volume_z
+      params:
+        window: 48
+        min_z: 1.0
+  - - block: volume_z
+      params:
+        window: 48
+        min_z: 2.0
+study:
+  n_null: 1000
+  seed: 0
+  min_events: 300
+  stratify: hour_vol
+costs:
+  primary: coinone_conservative
+  grade: upbit_conservative
+correction:
+  method: bh
+  alpha: 0.1
+budget: 6
+hypothesis:
+  text: On Coinone BTC-KRW at 1h decisions, a rise of >= 100 bp over the last 3 h or 12 h (roc_threshold) is followed by 4-24
+    h returns above a matched (KST hour x vol) null net of coinone_conservative cost, and more so when the decision bar's
+    volume is abnormally high vs its trailing 2-day distribution (volume_z(48) >= 1 / >= 2).
+  rationale: 'Mechanism: volume-return dynamics (Campbell-Grossman-Wang 1993; Llorente-Michaely-Saar-Wang 2002), an M3 variant:
+    price moves on abnormal volume carry informed, forced (liquidation / stop) or trend-following flow and continue; moves
+    on normal volume are more often liquidity noise. Counterparty: counter-trend limit sellers and liquidity providers absorbing
+    directional flow at the impulse, and late chasers we sell to at exit; persists because liquidation flow is price-insensitive
+    and Coinone is too thin for large arbitrageurs. What kills it: Coinone volume is contaminated by bot prints (pitfalls
+    P-D1, venues V-1; lockbox none, Val none) so volume_z may be noise; long-only bear regimes; Upbit-level cost (grade B);
+    the effect may be nothing but the generic 1h momentum already known (fact-000009, fact-000015; Dev, lockbox none, Val
+    none). Pre-registered contrast: the volume filter adds information only if a filtered config passes AND its matched-null
+    excess at its best primary horizon exceeds that of the unfiltered sibling with the same lookback. A strategy campaign
+    is run ONLY for a passing volume-filtered config that meets this contrast; if only unfiltered roc configs pass, no strategy
+    campaign (that is the generic 1h momentum line paused in cycle 3A). All parameter values are block-grid values; nothing
+    was computed on data before registration. [derived-from drv-000012 ← fact-000009; family vol_breakout]'
+  success_criteria: 'Per config: BH q=0.10 over the family''s screen configs, n_events >= 300, coinone_conservative net mean
+    > 0 at the best primary horizon (240/480/1440). Volume-confirmation claim supported only if a volume_z config passes and
+    its excess > the unfiltered same-lookback config''s excess.'

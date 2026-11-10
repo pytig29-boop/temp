@@ -1,0 +1,3 @@
+label,family,entry,filters,n_events,p_signal,best_h,excess_bp,z,net_bp[coinone_conservative],net_bp[upbit_conservative],info_h,profile,significant,passed,fail_reason
+"bollinger_z_revert(window=24,z=2.5) & volume_z(window=48,min_z=1.0)",liq_meanrev,bollinger_z_revert,volume_z,541,1,240,2.93639,0.407504,-1.32761,-15.316,120,peaked,False,False,not significant after correction
+"bollinger_z_revert(window=24,z=2.5) & volume_z(window=48,min_z=2.0)",liq_meanrev,bollinger_z_revert,volume_z,314,1,240,-1.77761,-0.1923,0.0321197,-13.9581,60,decaying (z maximal at the shortest horizon),False,False,not significant after correction

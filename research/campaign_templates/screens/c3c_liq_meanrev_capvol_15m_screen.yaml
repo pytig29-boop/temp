@@ -1,0 +1,69 @@
+# Cycle 3C (2026-11-10) S3a — capitulation-volume reversion at 15m (M4 price+volume cascade proxy). Family liq_meanrev (inherited).
+# Derived via lessons_derive_hypothesis (drv-000014 <- fact-000011); hypothesis block tagged by apply_derivation.
+name: c3c_liq_meanrev_capvol_15m_screen
+family: liq_meanrev
+data:
+  exchange: coinone
+  symbol: BTC-KRW
+  timeframe: 1m
+  aux: []
+bar_minutes: 15
+signals:
+- entry:
+    block: bollinger_z_revert
+    params:
+      window: 24
+      z: 2.5
+  filters:
+  - - block: volume_z
+      params:
+        window: 96
+        min_z: 1.0
+  - - block: volume_z
+      params:
+        window: 96
+        min_z: 2.0
+study:
+  horizons:
+  - 15
+  - 30
+  - 60
+  - 120
+  - 240
+  - 480
+  primary_horizons:
+  - 30
+  - 60
+  - 120
+  min_gap_min: 60
+  n_null: 1000
+  seed: 0
+  min_events: 300
+  stratify: hour_vol
+costs:
+  primary: coinone_conservative
+  grade: upbit_conservative
+correction:
+  method: bh
+  alpha: 0.1
+budget: 2
+hypothesis:
+  text: On Coinone BTC-KRW at 15m decisions, closes >= 2.5 sd below the 24-bar (6 h) mean on abnormally high volume (volume_z(96)
+    >= 1 / >= 2 vs the trailing day) - the price+volume proxy for liquidation cascades in mechanisms.md M4 - are followed
+    by 30-120 min returns above a matched (KST hour x vol) null, net of coinone_conservative cost, with larger excess than
+    the unfiltered bollinger_z_revert(24, 2.5) of screen camp-000011.
+  rationale: 'Mechanism M4: forced liquidation of levered longs creates price-insensitive selling that partly reverts once
+    the pressure ends; liquidity providers are paid for absorbing it. mechanisms.md M4 names the proxy explicitly (sharp drop
+    z-score + volume z-score spike), which no prior screen used: camp-000004/camp-000011/camp-000012 tested price-only dislocations.
+    Counterparty: force-liquidated longs and panic sellers; persists because providing liquidity into cascades carries inventory
+    risk most avoid. What kills it: information-driven drops (no reversion), second-wave cascades, bear regimes; Coinone volume
+    contaminated by bot prints (P-D1, V-1; lockbox none, Val none), which may make volume_z a poor cascade proxy (Upbit volume
+    is not available as a block). Evidence (Dev, lockbox none, Val none): fact-000011 (15m bollinger(24,2.5) unfiltered passed,
+    info horizon 30 min, net +4.9 bp at 240 min); fact-000012 (1h price-only reversion NO_SIGNAL). Primary horizons 30/60/120
+    are set from fact-000011''s information horizon (30 min) instead of the 15m preset; int-000005 / int-000008 are unverified
+    and not used as facts. Pre-registered: a strategy campaign only if a config passes AND its excess exceeds fact-000011''s
+    unfiltered excess at the same horizon AND the plausible Sharpe (net mean x event frequency) clears the power requirement.
+    Block-grid values only. [derived-from drv-000014 ← fact-000011; family liq_meanrev]'
+  success_criteria: 'Per config: BH q=0.10 over the family''s screen configs, n_events >= 300, coinone_conservative net mean
+    > 0 at the best primary horizon (30/60/120); cascade claim additionally requires excess above the unfiltered camp-000011
+    config.'

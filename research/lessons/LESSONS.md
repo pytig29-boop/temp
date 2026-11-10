@@ -3,7 +3,7 @@
 > `btc_quant.research.lessons.render_markdown()` 생성물. **직접 편집 금지** (원본: `research/lessons/*.jsonl`).
 > 사실(Facts)은 파이프라인 결과에서 자동 추출되어 불변이다. 해석(Interpretations)은 AI 작성이며
 > 후속 캠페인으로 verified/refuted 되기 전까지 **unverified** 이다. Val/잠금은 결과 코드만.
-> 생성: 2026-11-10T01:26:33+00:00 · 사실 16 · 해석 10 · 사후분석 6 · 파생 11
+> 생성: 2026-11-10T01:38:23+00:00 · 사실 21 · 해석 13 · 사후분석 6 · 파생 16
 
 ## 실패 유형 (자동 분류)
 
@@ -26,8 +26,8 @@
 
 | family | 캠페인 | 누적 시도 | 결과 | 주 실패 유형 |
 |---|---|---|---|---|
-| `liq_meanrev` | 5 | 41 | passed 2, failed 3 | `PARAM_SPIKE`×1, `UNSTABLE`×1, `NO_SIGNAL`×1 |
-| `vol_breakout` | 8 | 66 | passed 4, failed 4 | `VAL_FAIL`×2, `PARAM_SPIKE`×1, `SELECTION_BIAS`×1 |
+| `liq_meanrev` | 7 | 45 | passed 2, failed 5 | `NO_SIGNAL`×3, `PARAM_SPIKE`×1, `UNSTABLE`×1 |
+| `vol_breakout` | 11 | 83 | passed 5, failed 6 | `VAL_FAIL`×2, `NO_SIGNAL`×2, `PARAM_SPIKE`×1, `SELECTION_BIAS`×1 |
 | `xvenue_upbit_lead` | 3 | 16 | failed 2, passed 1 | `COST_EATEN`×1, `LOW_SAMPLE`×1 |
 
 ## 교훈 (사실 → 해석)
@@ -334,6 +334,91 @@
   - 근거: fact-000016 candidates[0] (vol 0.67, SL 2 / TP 3 ATR, hold 480): sharpe 1.587, sharpe_w 1.145, gross_sharpe_w 1.353, 326 trades (60 recent), G2 p 0.023, G3 neighbour median 1.05, G4 rolling 0.81 recent 1.04, G5 dsr 0.999 pbo 0.073; G6 outcome fail (code only); camp-000017 ablation_dev: dropping vol_regime -> logic 72bbc9dae527d230 (= camp-000013 representative) sharpe_w 1.019, delta 0.126, se 0.348, removable (ablation campaign camp-000018); camp-000017 results.parquet (Dev, coinone_conservative): yearly Sharpe 2021..2025 2.51/0.97/2.28/1.24/0.48; all 8 specs sharpe_w > 0 (0.27..1.14), TP 3 specs 1.05..1.14, TP 1.5 specs 0.27..0.62; upbit_conservative sharpe_w 0.18..0.37 for TP 3, negative for TP 1.5; camp-000019 (log_exploration): robustness_for_spec all 7 checks pass; regime up share 0.670; alpha_t 3.21 beta 0.08; top 1% trades 0.19 of PnL; leave-year-out min 1.34; cross-venue ratio 0.81; camp-000013 / fact-000013 (Dev): unfiltered representative sharpe_w 1.019, 610 trades, yearly 2.25/0.50/2.03/1.85/-0.25, up share 0.74
   - 검증 방법: No further Dev campaign on this signal is informative: Dev is exhausted for it (two Dev survivors, two G6 fails). Refuted if forward/paper observation (after a human decision) or a Dev extension shows the filtered spec Sharpe below the unfiltered one by more than the bootstrap s.e.
 
+### fact-000017 · signal_screen `camp-000020` · family `vol_breakout`
+
+**사실 (자동, 불변)**
+
+- 가설 hyp-000019: On Coinone BTC-KRW at 1h decisions, a rise of >= 100 bp over the last 3 h or 12 h (roc_threshold) is followed by 4-24 h returns above a matched (KST hour x vol) null net of coinone_conservative cost, and more so when the decision bar's volume is abnormally high vs its trailing 2-day distribution (volume_z(48) >= 1 / >= 2).
+- 결과: **passed** · 주 실패 유형: `None` · 분포: `NO_SIGNAL`×1
+- 깔때기(전체 None 스펙): G1 None · SR_w>0 None · G4 None | 상위 None:  · Dev 생존 None
+  - `roc_threshold(lookback=3,thr_bp=100)` events=2545 p=0.744 best_h=1440 → `NO_SIGNAL`
+  - `roc_threshold(lookback=3,thr_bp=100) & volume_z(window=48,min_z=1.0)` events=981 p=0.058 best_h=1440 → PASS
+  - `roc_threshold(lookback=3,thr_bp=100) & volume_z(window=48,min_z=2.0)` events=371 p=0.077 best_h=1440 → PASS
+  - `roc_threshold(lookback=12,thr_bp=100)` events=5033 p=0.030 best_h=480 → PASS
+  - `roc_threshold(lookback=12,thr_bp=100) & volume_z(window=48,min_z=1.0)` events=1419 p=0.075 best_h=1440 → PASS
+  - `roc_threshold(lookback=12,thr_bp=100) & volume_z(window=48,min_z=2.0)` events=440 p=0.046 best_h=1440 → PASS
+- 범위: coinone None 1m · dev 2021-01-01T00:00:00+00:00~2025-11-01T00:00:00+00:00 · 블록 ['roc_threshold'] / None · 재검토 기한 2027-05-09
+- 재검토 조건: Dev data period changes; venue/cost model changes; decision interval changes (bar_minutes)
+
+### fact-000018 · signal_screen `camp-000021` · family `vol_breakout`
+
+**사실 (자동, 불변)**
+
+- 가설 hyp-000020: On Coinone BTC-KRW at 1h decisions at the KST morning (decision hour 09/10 KST, session_kst asia_open), an overnight rise of >= 100 bp over the last 12 h / 24 h is followed by 4-24 h returns above a matched null drawn from the same morning hours, net of coinone_conservative cost, and this excess is larger than for the same entry at the US open (placebo, us_open) and than the unfiltered roc(12,100) config of screen c3c_vol_breakout_roc_volz_1h.
+- 결과: **failed** · 주 실패 유형: `NO_SIGNAL` · 분포: `NO_SIGNAL`×3
+- 깔때기(전체 None 스펙): G1 None · SR_w>0 None · G4 None | 상위 None:  · Dev 생존 None
+  - `roc_threshold(lookback=12,thr_bp=100) & session_kst(session=asia_open)` events=493 p=0.111 best_h=240 → `NO_SIGNAL`
+  - `roc_threshold(lookback=12,thr_bp=100) & session_kst(session=us_open)` events=742 p=0.970 best_h=1440 → `NO_SIGNAL`
+  - `roc_threshold(lookback=24,thr_bp=100) & session_kst(session=asia_open)` events=579 p=0.137 best_h=1440 → `NO_SIGNAL`
+- 범위: coinone None 1m · dev 2021-01-01T00:00:00+00:00~2025-11-01T00:00:00+00:00 · 블록 ['roc_threshold'] / None · 재검토 기한 2027-05-09
+- 재검토 조건: Dev data period changes; venue/cost model changes; decision interval changes (bar_minutes)
+
+**해석 (AI, 검증 상태 표시)**
+
+- [UNVERIFIED] int-000012 (신뢰도 medium): The KST-morning attention-lag mechanism (Korean retail reacting at 09-10 KST to overnight up-moves) shows no information beyond generic hourly momentum on Coinone Dev: asia_open roc(12,100) excess 10.5 bp z 1.79 @240 and roc(24,100) 19.1 bp z 1.69 @1440 are no larger than the unfiltered roc(12,100) (8.5 bp z 2.32 @480; 16.9 bp @1440), and the us_open placebo is 6.8 bp z 0.46. The salient Dev feature of morning hours is instead a negative unconditional 4 h drift in the matched null (about -14 bp at 240 min), so the raw 4 h mean after an overnight rise is itself negative (-3.8 bp). Long-only continuation trades at the KST open are not supported.
+  - 근거: fact-000018 (screen camp-000021): asia_open roc12 n 493 p_signal 0.111; roc24 n 579 p 0.137; us_open n 742 p 0.97; research/campaigns/camp-000021/signal_screen.md roc(12,100)&asia_open table: null mean -14.3 bp @240, raw mean -3.8 bp; fact-000017 (screen camp-000020): roc(12,100) unfiltered excess 8.5 bp z 2.32 @480; research/knowledge/phase0_findings.md#K-P0-3 (lockbox exposed, Val exposed) - motivation only
+  - 검증 방법: Same 3-config screen on Upbit 1h (the venue where Korean retail is the marginal trader): refuted if the asia_open config's excess exceeds both the us_open placebo and the unfiltered roc(12,100) excess by >= 2 HAC SE with z >= 3.
+
+### fact-000019 · signal_screen `camp-000022` · family `liq_meanrev`
+
+**사실 (자동, 불변)**
+
+- 가설 hyp-000021: On Coinone BTC-KRW at 15m decisions, closes >= 2.5 sd below the 24-bar (6 h) mean on abnormally high volume (volume_z(96) >= 1 / >= 2 vs the trailing day) - the price+volume proxy for liquidation cascades in mechanisms.md M4 - are followed by 30-120 min returns above a matched (KST hour x vol) null, net of coinone_conservative cost, with larger excess than the unfiltered bollinger_z_revert(24, 2.5) of screen camp-000011.
+- 결과: **failed** · 주 실패 유형: `NO_SIGNAL` · 분포: `NO_SIGNAL`×2
+- 깔때기(전체 None 스펙): G1 None · SR_w>0 None · G4 None | 상위 None:  · Dev 생존 None
+  - `bollinger_z_revert(window=24,z=2.5) & volume_z(window=96,min_z=1.0)` events=1474 p=0.107 best_h=30 → `NO_SIGNAL`
+  - `bollinger_z_revert(window=24,z=2.5) & volume_z(window=96,min_z=2.0)` events=889 p=0.972 best_h=120 → `NO_SIGNAL`
+- 범위: coinone None 1m · dev 2021-01-01T00:00:00+00:00~2025-11-01T00:00:00+00:00 · 블록 ['bollinger_z_revert'] / None · 재검토 기한 2027-05-09
+- 재검토 조건: Dev data period changes; venue/cost model changes; decision interval changes (bar_minutes)
+
+**해석 (AI, 검증 상태 표시)**
+
+- [UNVERIFIED] int-000013 (신뢰도 medium): Abnormal Coinone volume does not isolate forced-selling (cascade) dislocations: adding volume_z to bollinger_z_revert(24,2.5) lowers the reversion excess at 15m (vz>=1: 3.5 bp z 1.81 @30 min; vz>=2: 1.8 bp z 0.46, vs unfiltered 4.4 bp z 2.97 in camp-000011) and leaves the 1h version without information (<= 2.9 bp, z <= 0.41, camp-000023). Either high-volume drops on Coinone are more often information-driven (no reversion) or Coinone volume is too bot-contaminated (P-D1) to proxy liquidations; the price+volume M4 proxy in mechanisms.md is not supported on Coinone volume.
+  - 근거: fact-000019 (screen camp-000022): vz(96,1) n 1474 p_signal 0.107 excess 3.5 bp z 1.81 @30; vz(96,2) n 889 p 0.97; fact-000020 (screen camp-000023, 1h): vz(48,1) n 541 p 1.0; vz(48,2) n 314 p 1.0; fact-000011 (screen camp-000011): unfiltered bollinger(24,2.5) 15m excess 4.4 bp z 2.97 @30 min; research/knowledge/pitfalls.md#P-D1 (lockbox none, Val none)
+  - 검증 방법: Experimental block upbit_volume_z (Upbit quote-volume z-score, live-ready) as a filter on bollinger_z_revert(24,2.5) at 15m (family liq_meanrev): refuted if the Upbit-volume-filtered excess at 30-60 min exceeds the unfiltered 4.4 bp by >= 2 HAC SE.
+
+### fact-000020 · signal_screen `camp-000023` · family `liq_meanrev`
+
+**사실 (자동, 불변)**
+
+- 가설 hyp-000022: On Coinone BTC-KRW at 1h decisions, closes >= 2.5 sd below the 24 h mean on abnormally high volume (volume_z(48) >= 1 / >= 2 vs the trailing 2 days) are followed by 4-24 h returns above a matched (KST hour x vol) null, net of coinone_conservative cost, unlike the price-only 1h reversion that was NO_SIGNAL (camp-000012).
+- 결과: **failed** · 주 실패 유형: `NO_SIGNAL` · 분포: `NO_SIGNAL`×2
+- 깔때기(전체 None 스펙): G1 None · SR_w>0 None · G4 None | 상위 None:  · Dev 생존 None
+  - `bollinger_z_revert(window=24,z=2.5) & volume_z(window=48,min_z=1.0)` events=541 p=1.000 best_h=240 → `NO_SIGNAL`
+  - `bollinger_z_revert(window=24,z=2.5) & volume_z(window=48,min_z=2.0)` events=314 p=1.000 best_h=240 → `NO_SIGNAL`
+- 범위: coinone None 1m · dev 2021-01-01T00:00:00+00:00~2025-11-01T00:00:00+00:00 · 블록 ['bollinger_z_revert'] / None · 재검토 기한 2027-05-09
+- 재검토 조건: Dev data period changes; venue/cost model changes; decision interval changes (bar_minutes)
+
+### fact-000021 · campaign `camp-000024` · family `vol_breakout`
+
+**사실 (자동, 불변)**
+
+- 가설 hyp-000023: Coinone BTC-KRW 1h: a >= 100 bp rise over 3 h or 12 h (roc_threshold) on abnormally high decision-bar volume (volume_z(48) >= 1), with ATR exits (SL 3 ATR x TP 2 / 4 ATR, max hold 1440 min = information horizon or 2880 min low-turnover variant), earns positive coinone_conservative net returns that pass G0-G5 on Dev and the robustness suite (incl. regime share <= 70%).
+- 결과: **failed** · 주 실패 유형: `NO_SIGNAL` · 분포: `NO_SIGNAL`×1
+- 파생: drv-000016 (계열 점검: ok)
+- 깔때기(전체 8 스펙): G1 8 · SR_w>0 8 · G4 5 | 상위 5: G0 1 · G1 1 · G2 0 · G3 1 · G4 1 · G5 1 · Dev 생존 0
+- 선택편향 입력: n_campaign_specs=8, k_eff_clusters=1, n_family_trials=83, n_global_trials=144, n_trials_dsr=10.375, pbo=0.201, cluster_threshold=0.500
+- Val(G6): 평가 0 · 통과 0 (결과 코드만) · 잠금: not_accessed
+  - #1 `c3c_vol_breakout_roc_volz_1h_atr_36b866681f` SR_w=0.906 trades=614 first_failed=G2 → `NO_SIGNAL` ['NO_SIGNAL'] · val=not_run
+- 범위: coinone BTC-KRW 1m · dev 2021-01-01T00:00:00+00:00~2025-11-01T00:00:00+00:00 · 블록 roc_threshold / [['volume_z']] · 재검토 기한 2027-05-09
+- 재검토 조건: Dev data period or segment boundaries change (new data, lockbox rolled into Dev/Val); venue or cost model changes (e.g. Coinone 0% fee promotion ends, Upbit fee changes); timeframe / decision interval changes (5m ↔ 1m); a block used here is re-implemented (new block version) or an engine bug is fixed; review date 2027-05-09 passes
+
+**해석 (AI, 검증 상태 표시)**
+
+- [UNVERIFIED] int-000011 (신뢰도 low): The event-level volume-confirmation effect on Coinone 1h (screen camp-000020: volume_z(48)>=1 configs excess 24-29 bp at 1440 min vs 8-17 bp unfiltered, but z only ~2) does not convert into a strategy that beats random entries in the same high-volume hours: the best spec (roc(3,100)&vz(48,1), SL3/TP4 ATR, 1440 min) has Sharpe_w 0.91 at the 89th percentile of the trade-count-matched null whose median is already 0.39. Most of the return is the drift of being long in high-volume hours (exposure 48% of days) plus generic 1h momentum, not volume-specific timing. Bot-contaminated Coinone volume (P-D1) may also blur the filter.
+  - 근거: fact-000021 candidates[0].gates_dev.G2 p_value 0.112, sharpe_w 0.906, null median 0.386, null p95 1.091; fact-000017 (screen camp-000020): roc(3,100)&vz(48,1) excess 28.8 bp z 2.07 @1440; roc(12,100)&vz(48,1) 24.3 bp z 1.96; unfiltered roc(3,100) 8.3 bp z 0.68, roc(12,100) 16.9 bp @1440; research/reports/campaign_camp-000024.md B&H reference: exposure_days 0.483, up-regime capture 0.45, down-regime capture -2.45 (Dev); research/knowledge/pitfalls.md#P-D1 (lockbox none, Val none)
+  - 검증 방법: Signal screen (family vol_breakout) of roc_threshold(3,100) x {none, volume_z(48,1.0)} on Upbit 1h data (uncontaminated volume): refuted if the volume_z config shows excess z >= 3 at 1440 min AND exceeds the unfiltered excess by >= 2 HAC SE; otherwise the volume-confirmation line stays closed.
+
 ## 파생 가설 (계열 상속)
 
 | id | 부모 | family | override | 가설 |
@@ -349,6 +434,11 @@
 | drv-000009 | fact-000009 | `vol_breakout` | – | Coinone BTC-KRW 1h: donchian_breakout(lookback 48/144 h) with ATR exits (SL 2.5/3.5 ATR x TP 2.5/5 ATR, max hold 1440 min = information horizon) earns positive coinone_conservative net returns that pass G0-G5 on Dev and the robustness suite. |
 | drv-000010 | fact-000013 | `vol_breakout` | – | On Coinone BTC-KRW at 1h decisions, atr_channel_breakout(24,3) carries more information per event when 24h realised vol is in the upper half / tercile of its trailing 7-day range (vol_regime 0.5 / 0.67), and that information is present in down- and sideways-30d regimes, not only up-trends. |
 | drv-000011 | fact-000015 | `vol_breakout` | – | Coinone BTC-KRW 1h: atr_channel_breakout(span 24, mult 3) taken only when 24h realised vol is in the upper half / tercile of its trailing range (vol_regime(24, 0.5 / 0.67)), with ATR exits (SL 2/3 ATR x TP 1.5/3 ATR, max hold 480 min = information horizon), earns positive coinone_conservative net returns that pass G0-G5 on Dev and the robustness suite (incl. regime share <= 70%). |
+| drv-000012 | fact-000009 | `vol_breakout` | – | On Coinone BTC-KRW at 1h decisions, a rise of >= 100 bp over the last 3 h or 12 h (roc_threshold) is followed by 4-24 h returns above a matched (KST hour x vol) null net of coinone_conservative cost, and more so when the decision bar's volume is abnormally high vs its trailing 2-day distribution (volume_z(48) >= 1 / >= 2). |
+| drv-000013 | fact-000009 | `vol_breakout` | – | On Coinone BTC-KRW at 1h decisions at the KST morning (decision hour 09/10 KST, session_kst asia_open), an overnight rise of >= 100 bp over the last 12 h / 24 h is followed by 4-24 h returns above a matched null drawn from the same morning hours, net of coinone_conservative cost, and this excess is larger than for the same entry at the US open (placebo, us_open) and than the unfiltered roc(12,100) config of screen c3c_vol_breakout_roc_volz_1h. |
+| drv-000014 | fact-000011 | `liq_meanrev` | – | On Coinone BTC-KRW at 15m decisions, closes >= 2.5 sd below the 24-bar (6 h) mean on abnormally high volume (volume_z(96) >= 1 / >= 2 vs the trailing day) - the price+volume proxy for liquidation cascades in mechanisms.md M4 - are followed by 30-120 min returns above a matched (KST hour x vol) null, net of coinone_conservative cost, with larger excess than the unfiltered bollinger_z_revert(24, 2.5) of screen camp-000011. |
+| drv-000015 | fact-000012 | `liq_meanrev` | – | On Coinone BTC-KRW at 1h decisions, closes >= 2.5 sd below the 24 h mean on abnormally high volume (volume_z(48) >= 1 / >= 2 vs the trailing 2 days) are followed by 4-24 h returns above a matched (KST hour x vol) null, net of coinone_conservative cost, unlike the price-only 1h reversion that was NO_SIGNAL (camp-000012). |
+| drv-000016 | fact-000017 | `vol_breakout` | – | Coinone BTC-KRW 1h: a >= 100 bp rise over 3 h or 12 h (roc_threshold) on abnormally high decision-bar volume (volume_z(48) >= 1), with ATR exits (SL 3 ATR x TP 2 / 4 ATR, max hold 1440 min = information horizon or 2880 min low-turnover variant), earns positive coinone_conservative net returns that pass G0-G5 on Dev and the robustness suite (incl. regime share <= 70%). |
 
 ## 과정 사후분석 (버그·데이터·절차)
 

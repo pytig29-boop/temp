@@ -1,0 +1,4 @@
+label,family,entry,filters,n_events,p_signal,best_h,excess_bp,z,net_bp[coinone_conservative],net_bp[upbit_conservative],info_h,profile,significant,passed,fail_reason
+"roc_threshold(lookback=12,thr_bp=100) & session_kst(session=asia_open)",vol_breakout,roc_threshold,session_kst,493,0.111321,240,10.4768,1.78529,-7.78063,-21.76,240,peaked,False,False,not significant after correction
+"roc_threshold(lookback=12,thr_bp=100) & session_kst(session=us_open)",vol_breakout,roc_threshold,session_kst,742,0.970482,1440,6.77185,0.457951,15.8315,1.81914,1440,rising (z still increasing at the longest horizon — information may persist longer),False,False,not significant after correction
+"roc_threshold(lookback=24,thr_bp=100) & session_kst(session=asia_open)",vol_breakout,roc_threshold,session_kst,579,0.137062,1440,19.0632,1.68819,26.2424,12.2154,1440,rising (z still increasing at the longest horizon — information may persist longer),False,False,not significant after correction
