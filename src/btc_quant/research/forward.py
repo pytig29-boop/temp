@@ -204,6 +204,7 @@ class ForwardStrategy:
     warmup: str = "forward"          # "forward" (Forward 데이터만, 일수 워밍업) | "rest" (메모리 내 REST 워밍업)
     watch: dict | None = None        # 관찰 목록 메타데이터 (added_by, added_at, reason, source_campaign)
     accounting: str = "realized"     # 일간 수익 회계 (PLAN D18) — 원천 캠페인 매니페스트 `daily_returns`
+    position_scale: float = 1.0      # 운용 크기 배수 (risk.yaml, G6 크기 조절 R1; 관찰 목록·사이드카 없음 = 1.0)
 
 
 def campaign_manifest_accounting(env: ResearchEnv, campaign_id: str | None) -> str:
@@ -236,6 +237,15 @@ def _context(env: ResearchEnv, sid: str, version: int) -> dict:
     return {"campaign_id": camp_id, "exchange": exchange, "cost": cost}
 
 
+def _sidecar_scale(env: ResearchEnv, state: str, sid: str, version: int) -> float:
+    """레지스트리 리스크 사이드카의 position_scale (없으면 1.0) — 페이퍼와 같은 해석(`paper.service.load_position_scale`)."""
+    from btc_quant.paper.service import load_position_scale
+    try:
+        return load_position_scale(env.registry.sidecar_path(state, sid, version))
+    except (OSError, ValueError, KeyError):
+        return 1.0
+
+
 def resolve_strategies(env: ResearchEnv, states=DEFAULT_STATES) -> list[ForwardStrategy]:
     out = []
     for st in states:
@@ -244,7 +254,8 @@ def resolve_strategies(env: ResearchEnv, states=DEFAULT_STATES) -> list[ForwardS
             ctx = _context(env, x["id"], x["version"])
             out.append(ForwardStrategy(key_of(x["id"], x["version"]), x["id"], x["version"], st, spec,
                                        spec.logic_hash(), ctx["exchange"], ctx["cost"], ctx["campaign_id"],
-                                       accounting=campaign_manifest_accounting(env, ctx["campaign_id"])))
+                                       accounting=campaign_manifest_accounting(env, ctx["campaign_id"]),
+                                       position_scale=_sidecar_scale(env, st, x["id"], x["version"])))
     return out
 
 
@@ -524,6 +535,8 @@ def evaluate(env: ResearchEnv, fs: ForwardStrategy, fwd_start: pd.Timestamp, win
         base["accounting"] = fs.accounting          # D18 이전 캠페인(realized)은 이전과 같은 레코드
     if getattr(fs.spec, "sizing", None) is not None and not fs.spec.sizing.is_default:
         base["sizing"] = {"entry_fraction": float(fs.spec.sizing.entry_fraction)}
+    if float(fs.position_scale) != 1.0:
+        base["position_scale"] = float(fs.position_scale)   # 크기 조절 전략만 (1.0 = 이전과 같은 레코드)
     if fs.watch is not None:
         base["observation_only"] = True
         base["watchlist"] = {k: fs.watch[k] for k in ("added_by", "added_at", "reason", "source_campaign")}
@@ -580,6 +593,10 @@ def evaluate(env: ResearchEnv, fs: ForwardStrategy, fwd_start: pd.Timestamp, win
            "data_rows": len(raw0) if len(syms) == 1 else int(sum(len(r) for r in raws.values())),
            "data_last_ts": pd.Timestamp(min(r.index.max() for r in raws.values())).isoformat()}
     out.update({k: met[k] for k in BENCH_KEYS if k in met})
+    if float(fs.position_scale) != 1.0:      # 운용 크기 기준 수익·낙폭 (관문·기대 구간 비교는 위의 전액 기준 그대로)
+        sd = res.daily_returns * float(fs.position_scale)
+        out["net_return_scaled"] = float((1 + sd).prod() - 1)
+        out["max_dd_scaled"] = float(M.max_drawdown(sd)[0])
     if len(syms) > 1:
         out["per_asset"] = {sym: {"n_trades": int(len(r.trades)),
                                   "net_return": float((1 + r.daily_returns).prod() - 1),

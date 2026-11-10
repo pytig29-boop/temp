@@ -41,6 +41,11 @@ G6:
   max_stress_mdd: 0.20         # 구 규칙(legacy, float 입력 시에만 사용)
   max_mc_mdd95: 0.20           # 이하(<=), 거래당 몬테카를로 MDD 95백분위
   mc_sims: 10000
+  # R1 옵션 (gate_review_20261110, 기본 = 현재 동작). 바꾸기 = 제안 + 사람 승인 → 다음 캠페인부터.
+  stress_mode: sharpe          # sharpe = stress 비용 Val Sharpe > min_stress_sharpe 요구 | off = 계산·표시만 (② )
+  drawdown_mode: reject        # reject = 낙폭 초과 시 탈락 | size = 크기 조절: position_scale = min(1, max_mdd/ValMDD,
+                               #   max_mc_mdd95/MCMDD95) ≥ min_position_scale 이면 낙폭 조건 통과 (②; 하한은 ③)
+  min_position_scale: 0.25     # size 모드 크기 하한 (③ 위험 선호)
   # Val 사용 원장 + 누적 Holm (PLAN §10b-4, §5.3 잠금 규칙과 같은 구조). 후보마다 Val 평가 *전에*
   # 원장 val_evaluations 에 기록(k번째 사용). 통계량 = primary 비용 Val 일간 수익 평균 > 0 의
   # 정상 블록 부트스트랩 단측 p (inference.bootstrap_mean_test). 기존 G6 조건에 더해 이 p 가
@@ -52,6 +57,12 @@ G6:
     cap: 20                    # 20회 사용 시 Val 은퇴 → dev 편입, 새 Val 필요 (val_id 는 splits.yaml 의 val_id, 없으면 구간 경계로 생성)
     n_boot: 2000
     seed: 0
+    # Val 증거 규칙 (R1 옵션, 기본 holm = 현재 동작). 사용 기록(k)·상한(cap)·재사용 규칙은 모든 방식에서 같다.
+    #   holm = 위 누적 Holm | fixed = p ≤ fixed_p (다중성 보정 없음) |
+    #   combined = Dev DSR 의 z 와 Val z = Φ⁻¹(1−p) 의 Stouffer 결합 (z_dev+z_val)/√2: 결합 p ≤ combined_alpha 그리고 Val Sharpe > 0
+    evidence: holm
+    fixed_p: 0.05
+    combined_alpha: 0.05
 # 노출 인식 관문 변형 (PLAN D14 초안 — 사람 승인 전, 기본 OFF; docs/PARAMS.md §6). 전부 class ② (config/params.yaml).
 # enabled: false 인 동안 G4/G6 판정은 위의 기존 규칙 그대로다. 파이프라인은 변형 결과를 정보(shadow)로만 기록한다.
 # 켜기 = class ② 기준 변경(btc_quant.params.criteria, 합성 보정 근거만) + 사람 승인 → 승인 이후 등록되는 캠페인부터.

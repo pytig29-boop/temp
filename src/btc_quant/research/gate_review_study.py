@@ -71,9 +71,10 @@ SCENARIO_GRID = {"5m": "g12", "1m_atr": "a12", "5m_low": "l12", "5m_vlow": "v12"
 
 
 # ============================================================== 1단계: 원시 수집
-def study_gate_cfg(n_null: int = N_NULL) -> dict:
-    """현재 관문 설정(config/gates.yaml) + G2.null_runs = n_null (수집·대조 실행 공통). 그 밖의 값은 그대로."""
-    cfg = copy.deepcopy(G.load_gate_config())
+def study_gate_cfg(n_null: int = N_NULL, path: str | None = None) -> dict:
+    """현재 관문 설정(config/gates.yaml, 또는 path 의 관문 설정 파일) + G2.null_runs = n_null (수집·대조 실행 공통).
+    그 밖의 값은 그대로."""
+    cfg = copy.deepcopy(G.load_gate_config(path) if path else G.load_gate_config())
     cfg["G2"]["null_runs"] = int(n_null)
     return cfg
 
@@ -360,7 +361,7 @@ def run_task(task: dict) -> dict:
             if task.get("actual"):
                 ta = time.time()
                 out = run_pipeline(cr, env=env, top_k=task["top_k"], n_null=task["n_null"],
-                                   gate_cfg=study_gate_cfg(task["n_null"]), register=False,
+                                   gate_cfg=study_gate_cfg(task["n_null"], task.get("gate_config")), register=False,
                                    reference_check=bool(task.get("reference_check")), lessons=False)
                 camp["actual"] = actual_outcomes(out)
                 camp["actual_sec"] = round(time.time() - ta, 1)
@@ -491,6 +492,31 @@ ATOM_GATE = {"G1": "G1", "G2": "G2", "G3": "G3", "G4_roll": "G4", "G4_recent": "
 BIG_CAP = 10 ** 9
 
 
+def _val_mode_of(vb: dict) -> dict:
+    """gates.yaml G6.val_budget.evidence → 패키지 val_mode/val_alpha (holm → holm(alpha), fixed → fixed(fixed_p),
+    combined → stouffer(combined_alpha))."""
+    m = G.val_evidence_mode(vb)
+    if m == "holm":
+        return {"val_mode": "holm", "val_alpha": float(vb["alpha"])}
+    if m == "fixed":
+        return {"val_mode": "fixed", "val_alpha": float(vb["fixed_p"])}
+    return {"val_mode": "stouffer", "val_alpha": float(vb["combined_alpha"])}
+
+
+def size_scale(c: dict, pkg: dict) -> float:
+    """크기 조절 배수 (`gates.position_scale` 와 같은 식): min(1, g6_mdd/Val MDD, g6_mc/MC MDD95). 한도 None = 그 항 없음."""
+    out = 1.0
+    for lim, x in ((pkg["g6_mdd"], c["val_mdd"]), (pkg["g6_mc"], c["val_mc_mdd95"])):
+        if lim is None:
+            continue
+        if x is None or not math.isfinite(float(x)):
+            return 0.0
+        x = abs(float(x))
+        if x > 0:
+            out = min(out, float(lim) / x)
+    return out
+
+
 def current_package(cfg: dict | None = None) -> dict:
     """config/gates.yaml(또는 cfg) → 패키지 (현재 기준)."""
     c = cfg or G.load_gate_config()
@@ -504,9 +530,12 @@ def current_package(cfg: dict | None = None) -> dict:
         "g3_ratio": c["G3"]["neighbor_median_ratio"],
         "g4_roll": c["G4"]["min_rolling_positive_frac"], "g4_recent": c["G4"]["min_recent_sharpe"],
         "g5_dsr": c["G5"]["min_dsr"], "g5_pbo": c["G5"]["max_pbo"], "dsr_n": "current",
-        "g6_sharpe": c["G6"]["min_sharpe"], "g6_mdd": c["G6"]["max_mdd"], "g6_stress": c["G6"]["min_stress_sharpe"],
+        "g6_sharpe": c["G6"]["min_sharpe"], "g6_mdd": c["G6"]["max_mdd"],
+        "g6_stress": None if G.g6_stress_mode(c["G6"]) == "off" else c["G6"]["min_stress_sharpe"],
         "g6_mc": c["G6"]["max_mc_mdd95"],
-        "val_mode": "holm", "val_alpha": float(vb["alpha"]), "val_cap": int(vb["cap"]),
+        "g6_dd_mode": G.g6_drawdown_mode(c["G6"]), "g6_min_scale": float(c["G6"].get("min_position_scale", 0.25)),
+        **_val_mode_of(vb),
+        "val_cap": int(vb["cap"]),
         "rob_latency": r.get("latency_min_retention", 0.5), "rob_outliers": 0.0, "rob_loyo": 0.0,
         "rob_cost_mult": r.get("cost_pass_mult", 1.5), "rob_regime": r.get("regime_max_pnl_share", 0.70),
         "rob_alpha_t": r.get("alpha_min_tstat", 2.0),
@@ -596,9 +625,13 @@ def atom_flags(c: dict, pkg: dict, n_trials: float, pbo: float | None) -> dict:
     f["G5_dsr"] = pkg["g5_dsr"] is None or _phi(dsr_z(c, n_trials)) >= pkg["g5_dsr"]
     f["G5_pbo"] = pkg["g5_pbo"] is None or (1.0 if pbo is None else pbo) < pkg["g5_pbo"]
     f["G6_sharpe"] = pkg["g6_sharpe"] is None or c["val_sharpe"] > pkg["g6_sharpe"]
-    f["G6_mdd"] = pkg["g6_mdd"] is None or abs(c["val_mdd"]) <= pkg["g6_mdd"]
+    if pkg.get("g6_dd_mode", "reject") == "size":     # 크기 조절: 낙폭 두 조건 → 크기 하한 하나 (G6_mdd 자리, 라벨 'size')
+        f["G6_mdd"] = size_scale(c, pkg) >= float(pkg.get("g6_min_scale", 0.25))
+        f["G6_mc"] = True
+    else:
+        f["G6_mdd"] = pkg["g6_mdd"] is None or abs(c["val_mdd"]) <= pkg["g6_mdd"]
+        f["G6_mc"] = pkg["g6_mc"] is None or abs(c["val_mc_mdd95"]) <= pkg["g6_mc"]
     f["G6_stress"] = pkg["g6_stress"] is None or c["val_stress_sharpe"] > pkg["g6_stress"]
-    f["G6_mc"] = pkg["g6_mc"] is None or abs(c["val_mc_mdd95"]) <= pkg["g6_mc"]
     t = pkg["rob_latency"]
     f["R_latency"] = t is None or ((c.get("lat_base_sharpe") or 0.0) > 0 and c.get("lat_min_retention") is not None
                                    and c["lat_min_retention"] >= t)
@@ -690,7 +723,8 @@ def evaluate_market(rec: dict, pkg: dict, detail: bool = True) -> dict:
             else:
                 any_dev = True
                 checks = all(f[a] for a in G6_ATOMS) and c.get("val_ref_match") is not False
-                why = [ATOM_LABEL[a] for a in G6_ATOMS if not f[a]]
+                why = [("size" if a == "G6_mdd" and pkg.get("g6_dd_mode") == "size" else ATOM_LABEL[a])
+                       for a in G6_ATOMS if not f[a]]
                 lh = c["logic_hash"]
                 if lh in used:                       # 같은 스펙·같은 Val: 이전 결정 재사용 (새 사용 아님)
                     holm_ok, prev_final = used[lh]
@@ -1975,6 +2009,41 @@ def _cmd_run(a) -> int:
     return 0
 
 
+def _cmd_consistency(a) -> int:
+    """일치 점검 전용: 관문 설정 파일(--gate-config)로 실제 run_pipeline 을 돌린 시장(actual)들만 수집하고,
+    같은 설정의 오프라인 패키지와 후보 단위로 비교한다. 엣지 지도는 --edges 디렉터리의 _edge_*.json 을 재사용."""
+    import shutil as _sh
+    raw = Path(a.raw)
+    raw.mkdir(parents=True, exist_ok=True)
+    if a.edges:
+        for fp in Path(a.edges).glob("_edge_*.json"):
+            if not (raw / fp.name).exists():
+                _sh.copy(fp, raw / fp.name)
+    cfg_path = str(Path(a.gate_config).resolve())
+    cfg = G.load_gate_config(cfg_path)
+    edges = edge_maps(raw, None, progress=lambda s: print(s, flush=True))
+    if (raw / "_edge_universe.json").exists():
+        edges["universe"] = universe_edge_map(raw, None, progress=lambda s: print(s, flush=True))
+    tasks = [t for t in build_tasks(edges, scale=1.0, n_null=a.n_null) if t["actual"]]
+    for t in tasks:
+        t["gate_config"] = cfg_path
+        t["reference_check"] = not a.no_reference
+        if a.tmp:
+            t["tmp_dir"] = a.tmp
+    if a.tmp:
+        Path(a.tmp).mkdir(parents=True, exist_ok=True)
+    res = run_tasks(tasks, raw, a.jobs, progress=lambda s: print(s, flush=True))
+    print(f"[run] finished: {res}", flush=True)
+    recs = load_records(raw)
+    cons = consistency(recs, current_package(cfg))
+    _write_json(Path(a.out), {"gate_config": cfg_path, "package": current_package(cfg), "consistency": cons,
+                              "n_records": len(recs)})
+    print(json.dumps({k: v for k, v in cons.items() if k != "mismatches"}, ensure_ascii=False), flush=True)
+    for m in (cons.get("mismatches") or [])[:20]:
+        print("MISMATCH", m, flush=True)
+    return 0 if not cons.get("mismatches") else 1
+
+
 def _cmd_analyze(a) -> int:
     recs = load_records(a.raw)
     print(f"[analyze] {len(recs)} records from {a.raw}", flush=True)
@@ -2004,6 +2073,16 @@ def main(argv=None) -> int:
     r.add_argument("--no-reference", action="store_true")
     r.add_argument("--universe", action="store_true", help="3자산 유니버스 파일럿 (d 그룹에 필요)")
     r.set_defaults(fn=_cmd_run)
+    cn = sub.add_parser("consistency", help="관문 설정 파일로 실제 파이프라인 vs 오프라인 평가기 일치 점검")
+    cn.add_argument("--raw", required=True)
+    cn.add_argument("--gate-config", required=True)
+    cn.add_argument("--edges", default="", help="_edge_*.json 을 재사용할 이전 raw 디렉터리")
+    cn.add_argument("--out", required=True)
+    cn.add_argument("--jobs", type=int, default=4)
+    cn.add_argument("--n-null", type=int, default=N_NULL)
+    cn.add_argument("--tmp", default="")
+    cn.add_argument("--no-reference", action="store_true")
+    cn.set_defaults(fn=_cmd_consistency)
     an = sub.add_parser("analyze", help="원시 JSON → 요약 JSON + 표")
     an.add_argument("--raw", required=True)
     an.add_argument("--out", required=True)

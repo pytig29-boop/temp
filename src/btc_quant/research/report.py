@@ -77,7 +77,8 @@ def _gate_line(name: str, g: dict) -> str:
         "G6": ["rule", "sharpe", "max_dd", "stress_sharpe", "stress_mdd", "mc_mdd95", "n_trades", "total_return",
                "cost", "stress_cost", "reference_engine_match", "val_k", "val_p_value", "val_holm_passed",
                "ok_sharpe", "ok_mdd", "ok_stress_sharpe", "ok_mc_mdd", "path", "base_passed",
-               "val_reuse_prior_passed"],
+               "val_reuse_prior_passed", "stress_mode", "drawdown_mode", "position_scale", "ok_position_scale",
+               "val_evidence", "val_evidence_passed"],
     }.get(name, [])
     parts = [f"{k}={_f(_v(g.get(k)), 4)}" for k in keys if k in g]
     line = f"- **{name} {_pf(g)}** — " + ", ".join(parts)

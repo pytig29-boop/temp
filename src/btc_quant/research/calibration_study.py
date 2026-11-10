@@ -673,9 +673,15 @@ def candidate_outcome(c: dict) -> str:
     if not c.get("dev_passed"):
         return str(c.get("first_failed"))
     g = c.get("gates", {}).get("G6") or {}
-    why = [n for k, n in G6_FLAGS if g.get(k) is False]
-    if g.get("val_holm_passed") is False:
-        why.append("holm")
+    flags = G6_FLAGS
+    if g.get("stress_mode") == "off":                 # R1: stress Sharpe 는 표시만 → 라벨에서 제외
+        flags = tuple(f for f in flags if f[0] != "ok_stress_sharpe")
+    if g.get("drawdown_mode") == "size":              # R1: 낙폭 두 조건 대신 크기 하한 하나
+        flags = tuple(("ok_position_scale", "size") if f[0] == "ok_mdd" else f for f in flags if f[0] != "ok_mc_mdd")
+    why = [n for k, n in flags if g.get(k) is False]
+    ev = g.get("val_evidence_passed", g.get("val_holm_passed"))
+    if ev is False:
+        why.append("holm")                            # Val 증거 실패 (방식 무관하게 같은 라벨)
     return f"G6({'+'.join(why) or '?'})"
 
 

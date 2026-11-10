@@ -250,9 +250,13 @@ class PaperTrader:
                  ctx: Context | None = None, conservative: CostModel = COINONE_CONSERVATIVE,
                  aux_hist: dict[str, M1History] | None = None,
                  clock=time.time, persist: bool = True, group: SleeveGroup | None = None,
-                 symbol: str | None = None, tick_source: str = "auto"):
+                 symbol: str | None = None, tick_source: str = "auto", position_scale: float = 1.0):
         if grade not in ("A", "B"):
             raise ValueError("grade must be A or B")
+        if not (0.0 < float(position_scale) <= 1.0):
+            raise ValueError(f"position_scale must be in (0, 1], got {position_scale!r}")
+        # 운용 크기 배수 (risk.yaml position_scale — G6 크기 조절, R1). 모든 진입 명목·실현 기여에 곱한다(1.0 = 이전과 같음).
+        self.position_scale = float(position_scale)
         spec.validate(registry)
         from btc_quant.params import check_exposure_cap
         check_exposure_cap(spec)                      # class ③ 슬리브당 최대 노출 상한 (D16)
@@ -541,10 +545,10 @@ class PaperTrader:
                 if ev.tranche == 0 or self.ladder_equity is None:
                     self.ladder_equity = self.equity
                     self.tranche_qty = {}
-                notional = self.ladder_equity * float(ev.weight)
+                notional = self.ladder_equity * float(ev.weight) * self.position_scale
                 maker = (self.spec.execution.limit_entry if ev.tranche == 0 else lad.limit_orders)
             else:
-                notional = self.equity * float(self.spec.sizing.entry_fraction)
+                notional = self.equity * float(self.spec.sizing.entry_fraction) * self.position_scale
                 maker = self.spec.execution.limit_entry          # 지정가 체결 = 지정가 (호가 대입 비교 없음)
             bf = (walk_book(self.book_open, "buy", notional=notional, now=self.book_open_wall)
                   if self.book_open and not maker else None)
@@ -599,9 +603,10 @@ class PaperTrader:
         eq_before = self.equity
         if trade and tranche is not None and self.spec.ladder is not None:   # 실현 = 사다리 시작 자산 × w × r
             eg = self.ladder_equity if self.ladder_equity is not None else eq_before
-            self.equity = eq_before + eg * float(ev.weight) * trade["net_ret"]
+            self.equity = eq_before + eg * float(ev.weight) * self.position_scale * trade["net_ret"]
         elif trade:
-            self.equity = eq_before * (1 + float(self.spec.sizing.entry_fraction) * trade["net_ret"])
+            self.equity = eq_before * (1 + float(self.spec.sizing.entry_fraction) * self.position_scale
+                                       * trade["net_ret"])
         book_net = None
         if (bf is not None and self.entry_cmp and self.entry_cmp.get("book") and math.isfinite(bf.vwap)
                 and (tranche is None or tranche == 0)):        # 사다리: 첫 분할만 진입 호가 비교가 있다
@@ -658,6 +663,7 @@ class PaperTrader:
             "spec_version": self.spec.version, "logic_hash": self.spec.logic_hash(),
             "cost": asdict(self.cost), "grade": self.grade,
             "initial_equity": self.initial_equity, "equity": self.equity, "qty": self.qty,
+            "position_scale": self.position_scale,
             "last_ts": _iso(self.last_ts), "start": _iso(e.start),
             "position": pos, "cooldown_until": _iso(e.cooldown_until), "decision": dec,
             "order": _order_dict(e.order), "execution": self.spec.execution.to_dict(),

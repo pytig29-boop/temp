@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import math
 from functools import lru_cache
 from pathlib import Path
 
@@ -205,6 +206,83 @@ def g6_flat_variant(val_metrics: dict, stress: dict, mc_mdd95: float, cfg: dict 
     return d
 
 
+G6_STRESS_MODES = ("sharpe", "off")
+G6_DRAWDOWN_MODES = ("reject", "size")
+VAL_EVIDENCE_MODES = ("holm", "fixed", "combined")
+
+
+def g6_stress_mode(c: dict) -> str:
+    """G6 stress 비용 조건 (R1 옵션): 'sharpe'(기본, 현재) | 'off'(계산·표시만)."""
+    v = c.get("stress_mode", "sharpe")
+    m = "off" if v is False else str(v)          # YAML 1.1: 따옴표 없는 off 는 False 로 읽힌다
+    if m not in G6_STRESS_MODES:
+        raise ValueError(f"G6.stress_mode must be one of {G6_STRESS_MODES}, got {m!r}")
+    return m
+
+
+def g6_drawdown_mode(c: dict) -> str:
+    """G6 낙폭 조건 (R1 옵션): 'reject'(기본, 현재 — 한도 초과 탈락) | 'size'(크기 조절)."""
+    m = str(c.get("drawdown_mode", "reject"))
+    if m not in G6_DRAWDOWN_MODES:
+        raise ValueError(f"G6.drawdown_mode must be one of {G6_DRAWDOWN_MODES}, got {m!r}")
+    return m
+
+
+def val_evidence_mode(vb: dict) -> str:
+    """Val 증거 규칙 (R1 옵션): 'holm'(기본, 현재) | 'fixed' | 'combined'."""
+    m = str((vb or {}).get("evidence", "holm"))
+    if m not in VAL_EVIDENCE_MODES:
+        raise ValueError(f"G6.val_budget.evidence must be one of {VAL_EVIDENCE_MODES}, got {m!r}")
+    return m
+
+
+def position_scale(val_mdd: float, mc_mdd95: float, c: dict) -> float:
+    """크기 조절 배수 = min(1, max_mdd/Val MDD, max_mc_mdd95/MC MDD95) (낙폭은 크기, 부호 무관).
+    낙폭이 0 이면 그 항은 1. 값이 없거나 유한하지 않으면 0 (통과 불가)."""
+    out = 1.0
+    for lim, x in ((c["max_mdd"], val_mdd), (c["max_mc_mdd95"], mc_mdd95)):
+        x = abs(float(x)) if x is not None else float("nan")
+        if not np.isfinite(x):
+            return 0.0
+        if x > 0:
+            out = min(out, float(lim) / x)
+    return float(out)
+
+
+def dsr_z(g5: dict) -> float:
+    """G5 세부(sr, sr0, skew, kurtosis, n_obs) → DSR 의 z (DSR = Φ(z); `selection.probabilistic_sharpe_ratio` 와 같은 식).
+    유한하지 않은 skew → 0, kurtosis → 3 (`gate_review_study.dsr_z` 와 같은 처리)."""
+    n = int(g5.get("n_obs") or 0)
+    if n < 2:
+        return 0.0
+
+    def fin(x, d):
+        try:
+            v = float(x)
+        except (TypeError, ValueError):
+            return d
+        return v if math.isfinite(v) else d
+    sr, sr0 = float(g5["sr"]), float(g5["sr0"])
+    sk, ku = fin(g5.get("skew"), 0.0), fin(g5.get("kurtosis"), 3.0)
+    vt = 1.0 - sk * sr + (ku - 1.0) / 4.0 * sr * sr
+    if vt <= 0:
+        vt = 1e-12
+    return (sr - sr0) * math.sqrt(n - 1) / math.sqrt(vt)
+
+
+def combined_val_evidence(z_dev: float, p_val: float, val_sharpe: float, alpha: float) -> dict:
+    """Dev+Val 결합 증거 (R1 'combined'; `gate_review_study.val_evidence` 의 'stouffer' 와 같은 식):
+    z_val = Φ⁻¹(1 − p) (p 를 [1e-9, 1−1e-9] 로 자름), z = (z_dev + z_val)/√2, 결합 p = 1 − Φ(z).
+    통과 = 결합 p ≤ alpha 그리고 Val Sharpe > 0."""
+    from statistics import NormalDist
+    nd = NormalDist()
+    zv = nd.inv_cdf(min(max(1.0 - float(p_val), 1e-9), 1 - 1e-9))
+    z = (float(z_dev) + zv) / math.sqrt(2.0)
+    pc = 1.0 - 0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))
+    return {"z_dev": float(z_dev), "z_val": zv, "z": z, "p_combined": pc, "alpha": float(alpha),
+            "val_sharpe_positive": float(val_sharpe) > 0, "passed": bool(pc <= alpha and float(val_sharpe) > 0)}
+
+
 def check_g6(val_metrics: dict, stress, mc_mdd95: float,
              cfg: dict | None = None, dev_metrics: dict | None = None) -> tuple[bool, dict]:
     """G6 검증(Val) — 2026-11-09 사용자 결정 (b):
@@ -222,15 +300,27 @@ def check_g6(val_metrics: dict, stress, mc_mdd95: float,
     mc = abs(float(mc_mdd95))
     d = {"sharpe": sr, "mc_mdd95": mc, "ok_sharpe": sr > c["min_sharpe"],
          "ok_mc_mdd": mc <= c["max_mc_mdd95"]}
+    stress_mode, dd_mode = g6_stress_mode(c), g6_drawdown_mode(c)
     if isinstance(stress, dict):
         mdd = abs(float(val_metrics.get("max_dd", float("nan"))))
         ssr = float(stress["sharpe"])
         d.update(max_dd=mdd, stress_sharpe=ssr, stress_mdd=abs(float(stress.get("max_dd", float("nan")))),
-                 ok_mdd=mdd <= c["max_mdd"], ok_stress_sharpe=ssr > c["min_stress_sharpe"], rule="b")
-        ok = d["ok_sharpe"] and d["ok_mdd"] and d["ok_stress_sharpe"] and d["ok_mc_mdd"]
+                 ok_mdd=mdd <= c["max_mdd"], ok_stress_sharpe=ssr > c["min_stress_sharpe"], rule="b",
+                 stress_mode=stress_mode)
+        ok_stress = d["ok_stress_sharpe"] if stress_mode == "sharpe" else True     # off = 계산·표시만
+        if dd_mode == "size":
+            sc = position_scale(mdd, mc, c)
+            d.update(drawdown_mode="size", position_scale=sc, min_position_scale=float(c["min_position_scale"]),
+                     ok_position_scale=sc >= float(c["min_position_scale"]))
+            ok_dd = d["ok_position_scale"]
+        else:
+            d.update(drawdown_mode="reject", position_scale=1.0)
+            ok_dd = d["ok_mdd"] and d["ok_mc_mdd"]
+        ok = d["ok_sharpe"] and ok_dd and ok_stress
     else:
         smdd = abs(float(stress))
-        d.update(stress_mdd=smdd, ok_stress_mdd=smdd <= c.get("max_stress_mdd", c["max_mdd"]), rule="legacy")
+        d.update(stress_mdd=smdd, ok_stress_mdd=smdd <= c.get("max_stress_mdd", c["max_mdd"]), rule="legacy",
+                 drawdown_mode="reject", position_scale=1.0)
         ok = d["ok_sharpe"] and d["ok_stress_mdd"] and d["ok_mc_mdd"]
     d["path"] = "sharpe" if ok else None
     if "exposure_aware" in (cfg or load_gate_config()) and isinstance(stress, dict):

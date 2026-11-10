@@ -168,6 +168,8 @@ def public_pipeline(out: dict) -> dict:
             c["risk_limits"] = "withheld (Val-derived)"
         if "sleeve_risk_limits" in c:
             c["sleeve_risk_limits"] = "withheld (Val-derived)"
+        if "position_scale" in c:
+            c["position_scale"] = "withheld (Val-derived)"
     if isinstance(pub.get("val_status"), dict):
         pub["val_status"] = {k: pub["val_status"].get(k) for k in VAL_STATUS_PUBLIC_KEYS}
     pub["redacted"] = ("agent-safe copy of pipeline.json: Val (G6) / lockbox as outcome codes only; "
@@ -193,6 +195,22 @@ def val_holm_decision(ledger, val_id: str, k: int, p_value: float, vb_cfg: dict)
     return {"alpha": float(vb_cfg["alpha"]), "holm_mode": vb_cfg["holm_mode"], "m": dec["m"], "rank": dec["rank"],
             "threshold": dec["threshold"], "holm_passed": dec["passed"], "n_prior": len(prior),
             "retire_val": dec["retire_lockbox"]}
+
+
+def val_evidence(vb_cfg: dict, dec: dict, p_value: float, val_sharpe: float, dev_g5: dict | None) -> dict:
+    """Val 증거 규칙 (`G6.val_budget.evidence`, R1 옵션; 기본 holm = 현재 동작). 반환 {evidence, evidence_passed[, combined]}.
+    holm = 누적 Holm 결정(dec) | fixed = p ≤ fixed_p | combined = Dev DSR z 와 Val p 의 Stouffer 결합
+    (`gates.combined_val_evidence`) — Dev G5 세부(dev_g5)가 없으면 실패로 둔다."""
+    mode = G.val_evidence_mode(vb_cfg)
+    if mode == "holm":
+        return {"evidence": mode, "evidence_passed": bool(dec["holm_passed"])}
+    if mode == "fixed":
+        return {"evidence": mode, "evidence_passed": bool(float(p_value) <= float(vb_cfg["fixed_p"])),
+                "fixed_p": float(vb_cfg["fixed_p"])}
+    if not dev_g5 or dev_g5.get("sr") is None:
+        return {"evidence": mode, "evidence_passed": False, "combined": {"error": "Dev G5 details missing"}}
+    ce = G.combined_val_evidence(G.dsr_z(dev_g5), p_value, val_sharpe, float(vb_cfg["combined_alpha"]))
+    return {"evidence": mode, "evidence_passed": ce["passed"], "combined": ce}
 
 
 def _val_metrics(met: dict) -> dict:
@@ -779,6 +797,8 @@ class Pipeline:
             dec = res.get("decision") or {}
             return {"val_id": vid, "reused": prior["id"], "k": prior["k"], "cap": int(vb["cap"]),
                     "p_value": prior["p_value"], "holm_passed": bool(dec.get("holm_passed", False)),
+                    "evidence": dec.get("evidence", "holm"),
+                    "evidence_passed": bool(dec.get("evidence_passed", dec.get("holm_passed", False))),
                     "prior_passed": bool(prior.get("passed")),
                     "note": "logic_hash already used this Val; prior decision reused (not counted again)"
                             + ("" if prior["result"] else " — prior evaluation has no result (aborted) → fail")}
@@ -787,12 +807,13 @@ class Pipeline:
                                          note="pipeline G6")
         except ValBudgetExhaustedError as e:
             return {"val_id": vid, "exhausted": True, "cap": int(vb["cap"]), "holm_passed": False,
+                    "evidence_passed": False,
                     "error": str(e)}
         return {"val_id": vid, "opening": op["id"], "k": op["k"], "cap": int(vb["cap"])}
 
     def g6(self, spec: StrategySpec, m1v, vs, ve, cost_name: str, stress_name: str,
            record: bool = True, budget: bool | None = None, ctx: Context | None = None,
-           dev_metrics: dict | None = None) -> tuple:
+           dev_metrics: dict | None = None, dev_g5: dict | None = None) -> tuple:
         """G6. budget=True(기본: self.val_budget) 이면 Val 사용 원장 + 누적 Holm 적용 (primary 비용 전용).
         사용 상한 도달 시 Val 을 평가하지 않고 (gate, None, None, None) 반환.
         스펙은 그대로(timeframe·ATR 청산) run_fast / run_reference. ctx = Val 보조 데이터(기본 load_val 의 것)."""
@@ -845,24 +866,29 @@ class Pipeline:
                                                    seed=vb_cfg.get("seed", 0))
                 dec = val_holm_decision(self.env.ledger, vbd["val_id"], vbd["k"], bt["p_value"], vb_cfg)
                 vbd.update(p_value=bt["p_value"], mean_block=bt["mean_block"], n_boot=bt["n_boot"], **dec)
+                ev = val_evidence(vb_cfg, dec, bt["p_value"], float(met["sharpe"]), dev_g5)
+                vbd.update(ev)
                 checks_ok = ok
                 # '쉬어서 피함' 경로(exposure_aware, 기본 OFF)는 평균 > 0 증거를 요구하지 않는다(G6 변형 설명).
                 # 사용 자체는 원장에 k번째로 기록되고 p 도 Holm 입력으로 남는다.
-                ok = ok and (dec["holm_passed"] or d.get("path") == "flat")
+                ok = ok and (ev["evidence_passed"] or d.get("path") == "flat")
                 summ = {k: met[k] for k in VAL_SUMMARY_KEYS if k in met}
                 summ.update(stress_mdd=d["stress_mdd"], mc_mdd95=d["mc_mdd95"],
                             reference_engine_match=d.get("reference_engine_match"))
                 self.env.ledger.record_val_result(
                     vbd["opening"], ok, bt["p_value"], summ,
-                    {k: vbd[k] for k in ("alpha", "holm_mode", "m", "rank", "threshold", "n_prior", "holm_passed")}
+                    {k: vbd[k] for k in ("alpha", "holm_mode", "m", "rank", "threshold", "n_prior", "holm_passed",
+                                         "evidence", "evidence_passed") if k in vbd}
+                    | ({"combined": vbd["combined"]} if "combined" in vbd else {})
                     | {"g6_checks_passed": bool(checks_ok)})
             else:   # 재사용: 같은 스펙·같은 Val → 결정은 첫 사용 시점에 확정. 지금 설정(예: 나중에 승인된
                 # 기준 변경, exposure_aware)으로 다시 판정한 결과는 이전 결정보다 *엄격해질* 수만 있다 —
                 # 이전에 G6 를 떨어진 스펙은 같은 Val 에서 다시 통과할 수 없다(골대 이동 방지).
-                ok = ok and vbd["holm_passed"] and vbd.get("prior_passed", False)
+                ok = ok and vbd["evidence_passed"] and vbd.get("prior_passed", False)
                 d["val_reuse_prior_passed"] = vbd.get("prior_passed", False)
             d["val_budget"] = vbd
             d["val_p_value"], d["val_k"], d["val_holm_passed"] = vbd.get("p_value"), vbd.get("k"), vbd["holm_passed"]
+            d["val_evidence"], d["val_evidence_passed"] = vbd.get("evidence", "holm"), bool(vbd["evidence_passed"])
         if record:
             per = {"segment": "val", "start": vs.isoformat(), "end": ve.isoformat(),
                    "warmup_days": VAL_WARMUP_DAYS}
@@ -1021,7 +1047,7 @@ class Pipeline:
                 m1v, vs, ve = self.load_val()
             spec = cr.specs[c["logic_hash"]]
             g6, vres, vmet, mc = self.g6(spec, m1v, vs, ve, self.costs["primary"], self.costs["stress"],
-                                         dev_metrics=c["metrics"])
+                                         dev_metrics=c["metrics"], dev_g5=c["gates"].get("G5"))
             c["gates"]["G6"] = g6
             if not g6["passed"]:
                 c["grade"] = None
@@ -1029,11 +1055,15 @@ class Pipeline:
                 c["status"] = ("failed G6: Val budget exhausted — roll Val (human)" if vbd.get("exhausted")
                                else "failed G6 (ledger only)")
                 continue
-            c["risk_limits"] = G.risk_limits_from_validation(vres.daily_returns, mc, vmet["trades_per_day"], self.cfg)
+            # 크기 조절 (G6.drawdown_mode=size, R1): 운용 크기 배수. reject 모드는 1.0. §7 한도는 축소된 수익 기준.
+            sc = float(g6.get("position_scale", 1.0) or 1.0)
+            c["position_scale"] = sc
+            c["risk_limits"] = G.risk_limits_from_validation(vres.daily_returns * sc, mc * sc,
+                                                             vmet["trades_per_day"], self.cfg)
             if self.multi:      # 슬리브별 §7 한도 (같은 공식, 슬리브 Val 수익) — 페이퍼 슬리브 리스크 관리자용
                 c["sleeve_risk_limits"] = {
                     sym: G.risk_limits_from_validation(
-                        r.daily_returns, montecarlo.worst_case_mdd95(
+                        r.daily_returns * sc, sc * montecarlo.worst_case_mdd95(
                             frame_position_returns(r.trades), n_sims=self.cfg["G6"]["mc_sims"],
                             troughs=self._mc_troughs(r, m1v[sym])),
                         float(len(r.trades) / max(len(r.daily_returns), 1)), self.cfg)
@@ -1132,6 +1162,8 @@ class Pipeline:
         prim = get_cost(self.costs["primary"], self._croot)
         doc = {
             "grade": c["grade"],
+            # 운용 크기 배수 (G6 크기 조절, R1; 1.0 = 전액). 페이퍼·전진이 notional·수익에 곱한다. 아래 한도는 축소된 수익 기준.
+            "position_scale": float(c.get("position_scale", 1.0)),
             "limits": {"daily_loss": float(rl["daily_loss_limit"]), "weekly_loss": float(rl["weekly_loss_limit"]),
                        "max_drawdown": float(rl["drawdown_limit"]),
                        "max_trades_per_day": int(math.ceil(float(rl["max_trades_per_day"]))),

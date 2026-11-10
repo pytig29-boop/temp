@@ -102,6 +102,7 @@ class StrategySlot:
     limits: RiskLimits = DEFAULT_LIMITS
     source: str = ""
     sleeve_limits: dict = field(default_factory=dict)   # 다자산: {심볼: RiskLimits} (없으면 limits)
+    position_scale: float = 1.0     # risk.yaml position_scale (G6 크기 조절, R1; 없으면 1.0)
 
     @property
     def multi_asset(self) -> bool:
@@ -140,6 +141,17 @@ def load_risk_meta(path: Path | None, grade: str, limits: RiskLimits) -> tuple[s
     return str(d.get("grade", grade)).upper(), limits_from_dict(d.get("limits"), limits)
 
 
+def load_position_scale(path: Path | None) -> float:
+    """risk.yaml `position_scale` (G6 크기 조절, R1). 파일·키가 없으면 1.0 (이전과 같음)."""
+    if path is None or not Path(path).exists():
+        return 1.0
+    d = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+    v = float(d.get("position_scale", 1.0) or 1.0)
+    if not (0.0 < v <= 1.0):
+        raise ValueError(f"{path}: position_scale must be in (0, 1], got {v}")
+    return v
+
+
 def load_sleeve_limits(path: Path | None, base: RiskLimits) -> dict[str, RiskLimits]:
     """risk.yaml `sleeve_limits` (다자산 스펙, 파이프라인이 슬리브 Val 수익으로 같은 §7 공식) → {심볼: RiskLimits}."""
     if path is None or not Path(path).exists():
@@ -155,7 +167,8 @@ def slots_from_specs(paths: list[str | Path], grade: str = "B", risk_path: str |
     for p in paths:
         spec = StrategySpec.from_yaml(p)
         g, lim = load_risk_meta(sidecar_path(Path(p)), base_grade, base_limits)
-        out.append(StrategySlot(spec, "spec", g, lim, str(p), load_sleeve_limits(sidecar_path(Path(p)), lim)))
+        out.append(StrategySlot(spec, "spec", g, lim, str(p), load_sleeve_limits(sidecar_path(Path(p)), lim),
+                                load_position_scale(sidecar_path(Path(p)))))
     return out
 
 
@@ -183,7 +196,7 @@ def slots_from_registry(root: str | Path | None = None, grade: str = "B") -> lis
     for role, p in entries:
         g, lim = load_risk_meta(sidecar_path(p), grade, DEFAULT_LIMITS)
         out.append(StrategySlot(StrategySpec.from_yaml(p), role, g, lim, str(p),
-                                load_sleeve_limits(sidecar_path(p), lim)))
+                                load_sleeve_limits(sidecar_path(p), lim), load_position_scale(sidecar_path(p))))
     return out
 
 
@@ -355,7 +368,8 @@ class PaperService:
             cost = self._costs.get(f"{self.cfg.cost}@{symbol}", self.cost)
         tr = PaperTrader(s.spec, cost, risk, s.grade, key=key, out_dir=out,
                          initial_equity=self.cfg.notional / max(int(n_sleeves), 1),
-                         lookback_bars=lb, clock=self.clock, aux_hist=aux, group=group, symbol=symbol)
+                         lookback_bars=lb, clock=self.clock, aux_hist=aux, group=group, symbol=symbol,
+                         position_scale=s.position_scale)
         if tr.limit and self.cfg.limit_fill == "queue":
             from btc_quant.backtest.queue import QueueFillOracle
             tr.engine.fill_oracle = QueueFillOracle(latency_s=self.cfg.limit_latency_s, notional=tr.initial_equity)
@@ -364,6 +378,7 @@ class PaperService:
         restored = tr.load_state()
         (out / "spec.yaml").write_text(s.spec.to_yaml(), encoding="utf-8")
         meta = {"key": key, "role": s.role, "grade": s.grade, "source": s.source, "cost": cost.name,
+                "position_scale": s.position_scale,
                 "limits": {f.name: getattr(limits, f.name) for f in fields(RiskLimits)},
                 "timeframe": s.spec.timeframe, "lookback_bars": lb, "aux": list(spec_aux(s.spec)),
                 "restored": restored,
