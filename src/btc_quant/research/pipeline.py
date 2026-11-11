@@ -695,12 +695,21 @@ class Pipeline:
             d["neighbor_median_gross"] = float(np.median(gvals))
         return _gate(ok, **d, neighbors=desc, missing=missing)
 
+    def loosening_penalty(self) -> int:
+        """시도 계수 벌점 L_dev (자율 체제 §4-D): 프로그램 시작 뒤 개발 구간 규칙 느슨화 수. 프로그램 밖 = 0 (이전과 같다)."""
+        from btc_quant.params.ruleset import autonomy_cfg
+        ps = autonomy_cfg(self._croot).get("program_start")
+        if not ps:
+            return 0
+        return int(self.env.ledger.loosenings(since_ts=ps, scopes=("dev",)))
+
     def g5(self, lh: str, stats: dict) -> dict:
         x = self.cr.returns[lh].to_numpy(float)
-        dsr = selection.dsr_from_returns(x, stats["n_trials_dsr"], stats["var_trial_sr"])
+        L = self.loosening_penalty()
+        dsr = selection.dsr_from_returns(x, stats["n_trials_dsr"] * (1 + L), stats["var_trial_sr"])
         ok, d = G.check_g5(dsr["dsr"], stats["pbo"] if stats["pbo"] == stats["pbo"] else 1.0, self.cfg)
         return _gate(ok, **d, **{k: dsr[k] for k in ("sr", "sr0", "skew", "kurtosis", "n_obs", "n_trials",
-                                                     "var_trial_sr")})
+                                                     "var_trial_sr")}, loosening_penalty=L)
 
     # ---------------------------------------------------------- 기여도
     def ablation(self, survivors: list[StrategySpec]) -> dict[str, dict]:

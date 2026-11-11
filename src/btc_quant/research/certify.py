@@ -90,7 +90,7 @@ def final_flags(c: dict, z_dev: float, fin: dict, L: int = 0) -> dict:
 
 def evaluate_record(rec: dict, pkg: dict, fin: dict, L: int = 0) -> dict:
     """시장 하나: T1(검증 통과) 후보와 최종 후보. GR.evaluate_market + 결선."""
-    ev = GR.evaluate_market(rec, pkg, detail=True)
+    ev = GR.evaluate_market(rec, {**pkg, "dsr_mult": pkg.get("dsr_mult", 1.0 + int(L))}, detail=True)
     camps = rec["campaigns"]
     by_pos = {camp.get("pos", i + 1): camp for i, camp in enumerate(camps)}
     n_t1 = n_final = 0
@@ -357,7 +357,7 @@ def certify(bank: list[dict], pkg: dict, fin: dict, L: int = 0, base: tuple[dict
     x3 = sum(res[r["id"]]["final"] for r in nulls)
     out["C3"] = {"x": x3, "n": len(nulls), "rate": x3 / max(len(nulls), 1), "pass": x3 / max(len(nulls), 1) <= 0.005}
     x4 = sum(res[r["id"]]["final"] for r in prog)
-    shop = {r["id"]: evaluate_record(r, pkg, fin, L=3) for r in prog}          # 느슨화 3회를 다 쓴 각본의 문턱
+    shop = {r["id"]: evaluate_record(r, {**pkg, "dsr_mult": 4.0}, fin, L=3) for r in prog}   # 느슨화 3회 각본
     out["C4"] = {"x": x4, "n": len(prog), "shop_x": sum(v["final"] for v in shop.values()),
                  "pass": x4 <= max(1, len(prog) // 30)}
     x5 = sum(res[r["id"]]["final"] for r in van)

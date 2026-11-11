@@ -170,6 +170,12 @@ class DataAccess:
                 f"no human approval at {ap}. Request it; a human runs "
                 f"`python -m btc_quant.registry.admin_cli approve-lockbox {candidate_id}`.")
         approval = yaml.safe_load(ap.read_text(encoding="utf-8")) or {}
+        if approval.get("auto"):            # 자율 개봉 승인(D31): 조건을 지금 다시 검사해야 연다
+            from .authorize import AuthorizationError, verify_auto
+            try:
+                verify_auto(approval, self.root)
+            except AuthorizationError as e:
+                raise LockboxApprovalError(f"autonomous approval no longer valid: {e}") from None
         if approval.get("candidate_id") != candidate_id:
             raise LockboxApprovalError(f"approval file candidate_id mismatch in {ap}")
         if approval.get("lockbox_id") not in (None, lb_id):

@@ -601,9 +601,10 @@ def _phi(z: float) -> float:
 
 
 def n_trials_for(pkg: dict, k_eff: int, n_camp: int, n_family: int, sum_keff: int) -> float:
+    m = float(pkg.get("dsr_mult", 1.0))          # 자율 체제 벌점 (1 + L_dev)
     if pkg.get("dsr_n", "current") == "sum_keff":
-        return float(max(k_eff, sum_keff))
-    return max(float(k_eff), n_family * k_eff / max(n_camp, 1))
+        return m * float(max(k_eff, sum_keff))
+    return m * max(float(k_eff), n_family * k_eff / max(n_camp, 1))
 
 
 def atom_flags(c: dict, pkg: dict, n_trials: float, pbo: float | None) -> dict:
