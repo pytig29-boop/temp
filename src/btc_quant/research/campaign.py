@@ -1175,6 +1175,8 @@ def run_campaign(template: CampaignTemplate | str | Path, root: str | Path | Non
     from btc_quant.evaluation.gates import load_gate_config
     from btc_quant.params.floor import check_floor     # 바닥 규칙 (D29) → 원장 쓰기 전 거부
     check_floor(load_gate_config(config_root(env) / "config" / "gates.yaml"), config_root(env), tpl=tpl)
+    from btc_quant.params.ruleset import require_locked_ruleset
+    ruleset_id = require_locked_ruleset(config_root(env), "campaign registration")   # 사전 잠금 (§4-C)
     specs_all = tpl.enumerate()
     if len({s.logic_hash() for s in specs_all}) != len(specs_all):
         raise CampaignError("grid produces duplicate specs")
@@ -1291,6 +1293,8 @@ def run_campaign(template: CampaignTemplate | str | Path, root: str | Path | Non
         "params": pver, "params_version": pver.get("params_version"), "cost_versions": pver.get("cost_versions"),
         "daily_returns": acct,
     }
+    if ruleset_id:                          # 자율 체제 규칙 묶음 잠금 id (없으면 키 없음 = 이전과 같다)
+        manifest["ruleset"] = ruleset_id
     if tpl.gate_profile != "default":       # 관문 프로필 (없는 매니페스트 = default, 이전과 같다)
         manifest["gate_profile"] = tpl.gate_profile
     if tpl.signal_exit:                     # 신호 청산 (없는 템플릿은 매니페스트가 이전과 같다)

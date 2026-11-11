@@ -24,6 +24,21 @@ def _root(a):
     return Path(a.root) if a.root else None
 
 
+def cmd_ruleset(a) -> int:
+    import json
+    from . import ruleset as R
+    root = getattr(a, "root", None)
+    if a.op == "hash":
+        print(R.ruleset_hash(root))
+    elif a.op == "status":
+        print(json.dumps(R.status(root), ensure_ascii=False, indent=2))
+    else:
+        if not a.id:
+            raise SystemExit("--id required")
+        print(R.lock(a.id, a.cert, root, a.note))
+    return 0
+
+
 def cmd_floor_verify(a) -> int:
     import json
     from .floor import floor_verify
@@ -196,6 +211,12 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--root", default=None, help="repo root (default: auto)")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("status").set_defaults(fn=cmd_status)
+    rp = sub.add_parser("ruleset", help="ruleset hash / status / lock (autonomy §4-C)")
+    rp.add_argument("op", choices=["hash", "status", "lock"])
+    rp.add_argument("--id", default=None)
+    rp.add_argument("--cert", default=None)
+    rp.add_argument("--note", default="")
+    rp.set_defaults(fn=cmd_ruleset)
     sub.add_parser("floor-verify", help="floor.yaml hash, git history, current config check").set_defaults(
         fn=cmd_floor_verify)
 

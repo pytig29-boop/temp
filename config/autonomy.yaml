@@ -1,0 +1,7 @@
+# 자율 연구 체제 설정 (PLAN D26~D33, docs/prompts/autonomous_research_plan.md). 바닥(config/floor.yaml)보다 느슨할 수 없다.
+phase: build                     # build | research | final | report | closed — `program phase` 로만 전환
+ruleset_lock_required: false     # Phase 2 에서 rs-001 잠금 뒤 true: 캠페인 등록·Val·잠금·페이퍼 판정 전에 유효한 잠금 필수
+floor_guard: off                 # Phase 1 마지막에 on: guard hook 이 바닥 파일 쓰기를 항상 거부
+program_start: null              # Phase 4 시작 시각 (판정 예산·벌점 L 기준)
+verdict_budget: {val_new_uses: 10, lockbox_openings: 5, final_rounds_max: 2, bundle_max: 3}
+program: {max_weeks: 5, base_weeks: 3, max_trials: 400, weekly_trials: 150, family_weekly_trials: 60, max_loosenings: 3}

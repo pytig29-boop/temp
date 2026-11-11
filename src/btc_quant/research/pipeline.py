@@ -814,9 +814,19 @@ class Pipeline:
                     "prior_passed": bool(prior.get("passed")),
                     "note": "logic_hash already used this Val; prior decision reused (not counted again)"
                             + ("" if prior["result"] else " — prior evaluation has no result (aborted) → fail")}
+        from btc_quant.params.ruleset import RulesetError, autonomy_cfg, require_locked_ruleset, segment_consumed
+        rs_id = require_locked_ruleset(self._croot, "Val (G6) opening")      # 사전 잠금 (§4-C)
+        ac = autonomy_cfg(self._croot)
+        if rs_id and segment_consumed(led, "val", ac.get("program_start")):
+            raise RulesetError("Val segment consumed (a Val-reading rule was loosened after Val was opened)")
+        if rs_id and ac.get("program_start"):               # 판정 데이터 예산 (§4-E)
+            cap_prog = int((ac.get("verdict_budget") or {}).get("val_new_uses", 10))
+            if led.val_uses_since(ac["program_start"]) >= cap_prog:
+                return {"val_id": vid, "exhausted": True, "cap": cap_prog, "holm_passed": False,
+                        "evidence_passed": False, "error": f"program Val budget {cap_prog} used"}
         try:
             op = led.open_val_evaluation(lh, self.cr.campaign_id, vid, int(vb["cap"]), spec_id=spec.id,
-                                         note="pipeline G6")
+                                         note="pipeline G6", extra={"ruleset": rs_id} if rs_id else None)
         except ValBudgetExhaustedError as e:
             return {"val_id": vid, "exhausted": True, "cap": int(vb["cap"]), "holm_passed": False,
                     "evidence_passed": False,

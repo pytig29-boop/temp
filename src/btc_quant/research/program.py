@@ -137,6 +137,9 @@ def main(argv=None) -> int:
     p = sub.add_parser("phase")
     p.add_argument("to", choices=PHASES)
     p.add_argument("--reason", default="")
+    m = sub.add_parser("maintenance", help="정비 창구: 판정 코드 수정 동안 캠페인·Val·잠금 차단 (§4-C)")
+    m.add_argument("op", choices=["open", "close", "status"])
+    m.add_argument("--reason", default="")
     q = sub.add_parser("queue")
     q.add_argument("op", choices=["add", "done", "list"])
     q.add_argument("arg", nargs="?")
@@ -152,6 +155,16 @@ def main(argv=None) -> int:
             print(f"error: {e}", file=sys.stderr)
             return 2
         print(f"phase → {a.to}")
+    elif a.cmd == "maintenance":
+        st = load_state(a.root)
+        if a.op != "status":
+            if a.op == "open" and not a.reason:
+                print("error: --reason required", file=sys.stderr)
+                return 2
+            st["maintenance"] = {"open": a.op == "open", "reason": a.reason, "ts": utcnow()}
+            save_state(st, a.root)
+            log_event("maintenance", a.root, op=a.op, reason=a.reason)
+        print(json.dumps(st.get("maintenance") or {"open": False}, ensure_ascii=False))
     else:
         st = load_state(a.root)
         if a.op == "add":
