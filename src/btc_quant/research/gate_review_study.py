@@ -504,8 +504,16 @@ def _val_mode_of(vb: dict) -> dict:
 
 
 def size_scale(c: dict, pkg: dict) -> float:
-    """크기 조절 배수 (`gates.position_scale` 와 같은 식): min(1, g6_mdd/Val MDD, g6_mc/MC MDD95). 한도 None = 그 항 없음."""
+    """크기 조절 배수 (`gates.position_scale` 와 같은 식): min(1, g6_mdd/Val MDD, g6_mc/MC MDD95). 한도 None = 그 항 없음.
+    자율 rs-001 옵션: g6_size_dev(Dev MDD 포함), g6_worst_month(최악 월 Dev·Val)."""
     out = 1.0
+    if pkg.get("g6_size_dev") and pkg["g6_mdd"] is not None and c.get("dev_max_dd"):
+        out = min(out, float(pkg["g6_mdd"]) / abs(float(c["dev_max_dd"])))
+    wm = pkg.get("g6_worst_month")
+    if wm is not None:
+        ws = [x for x in (c.get("dev_worst_month"), c.get("val_worst_month")) if x is not None]
+        if ws and min(ws) < 0:
+            out = min(out, abs(float(wm)) / abs(min(ws)))
     for lim, x in ((pkg["g6_mdd"], c["val_mdd"]), (pkg["g6_mc"], c["val_mc_mdd95"])):
         if lim is None:
             continue
@@ -534,6 +542,8 @@ def current_package(cfg: dict | None = None) -> dict:
         "g6_stress": None if G.g6_stress_mode(c["G6"]) == "off" else c["G6"]["min_stress_sharpe"],
         "g6_mc": c["G6"]["max_mc_mdd95"],
         "g6_dd_mode": G.g6_drawdown_mode(c["G6"]), "g6_min_scale": float(c["G6"].get("min_position_scale", 0.25)),
+        "g6_size_dev": bool(c["G6"].get("size_includes_dev", False)), "g6_worst_month": c["G6"].get("worst_month_min"),
+        "val_per_campaign": c["G6"].get("max_val_per_campaign"),
         **_val_mode_of(vb),
         "val_cap": int(vb["cap"]),
         "rob_latency": r.get("latency_min_retention", 0.5), "rob_outliers": 0.0, "rob_loyo": 0.0,
@@ -716,12 +726,16 @@ def evaluate_market(rec: dict, pkg: dict, detail: bool = True) -> dict:
             rows.append((c, f, dev))
             if dev:
                 abl.update(c.get("abl_new") or [])
+        n_sent_camp = 0
         for c, f, dev in rows:
             row = {"pos": camp.get("pos", ci + 1), "rank": c["rank"], "is_star": bool(c.get("is_star")) and last,
                    "dev": dev, "g6": False, "validated": False}
             if not dev:
                 lab = "G0" if not c["g0_pass"] else next(ATOM_GATE[a] for a in DEV_ATOMS if not f[a])
+            elif pkg.get("val_per_campaign") is not None and n_sent_camp >= int(pkg["val_per_campaign"]):
+                lab = "Vcap"
             else:
+                n_sent_camp += 1
                 any_dev = True
                 checks = all(f[a] for a in G6_ATOMS) and c.get("val_ref_match") is not False
                 why = [("size" if a == "G6_mdd" and pkg.get("g6_dd_mode") == "size" else ATOM_LABEL[a])

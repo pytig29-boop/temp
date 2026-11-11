@@ -310,6 +310,16 @@ def check_g6(val_metrics: dict, stress, mc_mdd95: float,
         ok_stress = d["ok_stress_sharpe"] if stress_mode == "sharpe" else True     # off = 계산·표시만
         if dd_mode == "size":
             sc = position_scale(mdd, mc, c)
+            if c.get("size_includes_dev") and dev_metrics and dev_metrics.get("max_dd") is not None:
+                dmd = abs(float(dev_metrics["max_dd"]))
+                if dmd > 0:
+                    sc = min(sc, float(c["max_mdd"]) / dmd)
+            wmin = c.get("worst_month_min")
+            if wmin is not None:
+                wms = [x for x in (val_metrics.get("worst_month"), (dev_metrics or {}).get("worst_month"))
+                       if x is not None]
+                if wms and min(wms) < 0:
+                    sc = min(sc, abs(float(wmin)) / abs(min(wms)))
             d.update(drawdown_mode="size", position_scale=sc, min_position_scale=float(c["min_position_scale"]),
                      ok_position_scale=sc >= float(c["min_position_scale"]))
             ok_dd = d["ok_position_scale"]

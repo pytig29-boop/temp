@@ -966,6 +966,36 @@ params:
   last_updated: '2026-11-10'
   owner: human
   history: []
+- key: gates.G6.size_includes_dev
+  class: 2
+  source: yaml:config/gates.yaml#G6.size_includes_dev
+  value: false
+  rationale: 'G6 크기 계산에 Dev 최대낙폭 포함 (엄격화)'
+  evidence: '자율 체제 옵션 추가(기본 = 기존 동작) — docs/prompts/autonomous_research_plan.md §5.1'
+  version: 1
+  last_updated: '2026-11-11'
+  owner: human
+  history: []
+- key: gates.G6.worst_month_min
+  class: 2
+  source: yaml:config/gates.yaml#G6.worst_month_min
+  value: null
+  rationale: 'G6 크기 계산에 최악 달력 월 하한 포함 (엄격화)'
+  evidence: '자율 체제 옵션 추가(기본 = 기존 동작) — docs/prompts/autonomous_research_plan.md §5.1'
+  version: 1
+  last_updated: '2026-11-11'
+  owner: human
+  history: []
+- key: gates.G6.max_val_per_campaign
+  class: 2
+  source: yaml:config/gates.yaml#G6.max_val_per_campaign
+  value: null
+  rationale: '캠페인당 Val 사용 후보 수 상한'
+  evidence: '자율 체제 옵션 추가(기본 = 기존 동작) — docs/prompts/autonomous_research_plan.md §5.1'
+  version: 1
+  last_updated: '2026-11-11'
+  owner: human
+  history: []
 - key: gates.selection.method
   class: 2
   source: yaml:config/gates.yaml#selection.method

@@ -672,6 +672,8 @@ def candidate_outcome(c: dict) -> str:
         return "validated"
     if not c.get("dev_passed"):
         return str(c.get("first_failed"))
+    if c.get("val_skipped"):
+        return "Vcap"
     g = c.get("gates", {}).get("G6") or {}
     flags = G6_FLAGS
     if g.get("stress_mode") == "off":                 # R1: stress Sharpe 는 표시만 → 라벨에서 제외

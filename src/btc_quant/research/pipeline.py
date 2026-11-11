@@ -214,6 +214,15 @@ def val_evidence(vb_cfg: dict, dec: dict, p_value: float, val_sharpe: float, dev
     return {"evidence": mode, "evidence_passed": ce["passed"], "combined": ce}
 
 
+def worst_month(daily: pd.Series) -> float | None:
+    """최악 달력 월 수익 (복리, UTC 월). 자율 rs-001 의 G6 크기 계산·결선 F2 와 같은 정의."""
+    s = pd.Series(daily).dropna()
+    if not len(s):
+        return None
+    idx = s.index.tz_convert(None) if getattr(s.index, "tz", None) is not None else s.index
+    return float(((1 + pd.Series(s.to_numpy(float), index=idx)).groupby(idx.to_period("M")).prod() - 1).min())
+
+
 def _val_metrics(met: dict) -> dict:
     """Val 지표를 원장에 기록할 때: 연·월 단위 분해 키와 B&H 낙폭 구간 날짜(Val 안의 시점 = 구조 누설) 제거."""
     return {k: v for k, v in met.items() if k not in ("spec_id", "cost") and not k.startswith("sharpe_year_")
@@ -895,6 +904,7 @@ class Pipeline:
             st = fast.run_fast(spec, m1v, self._cost(stress_name), vs, ve, ctx=ctx, accounting=self.accounting)
         bh = self.val_benchmark(m1v, res.daily_returns.index, vs)
         met = M.summarize(res, HALF_LIFE_DAYS, benchmark=bh, neutral_exposure=self.neutral_exposure)
+        met["worst_month"] = worst_month(res.daily_returns)
         smet = M.summarize(st, HALF_LIFE_DAYS, benchmark=bh, neutral_exposure=self.neutral_exposure)
         mc = montecarlo.worst_case_mdd95(U.portfolio_trade_returns(res), n_sims=self.cfg["G6"]["mc_sims"],
                                          troughs=self._mc_troughs(res, m1v))
@@ -1147,6 +1157,7 @@ class Pipeline:
                  "uses_experimental": spec_uses_experimental(spec)}
             res = self.dev_result(spec, self.costs["primary"])
             c["yearly"] = M.yearly_table(res.daily_returns, res.trades).reset_index(names="year").to_dict("records")
+            c["metrics"]["worst_month"] = worst_month(res.daily_returns)
             if self.multi:      # 자산별 Dev 결과 (보고 전용 — 관문은 포트폴리오로만)
                 c["universe"] = list(self.syms)
                 c["per_asset"] = U.per_asset_metrics(res.sleeves, HALF_LIFE_DAYS)
@@ -1178,6 +1189,7 @@ class Pipeline:
         abl = self.ablation([s for s in dev_survivors if s.filters]) if dev_survivors else {}
         # G6 + 등급 + 견고성 (Dev 생존자만, 파라미터 고정)
         m1v = None
+        n_val_sent = 0
         for c in out["candidates"]:
             c["ablation"] = abl.get(c["logic_hash"])
             if not c["dev_passed"]:
@@ -1185,6 +1197,14 @@ class Pipeline:
                 c["grade"] = None
                 c["status"] = f"failed {c['first_failed']} (ledger only)"
                 continue
+            cap_v = self.cfg["G6"].get("max_val_per_campaign")
+            if cap_v is not None and n_val_sent >= int(cap_v):     # 캠페인당 Val 사용 상한 (자율 rs-001)
+                c["G6"] = None
+                c["grade"] = None
+                c["val_skipped"] = True
+                c["status"] = "Dev survivor not sent to Val (per-campaign cap)"
+                continue
+            n_val_sent += 1
             if m1v is None:
                 m1v, vs, ve = self.load_val()
             spec = cr.specs[c["logic_hash"]]
