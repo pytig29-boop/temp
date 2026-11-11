@@ -563,6 +563,13 @@ class Pipeline:
         n_family = self.env.ledger.trials_count(family=fam)
         n_global = self.env.ledger.trials_count()
         n_trials = max(float(k_eff), n_family * k_eff / max(n_camp, 1))
+        n_program = None
+        from btc_quant.params.ruleset import autonomy_cfg
+        ps = autonomy_cfg(self._croot).get("program_start")
+        if ps:      # 자율 프로그램: 계열 이름을 바꿔 시도 수를 초기화하는 길을 막는다 — 프로그램 전체 시도를 바닥으로
+            n_program = len({(r["campaign_id"], r["logic_hash"]) for r in self.env.ledger.records("runs")
+                             if str(r.get("ts") or "") >= str(ps)})
+            n_trials = max(n_trials, n_program * k_eff / max(n_camp, 1))
         try:
             pbo = selection.pbo_cscv(R, n_splits=self.cfg["G5"]["pbo_splits"])
             pbo_d = {"pbo": pbo["pbo"], "n_combinations": pbo["n_combinations"],
@@ -571,7 +578,7 @@ class Pipeline:
             pbo_d = {"pbo": float("nan"), "error": str(e)}
         return {"n_campaign_specs": n_camp, "k_eff_clusters": k_eff, "entropy_trials":
                 selection.effective_trials_entropy(R) if n_camp > 1 else 1.0,
-                "n_family_trials": n_family, "n_global_trials": n_global,
+                "n_family_trials": n_family, "n_global_trials": n_global, "n_program_trials": n_program,
                 "n_trials_dsr": n_trials, "var_trial_sr": V, "var_source": v_source,
                 "cluster_threshold": thr, **pbo_d}
 
@@ -807,12 +814,30 @@ class Pipeline:
         vid = self.env.data.config.get("val_id")
         return str(vid) if vid else f"val:{vs.date().isoformat()}..{ve.date().isoformat()}"
 
+    def _val_prior_canonical(self, vid: str, spec: StrategySpec) -> dict | None:
+        from btc_quant.strategy.spec import canonical_hash_of
+        hist = self.env.ledger.val_history(vid)
+        if not hist:
+            return None
+        want = spec.canonical_hash()
+        specs = {}
+        for r in self.env.ledger.records("runs"):
+            if r.get("logic_hash") in {h["logic_hash"] for h in hist} and r.get("spec"):
+                specs.setdefault(r["logic_hash"], r["spec"])
+        for h in hist:
+            sd = specs.get(h["logic_hash"])
+            if sd is not None and canonical_hash_of(sd) == want:
+                return h
+        return None
+
     def _open_val(self, spec: StrategySpec, vs, ve) -> dict:
         """Val 평가 전 사용 기록. 반환 {"val_id", "opening", "reused", "exhausted", ...}."""
         vb = self.cfg["G6"]["val_budget"]
         vid, lh = self.val_id(vs, ve), spec.logic_hash()
         led = self.env.ledger
         prior = led.val_prior(vid, lh)
+        if prior is None:                   # 표기만 바꾼 같은 규칙도 같은 스펙으로 본다 (canonical_hash, 레드팀 2026-11-11)
+            prior = self._val_prior_canonical(vid, spec)
         if prior is not None:
             res = prior["result"] or {}
             dec = res.get("decision") or {}

@@ -483,8 +483,35 @@ class StrategySpec:
     def to_yaml(self) -> str:
         return yaml.safe_dump(self.to_dict(), allow_unicode=True, sort_keys=False)
 
+    def canonical_hash(self) -> str:
+        """표기에 무관한 규칙 해시 (레드팀 발견 2026-11-11: 48 과 48.0 이 다른 logic_hash). 정수값 실수 → 정수,
+        실수는 12 유효숫자. Val 재사용 규칙(같은 규칙은 Val 을 한 번만)에 쓴다 — logic_hash 자체는 기존 기록과의
+        호환 때문에 바꾸지 않는다."""
+        return canonical_hash_of(self.to_dict())
+
     def logic_hash(self) -> str:
         """id·version을 제외한 '규칙 내용'의 해시. 같은 규칙이면 같은 해시."""
         d = self.to_dict()
         d.pop("id"), d.pop("version")
         return hashlib.sha256(json.dumps(d, sort_keys=True).encode()).hexdigest()[:16]
+
+
+def _canon(v):
+    if isinstance(v, bool) or v is None or isinstance(v, str):
+        return v
+    if isinstance(v, (int, float)):
+        f = float(v)
+        if f == int(f) and abs(f) < 2 ** 53:
+            return int(f)
+        return float(f"{f:.12g}")
+    if isinstance(v, dict):
+        return {k: _canon(x) for k, x in v.items()}
+    if isinstance(v, (list, tuple)):
+        return [_canon(x) for x in v]
+    return v
+
+
+def canonical_hash_of(spec_dict: dict) -> str:
+    """스펙 dict(`to_dict()` 형식, id·version 무시) → 표기 무관 해시."""
+    d = {k: v for k, v in dict(spec_dict).items() if k not in ("id", "version")}
+    return hashlib.sha256(json.dumps(_canon(d), sort_keys=True).encode()).hexdigest()[:16]
