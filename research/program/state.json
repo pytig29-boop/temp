@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "plan": "docs/prompts/autonomous_research_plan.md",
+  "phase": "build",
+  "plan_phase": "0",
+  "cycle": null,
+  "queue": [
+    {
+      "task": "Phase 0.6 scheduled resume",
+      "added": "2026-11-11T23:05:26+00:00"
+    },
+    {
+      "task": "Phase 1 safeguards (A..K)",
+      "added": "2026-11-11T23:05:27+00:00"
+    },
+    {
+      "task": "Phase 2 final verdict + certification bank + rs-001",
+      "added": "2026-11-11T23:05:28+00:00"
+    },
+    {
+      "task": "Phase 3 dry run",
+      "added": "2026-11-11T23:05:30+00:00"
+    },
+    {
+      "task": "Phase 4 research program R1-R3",
+      "added": "2026-11-11T23:05:31+00:00"
+    }
+  ],
+  "done": [
+    {
+      "task": "Phase 0.5 docs: AUTONOMY.md, PLAN D26-D33, user decision record",
+      "added": "2026-11-11T23:05:25+00:00",
+      "done": "2026-11-11T23:06:08+00:00"
+    }
+  ],
+  "background": [],
+  "notes": [],
+  "updated": "2026-11-11T23:06:08+00:00"
+}

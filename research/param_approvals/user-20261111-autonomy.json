@@ -1,0 +1,13 @@
+{
+  "id": "user-20261111-autonomy",
+  "approved_by": "user (explicit chat decision 2026-11-11)",
+  "ts": "2026-11-11",
+  "decisions": [
+    "자율 위임: 중간 결정은 AI, 최종 후보 묶음만 한 번 승인",
+    "판정 기준도 AI 가 바꿀 수 있음 — 안전장치 필수",
+    "최대 낙폭 20% 유지 (운용 크기 기준, 크기 조절, 하한 25%)",
+    "페이퍼 1~2주 — 수익 증명이 아니라 백테스트와 같게 움직이는지 확인",
+    "실제 돈(T2 승격, 실거래 실행기)은 사용자 승인"
+  ],
+  "plan": "docs/prompts/autonomous_research_plan.md"
+}
