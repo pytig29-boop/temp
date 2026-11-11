@@ -1,0 +1,38 @@
+# 바닥 규칙 (PLAN D29, 사용자 결정 2026-11-11) — **사용자만 변경**. AI 는 이보다 엄격하게만 설정할 수 있다.
+# 강제: btc_quant.params.floor.check_floor (캠페인 등록·파이프라인·자동 적용·결선·페이퍼·규칙 잠금), tests/test_floor*.py, guard hook.
+version: 1
+set_by: user (chat 2026-11-11)
+costs_min_roundtrip_bp:   # 2026-11-11 현재 비용 모델 왕복 bp — 이 값 아래로 못 내림
+  'coinone_base': 2.0
+  'coinone_base@ETH-KRW': 5.0
+  'coinone_base@XRP-KRW': 8.0
+  'coinone_conservative': 4.0
+  'coinone_conservative@ETH-KRW': 8.0
+  'coinone_conservative@XRP-KRW': 10.0
+  'coinone_stress': 8.0
+  'coinone_stress@ETH-KRW': 14.0
+  'coinone_stress@XRP-KRW': 23.76
+  'upbit_base': 13.4
+  'upbit_base@ETH-KRW': 15.5
+  'upbit_base@XRP-KRW': 18.7
+  'upbit_conservative': 18.0
+  'upbit_conservative@ETH-KRW': 19.5
+  'upbit_conservative@XRP-KRW': 22.7
+  'upbit_stress': 31.0
+  'upbit_stress@ETH-KRW': 36.4
+  'upbit_stress@XRP-KRW': 39.4
+primary_cost_roles: [conservative, stress]   # 판정(primary) 비용은 conservative 이상
+max_mdd: 0.20               # 운용 크기 기준 (G6·결선)
+max_mc_mdd95: 0.20
+min_position_scale: 0.25
+worst_month_min: -0.08      # 운용 크기 기준 최악 달력 월 (결선 F2)
+universe: [BTC-KRW, XRP-KRW, ETH-KRW]
+long_only_spot: true
+splits_sha256: 7d65078dce3573a985d8492533253f9a8bcb9d5afba5ec098a2f7bb1f259e097
+lockbox_peek: forbidden
+ledger_all_trials: true
+real_money: user_only
+cert_max_fpr: 0.02          # 기준 인증 오탐 목표 — AI 가 올릴 수 없음
+max_loosenings: 3
+verdict_budget_max: {val_new_uses: 10, lockbox_openings: 5}
+oos_alpha_max: 0.15         # 결선 F1c 상한

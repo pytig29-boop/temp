@@ -424,6 +424,8 @@ class Pipeline:
         self.cfg = (copy.deepcopy(gate_cfg) if gate_cfg is not None
                     else gate_config_for_campaign(cr.campaign_id, root=config_root(env)))
         self._croot = config_root(env)                 # 비용·관문 설정 루트 (캠페인과 같은 해석)
+        from btc_quant.params.floor import check_gate_floor
+        check_gate_floor(self.cfg)                     # 바닥 규칙 (D29): 낙폭·크기 하한이 바닥보다 느슨하면 거부
         self.params = run_params(env)                  # params_version + cost_versions (실행 기록용)
         # 관문 일간 수익 회계 (PLAN D18): 캠페인 매니페스트에 고정된 값 (D18 이전 캠페인 = realized → 재계산 불변)
         self.accounting = manifest_accounting(getattr(cr, "manifest", None))

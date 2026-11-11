@@ -24,6 +24,14 @@ def _root(a):
     return Path(a.root) if a.root else None
 
 
+def cmd_floor_verify(a) -> int:
+    import json
+    from .floor import floor_verify
+    r = floor_verify(getattr(a, "root", None))
+    print(json.dumps(r, ensure_ascii=False, indent=2))
+    return 0 if not r["violations"] else 2
+
+
 def cmd_status(a) -> int:
     from .costs import all_cost_models, cost_versions, round_trip_bps, side_cost_bps
     from .proposals import list_proposals
@@ -188,6 +196,8 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--root", default=None, help="repo root (default: auto)")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("status").set_defaults(fn=cmd_status)
+    sub.add_parser("floor-verify", help="floor.yaml hash, git history, current config check").set_defaults(
+        fn=cmd_floor_verify)
 
     p = sub.add_parser("sample", help="REST orderbook sampler (both sides, full book)")
     p.add_argument("--venues", default="coinone,upbit")

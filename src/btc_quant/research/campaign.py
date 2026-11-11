@@ -1172,6 +1172,9 @@ def run_campaign(template: CampaignTemplate | str | Path, root: str | Path | Non
     log = progress or (lambda s: None)
     n_specs = tpl.check_budget()                       # 예산 초과면 원장에 쓰기 전에 거부
     check_gate_profile(tpl, env)                       # 승인되지 않은 관문 프로필 → 원장 쓰기 전 거부
+    from btc_quant.evaluation.gates import load_gate_config
+    from btc_quant.params.floor import check_floor     # 바닥 규칙 (D29) → 원장 쓰기 전 거부
+    check_floor(load_gate_config(config_root(env) / "config" / "gates.yaml"), config_root(env), tpl=tpl)
     specs_all = tpl.enumerate()
     if len({s.logic_hash() for s in specs_all}) != len(specs_all):
         raise CampaignError("grid produces duplicate specs")
