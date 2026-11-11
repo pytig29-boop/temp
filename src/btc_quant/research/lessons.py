@@ -1192,11 +1192,41 @@ class LessonBook:
                                         "condition or human release")
             elif last.get("outcome") == "validated" or (last.get("funnel") or {}).get("n_dev_survivors"):
                 allowance, reason = PROMISING_FAMILY_WEEKLY_TRIALS, "promising: recent Dev survivor"
-        remaining = max(0, min(allowance - len(fam_used), GLOBAL_WEEKLY_TRIALS - len(glob_used)))
+        gcap = GLOBAL_WEEKLY_TRIALS
+        prog = self._program()
+        extra = {}
+        if prog:                        # 자율 프로그램 예산 (autonomous_research_plan §4-E·§7.3): 작은 쪽 적용
+            pc = prog["program"]
+            rel = (prog.get("families") or {}).get(family) or {}
+            if allowance == 0 and rel.get("released"):
+                allowance, reason = int(pc.get("family_weekly_trials", 60)), f"released by AI: {rel.get('reason')}"
+            allowance = min(allowance, int(pc.get("family_weekly_trials", 60)))
+            gcap = min(gcap, int(pc.get("weekly_trials", 150)))
+            used_prog = {(r["campaign_id"], r["logic_hash"]) for r in self.ledger.records("runs")
+                         if (r.get("ts") or "") >= str(prog["start"])}
+            total_left = int(pc.get("max_trials", 400)) - len(used_prog)
+            extra = {"program_used": len(used_prog), "program_cap": int(pc.get("max_trials", 400))}
+        else:
+            total_left = 10 ** 9
+        remaining = max(0, min(allowance - len(fam_used), gcap - len(glob_used), total_left))
         return {"family": family, "used_7d": len(fam_used), "allowance": allowance,
-                "global_used_7d": len(glob_used), "global_cap": GLOBAL_WEEKLY_TRIALS,
+                "global_used_7d": len(glob_used), "global_cap": gcap,
                 "remaining": remaining, "rule": reason,
-                "family_trials_total": self.ledger.trials_count(family=family)}
+                "family_trials_total": self.ledger.trials_count(family=family), **extra}
+
+    def _program(self) -> dict | None:
+        """자율 프로그램 설정 (config/autonomy.yaml program_start 가 있을 때만) + 계열 해제 기록(research/program/families.yaml)."""
+        import yaml
+        base = self.root.parent.parent
+        ap = base / "config" / "autonomy.yaml"
+        if not ap.exists():
+            return None
+        doc = yaml.safe_load(ap.read_text(encoding="utf-8")) or {}
+        if not doc.get("program_start"):
+            return None
+        fp = base / "research" / "program" / "families.yaml"
+        fams = (yaml.safe_load(fp.read_text(encoding="utf-8")) or {}) if fp.exists() else {}
+        return {"start": doc["program_start"], "program": doc.get("program") or {}, "families": fams}
 
     # ---------------------------------------------------------- 렌더링
     def render_markdown(self, path: str | Path | None = None) -> Path:
