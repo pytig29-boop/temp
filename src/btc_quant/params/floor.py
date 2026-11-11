@@ -71,8 +71,10 @@ def check_gate_floor(gate_cfg: dict, fl: dict | None = None) -> None:
 
 def check_cost_floor(cost_doc: dict | None = None, fl: dict | None = None, root=None) -> None:
     """현재 비용 모델 왕복 bp 가 바닥보다 작으면 거부 (바닥에 없는 새 모델은 허용 — 생성은 비용 레지스트리 절차)."""
-    from .costs import cost_model, load_costs, round_trip_bps
+    from .costs import cost_model, costs_path, load_costs, round_trip_bps
     fl = fl or load_floor(root)
+    if cost_doc is None and root is not None and not costs_path(root).exists():
+        root = None                 # 임시 연구 저장소에 costs.yaml 이 없으면 코드 저장소 비용 (캠페인과 같은 해석)
     doc = cost_doc or load_costs(root)
     errs = []
     for name, rt_min in (fl.get("costs_min_roundtrip_bp") or {}).items():
