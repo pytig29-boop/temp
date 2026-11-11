@@ -49,6 +49,7 @@ TABLES = {
     "transitions": "trn",
     "val_evaluations": "val",
     "forward_results": "fwd",
+    "criteria_revisions": "crv",     # 자율 체제(D30): 판정 기준 변경 기록 (엄격/중립/느슨/새 프로필)
 }
 
 # Val 결과 레코드에 남기지 않는 지표 (연도·월 단위 분해 = Val 구조 누설)
@@ -397,7 +398,7 @@ class Ledger:
 
     # ------------------------------------------------------------ 검증(Val) 구간 사용 원장
     def open_val_evaluation(self, logic_hash: str, campaign_id: str, val_id: str, cap: int,
-                            spec_id: str | None = None, note: str = "") -> dict:
+                            spec_id: str | None = None, note: str = "", extra: dict | None = None) -> dict:
         """Val 평가 *전에* 사용을 기록한다 (event=open). k = 이 val_id 의 사용 순번(1부터).
 
         - 같은 (val_id, logic_hash) 가 이미 열렸으면 새로 세지 않고 LedgerError (호출 측은
@@ -419,7 +420,7 @@ class Ledger:
                     "dev, take a fresh val segment from later data, and give it a new val_id.")
             rec = self._append_locked("val_evaluations", {
                 "event": "open", "val_id": val_id, "k": k, "logic_hash": logic_hash,
-                "campaign_id": campaign_id, "spec_id": spec_id, "note": note})
+                "campaign_id": campaign_id, "spec_id": spec_id, "note": note, **(extra or {})})
             return rec
 
     def record_val_result(self, opening_id: str, passed: bool, p_value: float | None,
@@ -439,6 +440,38 @@ class Ledger:
                 "logic_hash": op["logic_hash"], "campaign_id": op["campaign_id"],
                 "passed": bool(passed), "p_value": p_value, "summary": summ,
                 "decision": decision or {}})["id"]
+
+    def val_uses_since(self, since_ts: str) -> int:
+        """자율 프로그램 판정 예산(D31): since_ts(ISO) 이후 새로 연 Val 사용 수 (val_id 무관)."""
+        return sum(1 for r in self.records("val_evaluations")
+                   if r.get("event") == "open" and str(r["ts"]) >= str(since_ts))
+
+    # ------------------------------------------------------------ 판정 기준 변경 (자율 체제 D30)
+    REVISION_KINDS = ("stricter", "neutral", "looser", "profile_new", "initial")
+
+    def record_criteria_revision(self, kind: str, keys: list, frm: dict, to: dict, *, cert_id: str | None,
+                                 ruleset_before: str | None, ruleset_after: str | None, reason: str,
+                                 rescue_table: dict | None = None, scope: str = "dev") -> str:
+        """기준 변경 1건 (추가 전용). kind ∈ REVISION_KINDS, scope = 변경이 읽는 구간(dev | val | lockbox | paper).
+        looser·profile_new 는 시도 수 벌점 L 에 들어간다(`loosenings`). initial = 프로그램 시작 전 사전 확정."""
+        if kind not in self.REVISION_KINDS:
+            raise ValueError(f"kind must be one of {self.REVISION_KINDS}")
+        if kind in ("looser", "profile_new") and not cert_id:
+            raise LedgerError("a loosening needs a passed certification id")
+        return self.append("criteria_revisions", {
+            "kind": kind, "scope": scope, "keys": list(keys), "from": frm, "to": to, "cert_id": cert_id,
+            "ruleset_before": ruleset_before, "ruleset_after": ruleset_after, "reason": reason,
+            "rescue_table": rescue_table or {}})["id"]
+
+    def criteria_revisions(self) -> list[dict]:
+        return self.records("criteria_revisions")
+
+    def loosenings(self, since_ts: str | None = None, scopes: tuple | None = None) -> int:
+        """벌점 L: looser·profile_new 변경 수 (since_ts 이후, scopes 가 주어지면 그 구간만)."""
+        return sum(1 for r in self.criteria_revisions()
+                   if r["kind"] in ("looser", "profile_new")
+                   and (since_ts is None or str(r["ts"]) >= str(since_ts))
+                   and (scopes is None or r.get("scope") in scopes))
 
     def val_history(self, val_id: str | None = None) -> list[dict]:
         """사용 순서대로 open 레코드 + result(없으면 None: 평가 중단/진행 중)."""
