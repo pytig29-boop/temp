@@ -1,0 +1,63 @@
+{
+ "null_flat": {
+  "n": 40,
+  "validated": 0,
+  "dev_passed": 0,
+  "first_failed": {
+   "G2": 30,
+   "G4": 3,
+   "G5": 5,
+   "G3": 2
+  },
+  "median_dev_active_sharpe": -0.4081816813718012,
+  "median_val_mdd_ratio": 0.7280076968161662
+ },
+ "null_switch": {
+  "n": 40,
+  "validated": 0,
+  "dev_passed": 0,
+  "first_failed": {
+   "G2": 33,
+   "G4": 1,
+   "G3": 3,
+   "G5": 3
+  },
+  "median_dev_active_sharpe": -0.3782717626732538,
+  "median_val_mdd_ratio": 0.7034457481782226
+ },
+ "trend_L45": {
+  "n": 40,
+  "validated": 2,
+  "dev_passed": 6,
+  "first_failed": {
+   "G5": 12,
+   "G3": 6,
+   "G2": 7,
+   "G4": 9,
+   "G6": 4,
+   "validated": 2
+  },
+  "median_dev_active_sharpe": 0.34769345268502083,
+  "median_val_mdd_ratio": 0.6601303890418512
+ },
+ "trend_L90": {
+  "n": 40,
+  "validated": 5,
+  "dev_passed": 7,
+  "first_failed": {
+   "G5": 12,
+   "G4": 10,
+   "validated": 5,
+   "G2": 7,
+   "G3": 4,
+   "G6": 2
+  },
+  "median_dev_active_sharpe": 0.38436996930729206,
+  "median_val_mdd_ratio": 0.5941781562278103
+ },
+ "fpr_all_nulls": {
+  "x": 0,
+  "n": 80
+ },
+ "note": "computed with profile G5 0.95; at the approved 0.90 the null Dev passes stay 0/80 (sensitivity table, research/reports/managed_hold_profile_20261110.md §2)"
+}

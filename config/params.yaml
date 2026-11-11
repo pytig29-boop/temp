@@ -996,6 +996,116 @@ params:
   last_updated: '2026-11-11'
   owner: human
   history: []
+- key: gates.G8.paper_mode
+  class: 2
+  source: yaml:config/gates.yaml#G8.paper_mode
+  value: classic
+  rationale: '결선·페이퍼 판정 (gates.G8.paper_mode)'
+  evidence: '자율 체제 (D27·D28) — docs/prompts/autonomous_research_plan.md §5.2·§5.4'
+  version: 1
+  last_updated: '2026-11-11'
+  owner: human
+  history: []
+- key: gates.G8.paper_min_days
+  class: 2
+  source: yaml:config/gates.yaml#G8.paper_min_days
+  value: 7
+  rationale: '결선·페이퍼 판정 (gates.G8.paper_min_days)'
+  evidence: '자율 체제 (D27·D28) — docs/prompts/autonomous_research_plan.md §5.2·§5.4'
+  version: 1
+  last_updated: '2026-11-11'
+  owner: human
+  history: []
+- key: gates.G8.paper_max_days
+  class: 2
+  source: yaml:config/gates.yaml#G8.paper_max_days
+  value: 14
+  rationale: '결선·페이퍼 판정 (gates.G8.paper_max_days)'
+  evidence: '자율 체제 (D27·D28) — docs/prompts/autonomous_research_plan.md §5.2·§5.4'
+  version: 1
+  last_updated: '2026-11-11'
+  owner: human
+  history: []
+- key: gates.final.alpha_base
+  class: 2
+  source: yaml:config/gates.yaml#final.alpha_base
+  value: 0.05
+  rationale: '결선·페이퍼 판정 (gates.final.alpha_base)'
+  evidence: '자율 체제 (D27·D28) — docs/prompts/autonomous_research_plan.md §5.2·§5.4'
+  version: 1
+  last_updated: '2026-11-11'
+  owner: human
+  history: []
+- key: gates.final.lockbox_budget
+  class: 2
+  source: yaml:config/gates.yaml#final.lockbox_budget
+  value: 5
+  rationale: '결선·페이퍼 판정 (gates.final.lockbox_budget)'
+  evidence: '자율 체제 (D27·D28) — docs/prompts/autonomous_research_plan.md §5.2·§5.4'
+  version: 1
+  last_updated: '2026-11-11'
+  owner: human
+  history: []
+- key: gates.final.oos_alpha
+  class: 2
+  source: yaml:config/gates.yaml#final.oos_alpha
+  value: 0.1
+  rationale: '결선·페이퍼 판정 (gates.final.oos_alpha)'
+  evidence: '자율 체제 (D27·D28) — docs/prompts/autonomous_research_plan.md §5.2·§5.4'
+  version: 1
+  last_updated: '2026-11-11'
+  owner: human
+  history: []
+- key: gates.final.max_mdd
+  class: 2
+  source: yaml:config/gates.yaml#final.max_mdd
+  value: 0.2
+  rationale: '결선·페이퍼 판정 (gates.final.max_mdd)'
+  evidence: '자율 체제 (D27·D28) — docs/prompts/autonomous_research_plan.md §5.2·§5.4'
+  version: 1
+  last_updated: '2026-11-11'
+  owner: human
+  history: []
+- key: gates.final.max_mc_mdd95
+  class: 2
+  source: yaml:config/gates.yaml#final.max_mc_mdd95
+  value: 0.2
+  rationale: '결선·페이퍼 판정 (gates.final.max_mc_mdd95)'
+  evidence: '자율 체제 (D27·D28) — docs/prompts/autonomous_research_plan.md §5.2·§5.4'
+  version: 1
+  last_updated: '2026-11-11'
+  owner: human
+  history: []
+- key: gates.final.worst_month_min
+  class: 2
+  source: yaml:config/gates.yaml#final.worst_month_min
+  value: -0.08
+  rationale: '결선·페이퍼 판정 (gates.final.worst_month_min)'
+  evidence: '자율 체제 (D27·D28) — docs/prompts/autonomous_research_plan.md §5.2·§5.4'
+  version: 1
+  last_updated: '2026-11-11'
+  owner: human
+  history: []
+- key: gates.final.min_position_scale
+  class: 2
+  source: yaml:config/gates.yaml#final.min_position_scale
+  value: 0.25
+  rationale: '결선·페이퍼 판정 (gates.final.min_position_scale)'
+  evidence: '자율 체제 (D27·D28) — docs/prompts/autonomous_research_plan.md §5.2·§5.4'
+  version: 1
+  last_updated: '2026-11-11'
+  owner: human
+  history: []
+- key: gates.final.require_beat_bh
+  class: 2
+  source: yaml:config/gates.yaml#final.require_beat_bh
+  value: true
+  rationale: '결선·페이퍼 판정 (gates.final.require_beat_bh)'
+  evidence: '자율 체제 (D27·D28) — docs/prompts/autonomous_research_plan.md §5.2·§5.4'
+  version: 1
+  last_updated: '2026-11-11'
+  owner: human
+  history: []
 - key: gates.selection.method
   class: 2
   source: yaml:config/gates.yaml#selection.method

@@ -103,6 +103,16 @@ profiles:
     g6_combined_alpha: 0.05    # G6 Dev 능동 DSR z + Val 능동 p 결합
     g8_min_weeks: 8            # G8 페이퍼 기간 (구현 예정)
     g8_min_state_match: 0.95   # G8 백테스트 노출 상태 일치율 (구현 예정)
+# 결선 F1~F5 (자율 체제 D27, research/final_verdict.py · certify.final_flags). phase=final 에서만 쓰인다.
+final:
+  alpha_base: 0.05             # F1b 세 구간 결합 증거 문턱 = alpha_base / (lockbox_budget × (1 + L))
+  lockbox_budget: 5
+  oos_alpha: 0.10              # F1c 표본 밖 12개월(검증+잠금) 평균 > 0 의 p 문턱 (바닥 상한 0.15)
+  max_mdd: 0.20                # F2 (운용 크기, 개발·검증·잠금 중 최악)
+  max_mc_mdd95: 0.20
+  worst_month_min: -0.08
+  min_position_scale: 0.25
+  require_beat_bh: true        # F5 전 구간 Sharpe·Calmar 가 3코인 동일 비중 보유보다 커야 함
 # 후보 선택 (PLAN §10b-4): 캠페인 수익 행렬의 상관 군집별 최고(primary 가중 Sharpe) 1개 → 그 중 상위 K.
 selection:
   method: cluster_best         # cluster_best | top_sharpe(구 방식)
@@ -119,6 +129,9 @@ G8:
   min_paper_weeks: 3
   min_paper_trades: 30
   pnl_band: 0.90               # 손익이 백테스트 90% 구간 안
+  paper_mode: classic          # classic = 위 규칙 | replay = 자율 D28 (7일·연장 14일, P1~P4: research/paper_verdict.py)
+  paper_min_days: 7
+  paper_max_days: 14
   # 전진 인큐베이션 (research/forward.py, PLAN §10b-5)
   forward_states: [validated, challenger]
   forward_warmup_days: 14      # Forward 시작 후 이 기간은 지표 워밍업만(거래·평가 없음). 잠금 구간 데이터로 워밍업하지 않는다.
