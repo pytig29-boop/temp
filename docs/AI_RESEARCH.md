@@ -1,5 +1,7 @@
 # AI 연구 체계 — 연구 모드 운용 가이드
 
+> **자율 체제 (2026-11-11)**: 연구 운영·판정 기준 변경은 AI 가 안전장치 안에서 결정한다 — `docs/AUTONOMY.md`, `docs/prompts/autonomous_research_plan.md`. 사용자는 최종 후보 묶음만 승인한다.
+
 > PLAN §3.3(AI 권한), §5(캠페인·관문·잠금), §6(레지스트리), §8(AI 연구 체계), §10b(v4 개선)의 Claude Code 쪽 구현.
 > 구성 파일: `.claude/settings.json`, `.claude/hooks/guard.py`, `.claude/agents/*.md`, `.claude/skills/*/SKILL.md`.
 > 연구 입력: `research/knowledge/`(사전 지식, 노출 태그), `research/lessons/`(오답노트, `btc_quant.research.lessons`).

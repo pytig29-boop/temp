@@ -37,7 +37,7 @@ TOOL_NAMES = (
     "create_and_run_campaign", "list_campaigns", "get_campaign_report", "query_ledger", "lessons_view",
     "lessons_add_interpretation", "lessons_mark", "lessons_derive_hypothesis", "propose_block",
     "request_lockbox_eval", "registry_status", "params_status", "propose_criterion", "forward_status",
-    "log_exploration",
+    "log_exploration", "program_status",
 )
 
 # 이 서버에 절대 있어서는 안 되는 기능 (테스트가 도구 이름·설명에 대해 강제한다).
@@ -945,6 +945,28 @@ class ResearchTools:
                                       for p in list_proposals(root, status="pending")],
                 "note": "Read-only. Class ② criteria may only be proposed via propose_criterion (synthetic "
                         "calibration, anti-goalpost); approvals are human-only."}
+
+    @tool
+    def program_status(self) -> dict[str, Any]:
+        """자율 프로그램 상태 (읽기 전용): 단계·주기·대기열, 판정 데이터 예산(횟수만), 기준 묶음 잠금, 벌점 L."""
+        from btc_quant.params.ruleset import autonomy_cfg
+        from btc_quant.params.ruleset import status as rs_status
+        from btc_quant.research import program as P
+        from btc_quant.research.campaign import config_root
+        env = self.env()
+        root = config_root(env)
+        ac = autonomy_cfg(root)
+        st = P.load_state(env.root)
+        led = env.ledger
+        ps = ac.get("program_start")
+        rs = rs_status(root)
+        return {"phase": ac.get("phase"), "cycle": st.get("cycle"), "queue": [q["task"] for q in st.get("queue", [])][:10],
+                "program_start": ps, "verdict_budget": ac.get("verdict_budget"),
+                "val_used_in_program": led.val_uses_since(ps) if ps else 0,
+                "lockbox_openings": sum(1 for r in led.records("lockbox") if r.get("event") == "open"),
+                "loosenings_L": led.loosenings(since_ts=ps), "ruleset": {k: rs[k] for k in
+                                                                         ("latest_lock", "matches_latest", "lock_required")},
+                "note": "Read-only. Phase changes, ruleset locks, auto-apply and lockbox rounds are operator CLIs."}
 
     @tool
     def propose_criterion(self, key: str, candidates: list, motivation: str, references: list[str] | None = None,

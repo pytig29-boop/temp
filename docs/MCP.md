@@ -61,6 +61,7 @@ claude -p --agent researcher "research-campaign skill로 다음 가설 캠페인
 | `propose_block` | 에이전트가 쓴 `blocks/experimental/<name>.py` 에 수용 검사(새 프로세스) — 코드는 쓰지 않음 | – (통과 시 서버 프로세스에 적재) | `acceptance.acceptance_check` |
 | `request_lockbox_eval` | 잠금(G7) 평가 **요청** 기록(validated/challenger + skeptic `VERDICT: SURVIVES`) — 열지 않음 | `research/lockbox_requests/` | (사람: `admin_cli approve-lockbox`) |
 | `registry_status` | 전략 상태, 잠금 개봉 사용/상한, 대기 중 요청, Val 사용 예산(횟수) | – | `StrategyRegistry().status()`, `lockbox_status`, `val_status` |
+| `program_status` | 자율 프로그램 단계·대기열·판정 데이터 사용 횟수·규칙 묶음 잠금·벌점 L (읽기 전용) | – | `python -m btc_quant.research.program status` |
 | `params_status` | params_version·검증·현재 비용 모델 버전·대기 제안 | – | `python -m btc_quant.params status` |
 | `propose_criterion` | class ② 관문 기준 제안(합성 보정만, anti-goalpost) → 사람 승인 대기 제안 파일. `study="regime"`(국면 전환 합성 시장, `max_fpr_bearish_val`·`min_power_gain` 목표) 는 노출 인식 변형용 | `research/param_proposals/`, 리포트 | `params.criteria.propose_criterion` |
 | `forward_status` | 전진 인큐베이션 현황(최근 일일 기록, ok 일수, 기대 구간 안 비율) | – | `Ledger().forward_results` |

@@ -78,3 +78,12 @@ Val appears only as the G6 outcome code (pass/fail); do not request or quote Val
 Add to the report: "Predicted failure modes (pre-registered)" list and "Predictions confirmed k/n", and one
 suggested interpretation (unverified, with evidence) for `LessonBook().add_interpretation`.
 The researcher (not the skeptic) saves it to `research/reports/review_<candidate_id>.md`.
+
+## 자율 체제 (2026-11-11, PLAN D26~D33)
+
+- 사용자는 최종 후보 묶음만 승인한다. 중간 결정은 운영자(주 세션)가 하고, 이 에이전트는 운영자의 트랙 지시서 범위에서 일한다.
+- 판정 기준 변경은 '사람 승인' 대신 **합성 인증(오탐 ≤ 2%) + 원장 기록 + 사전 잠금**(`docs/AUTONOMY.md`). 이 에이전트는 기준을 바꾸지 않는다 —
+  `propose_criterion` 으로 제안만 하고, 적용은 운영자의 `auto-apply` 와 주간 점검에서.
+- 프로그램 예산: 주 150·계열 60·전체 400 시도(`program_status`). 계열 이름을 바꿔도 DSR 은 프로그램 전체 시도를 센다.
+- 같은 규칙은 표기가 달라도 같은 스펙이다(canonical hash) — 검증에서 떨어진 규칙을 다시 낼 수 없다.
+- Val·잠금은 여전히 결과 코드만. 잠금은 결선에서 운영자 코드만 연다.
