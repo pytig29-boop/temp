@@ -84,7 +84,8 @@ def final_flags(c: dict, z_dev: float, fin: dict, L: int = 0) -> dict:
                        and (c.get("full_calmar") or -9) > (c.get("full_bh_calmar") or 9))
     else:
         f["F5"] = True
-    f["final"] = all(f[k] for k in ("F1a", "F1b", "F1c", "F2", "F5"))
+    f["final_f1_f3"] = all(f[k] for k in ("F1a", "F1b", "F1c", "F2"))     # 인증 기준 (계획 §5.5: 최종 = F1~F3)
+    f["final"] = f["final_f1_f3"] and f["F5"]
     return f
 
 
@@ -96,18 +97,21 @@ def evaluate_record(rec: dict, pkg: dict, fin: dict, L: int = 0) -> dict:
     n_t1 = n_final = 0
     star_final = False
     finals = []
+    n_beat_bh_cnt: list = []
     for row in ev["cands"]:
         if not row["validated"]:
             continue
         n_t1 += 1
         c = next(x for x in by_pos[row["pos"]]["cands"] if x["rank"] == row["rank"])
         fl = final_flags(c, GR.dsr_z(c, row["n_trials"]), fin, L)
-        if fl["final"]:
+        if fl["final_f1_f3"] and fl["F5"]:
+            n_beat_bh_cnt.append(1)
+        if fl["final_f1_f3"]:
             n_final += 1
             finals.append((row["pos"], row["rank"]))
             star_final = star_final or row["is_star"]
     return {"t1": n_t1 > 0, "final": n_final > 0, "n_t1": n_t1, "n_final": n_final, "star_t1": ev["star_validated"],
-            "star_final": star_final, "finals": finals}
+            "star_final": star_final, "finals": finals, "final_beats_bh": len(n_beat_bh_cnt) > 0}
 
 
 # ============================================================== 은행 시장 생성기
@@ -367,7 +371,8 @@ def certify(bank: list[dict], pkg: dict, fin: dict, L: int = 0, base: tuple[dict
     for st in STRENGTHS:
         pl = [r for r in recs if r["kind"] in ("planted", "universe_planted") and abs(r["strength"] - st) < 1e-9]
         det[f"{st:g}"] = {"n": len(pl), "t1": sum(res[r["id"]]["t1"] for r in pl),
-                          "final": sum(res[r["id"]]["final"] for r in pl)}
+                          "final": sum(res[r["id"]]["final"] for r in pl),
+                          "final_and_beats_bh": sum(res[r["id"]]["final_beats_bh"] for r in pl)}
     d2, d3 = det["2"], det["3"]
     out["C6"] = {"detection": det,
                  "pass": (d2["n"] > 0 and d2["t1"] / d2["n"] >= 0.35 and d2["final"] / d2["n"] >= 0.25
