@@ -1,0 +1,3 @@
+label,family,entry,filters,n_events,p_signal,best_h,excess_bp,z,net_bp[coinone_conservative],net_bp[upbit_conservative],info_h,profile,n_events[BTC-KRW],n_events[XRP-KRW],n_events[ETH-KRW],significant,passed,fail_reason
+"donchian_breakout(lookback=48) & btc_trend_filter(span=42,band_bp=0.0)",xasset_btc_lead,donchian_breakout,btc_trend_filter,757,0.00582926,1440,61.275,2.88726,101.606,88.7144,1440,peaked,303,170,284,True,True,
+"donchian_breakout(lookback=48) & btc_trend_filter(span=90,band_bp=0.0)",xasset_btc_lead,donchian_breakout,btc_trend_filter,742,0.00146752,1440,62.2757,3.29668,103.566,90.6661,1440,peaked,302,160,280,True,True,

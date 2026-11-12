@@ -3,7 +3,7 @@
 > `btc_quant.research.lessons.render_markdown()` 생성물. **직접 편집 금지** (원본: `research/lessons/*.jsonl`).
 > 사실(Facts)은 파이프라인 결과에서 자동 추출되어 불변이다. 해석(Interpretations)은 AI 작성이며
 > 후속 캠페인으로 verified/refuted 되기 전까지 **unverified** 이다. Val/잠금은 결과 코드만.
-> 생성: 2026-11-12T02:00:42+00:00 · 사실 31 · 해석 16 · 사후분석 7 · 파생 23
+> 생성: 2026-11-12T03:18:27+00:00 · 사실 32 · 해석 17 · 사후분석 7 · 파생 23
 
 ## 실패 유형 (자동 분류)
 
@@ -29,6 +29,7 @@
 | `liq_meanrev` | 11 | 66 | passed 4, failed 7 | `NO_SIGNAL`×3, `COST_EATEN`×2, `PARAM_SPIKE`×1, `UNSTABLE`×1 |
 | `managed_hold` | 1 | 4 | failed 1 | `NO_SIGNAL`×1 |
 | `vol_breakout` | 16 | 102 | passed 7, failed 8, validated 1 | `PARAM_SPIKE`×2, `VAL_FAIL`×2, `NO_SIGNAL`×2, `SELECTION_BIAS`×1, `COST_EATEN`×1 |
+| `xasset_btc_lead` | 1 | 2 | passed 1 |  |
 | `xvenue_upbit_lead` | 3 | 16 | failed 2, passed 1 | `COST_EATEN`×1, `LOW_SAMPLE`×1 |
 
 ## 교훈 (사실 → 해석)
@@ -574,6 +575,24 @@
   - #1 `r1b_vol_breakout_donch_4h_u3_half_0dce65e919` SR_w=1.827 trades=554 first_failed=None → `None` [] · val=pass
 - 범위: coinone BTC-KRW 1m · dev 2021-01-01T00:00:00+00:00~2025-11-01T00:00:00+00:00 · 블록 donchian_breakout / [[]] · 재검토 기한 2027-05-11
 - 재검토 조건: Dev data period or segment boundaries change (new data, lockbox rolled into Dev/Val); venue or cost model changes (e.g. Coinone 0% fee promotion ends, Upbit fee changes); timeframe / decision interval changes (5m ↔ 1m); a block used here is re-implemented (new block version) or an engine bug is fixed; review date 2027-05-11 passes
+
+**해석 (AI, 검증 상태 표시)**
+
+- [UNVERIFIED] int-000017 (신뢰도 medium): The pooled 4h donchian(48) edge is carried mostly by the BTC sleeve (Dev sleeve Sharpe 1.82; Dev XRP+ETH-only sub-portfolio Sharpe 1.06 < required 1.49), and BTC 4h donchian(48) had already been screened on the same Dev data (camp-000010). XRP/ETH add diversification more than independent evidence; XRP's Dev median trade is -5 bp with 64% of its Dev PnL in 5 trades.
+  - 근거: skeptic review of camp-000034 (Dev only): per-sleeve Dev Sharpe BTC 1.82 / XRP 0.87 / ETH 0.68; Dev PnL shares 0.375/0.429/0.196; XRP top-5 trades 64% of Dev PnL; camp-000010 BTC 4h donchian 48 screen n 303 p 0.0005
+  - 검증 방법: Forward/paper after the design date: pooled Sharpe > 0 and XRP+ETH sub-portfolio Sharpe > 0.
+
+### fact-000032 · signal_screen `camp-000035` · family `xasset_btc_lead`
+
+**사실 (자동, 불변)**
+
+- 가설 hyp-000034: On the fixed Coinone universe [BTC-KRW, XRP-KRW, ETH-KRW] (pooled, per-asset matched null) at 4h decisions, donchian_breakout(48) entries taken only while Coinone BTC-KRW is in a 4h up-trend (close > EMA 42 or 90 bars = 7 or 15 days; experimental btc_trend_filter, aux coinone_btc) are followed by 8-48 h returns above the matched null, net of per-asset coinone_conservative cost.
+- 결과: **passed** · 주 실패 유형: `None` · 분포: –
+- 깔때기(전체 None 스펙): G1 None · SR_w>0 None · G4 None | 상위 None:  · Dev 생존 None
+  - `donchian_breakout(lookback=48) & btc_trend_filter(span=42,band_bp=0.0)` events=757 p=0.006 best_h=1440 → PASS
+  - `donchian_breakout(lookback=48) & btc_trend_filter(span=90,band_bp=0.0)` events=742 p=0.001 best_h=1440 → PASS
+- 범위: coinone None 1m · dev 2021-01-01T00:00:00+00:00~2025-11-01T00:00:00+00:00 · 블록 ['donchian_breakout'] / None · 재검토 기한 2027-05-11
+- 재검토 조건: Dev data period changes; venue/cost model changes; decision interval changes (bar_minutes)
 
 ## 파생 가설 (계열 상속)
 
