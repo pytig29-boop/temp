@@ -22,7 +22,7 @@
  "timeframe": "4h",
  "lookback_bars": 50,
  "aux": [],
- "restored": false,
+ "restored": true,
  "symbol": "ETH-KRW",
  "strategy_key": "r1b_vol_breakout_donch_4h_u3_half_0dce65e919_v1",
  "universe": [
