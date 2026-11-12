@@ -3,15 +3,11 @@
   "plan": "docs/prompts/autonomous_research_plan.md",
   "phase": "research",
   "plan_phase": "4",
-  "cycle": "R1",
+  "cycle": "R3-closed",
   "queue": [
     {
       "task": "paper 7-14d r1b_..._0dce65e919 (started 2026-11-12)",
       "added": "2026-11-12T02:03:10+00:00"
-    },
-    {
-      "task": "Phase 4 research program R1-R3",
-      "added": "2026-11-11T23:05:31+00:00"
     },
     {
       "task": "each resume: scripts/persist_runtime.sh then commit research/paper_runs (paper evidence must survive container loss)",
@@ -22,8 +18,12 @@
       "added": "2026-11-12T02:16:10+00:00"
     },
     {
-      "task": "R2 design: diversifying mechanism (not vol_breakout cluster). Options ranked: (1) track C BTC-led filter for XRP/ETH sleeves (needs aux=Coinone BTC for alt sleeves -> maintenance window + recertify); (2) track D 4h-trend-on dip buy (liq_meanrev release; 1h boll/rsi already NO_SIGNAL -> only with new decision interval 4h). Decide at weekly review 2026-11-18.",
-      "added": "2026-11-12T02:16:10+00:00"
+      "task": "after paper PASS (day 7 = 2026-11-19, or EXTEND to 14d = 2026-11-26): phase final -> final_verdict.run(1) -> lockbox auto-authorize (<=5) -> phase report -> final report §10 -> user approval of bundle",
+      "added": "2026-11-12T03:25:02+00:00"
+    },
+    {
+      "task": "report to user: guard hook floor/autonomy rule change still needs user approval (AUTONOMY.md deviation)",
+      "added": "2026-11-12T03:25:02+00:00"
     }
   ],
   "done": [
@@ -73,11 +73,23 @@
       "task": "judge r1b_..._0dce65e919",
       "done": "2026-11-12T02:15:46+00:00",
       "note": "PASS"
+    },
+    {
+      "task": "R2 design: diversifying mechanism (not vol_breakout cluster). Options ranked: (1) track C BTC-led filter for XRP/ETH sleeves (needs aux=Coinone BTC for alt sleeves -> maintenance window + recertify); (2) track D 4h-trend-on dip buy (liq_meanrev release; 1h boll/rsi already NO_SIGNAL -> only with new decision interval 4h). Decide at weekly review 2026-11-18.",
+      "added": "2026-11-12T02:16:10+00:00",
+      "done": "2026-11-12T03:25:02+00:00",
+      "note": "R1-R3 tracks A-D finished; see decisions.md 2026-11-12"
+    },
+    {
+      "task": "Phase 4 research program R1-R3",
+      "added": "2026-11-11T23:05:31+00:00",
+      "done": "2026-11-12T03:25:02+00:00",
+      "note": "R1-R3 tracks A-D finished; see decisions.md 2026-11-12"
     }
   ],
   "background": [],
   "notes": [],
-  "updated": "2026-11-12T03:18:03+00:00",
+  "updated": "2026-11-12T03:25:02+00:00",
   "maintenance": {
     "open": false,
     "reason": "",
