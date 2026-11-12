@@ -6,16 +6,24 @@
   "cycle": "R1",
   "queue": [
     {
+      "task": "skeptic review r1b_..._0dce65e919 (running)",
+      "added": "2026-11-12T02:03:10+00:00"
+    },
+    {
+      "task": "paper 7-14d r1b_..._0dce65e919 (started 2026-11-12)",
+      "added": "2026-11-12T02:03:10+00:00"
+    },
+    {
+      "task": "judge audit + dossier after skeptic",
+      "added": "2026-11-12T02:03:10+00:00"
+    },
+    {
+      "task": "R2: track C (BTC-led alt filter) screen; track B variants (atr_channel 4h) if budget",
+      "added": "2026-11-12T02:03:10+00:00"
+    },
+    {
       "task": "Phase 4 research program R1-R3",
       "added": "2026-11-11T23:05:31+00:00"
-    },
-    {
-      "task": "R1 track A: managed_hold screen → campaign (research/program/track_A_R1.md)",
-      "added": "2026-11-12T01:56:19+00:00"
-    },
-    {
-      "task": "R1 track B: 4h slow-trend screen (research/program/track_B_R1.md)",
-      "added": "2026-11-12T01:56:19+00:00"
     }
   ],
   "done": [
@@ -45,9 +53,19 @@
       "task": "Phase 3 dry run",
       "added": "2026-11-11T23:05:30+00:00",
       "done": "2026-11-12T01:56:19+00:00"
+    },
+    {
+      "task": "R1 track A screen camp-000032",
+      "done": "2026-11-12T02:03:10+00:00",
+      "note": "0/4 passed — no managed_hold campaign"
+    },
+    {
+      "task": "R1 track B screen camp-000033 + campaign camp-000034",
+      "done": "2026-11-12T02:03:10+00:00",
+      "note": "1 validated: r1b_vol_breakout_donch_4h_u3_half_0dce65e919"
     }
   ],
   "background": [],
   "notes": [],
-  "updated": "2026-11-12T01:56:19+00:00"
+  "updated": "2026-11-12T02:03:10+00:00"
 }

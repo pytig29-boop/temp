@@ -1,0 +1,46 @@
+{
+ "key": "r1b_vol_breakout_donch_4h_u3_half_0dce65e919_v1@BTC-KRW",
+ "role": "spec",
+ "grade": "A",
+ "source": "strategies/validated/r1b_vol_breakout_donch_4h_u3_half_0dce65e919_v1.yaml",
+ "cost": "coinone_conservative",
+ "position_scale": 1.0,
+ "tier": "T1",
+ "capital_fraction": 0.0,
+ "effective_capital_fraction": 0.0,
+ "limits": {
+  "daily_loss": -0.03,
+  "weekly_loss": -0.06,
+  "max_drawdown": -0.12,
+  "max_trades_per_day": 5,
+  "stale_seconds": 120.0,
+  "max_api_errors": 3,
+  "price_deviation_threshold": 0.01,
+  "expected_fee_rate": 0.0,
+  "fee_tolerance": 1e-06
+ },
+ "timeframe": "4h",
+ "lookback_bars": 50,
+ "aux": [],
+ "restored": false,
+ "symbol": "BTC-KRW",
+ "strategy_key": "r1b_vol_breakout_donch_4h_u3_half_0dce65e919_v1",
+ "universe": [
+  "BTC-KRW",
+  "XRP-KRW",
+  "ETH-KRW"
+ ],
+ "n_sleeves": 3,
+ "sleeve_weight": 0.3333333333333333,
+ "portfolio_limits": {
+  "daily_loss": -0.03,
+  "weekly_loss": -0.06,
+  "max_drawdown": -0.12,
+  "max_trades_per_day": 5,
+  "stale_seconds": 120.0,
+  "max_api_errors": 3,
+  "price_deviation_threshold": 0.01,
+  "expected_fee_rate": 0.0,
+  "fee_tolerance": 1e-06
+ }
+}

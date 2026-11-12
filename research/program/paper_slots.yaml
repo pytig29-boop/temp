@@ -1,0 +1,5 @@
+# T1 페이퍼 후보 (autonomous_research_plan §9.3). scripts/paper_watchdog.sh 가 읽는다.
+slots:
+  - spec: strategies/validated/r1b_vol_breakout_donch_4h_u3_half_0dce65e919_v1.yaml
+    started: '2026-11-12'
+    campaign: camp-000034

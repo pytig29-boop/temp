@@ -1,0 +1,19 @@
+id: r1b_vol_breakout_donch_4h_u3_half_0dce65e919
+entry:
+  block: donchian_breakout
+  params:
+    lookback: 48
+exit:
+  max_hold_min: 1440
+  signal_exit: null
+  stop_loss_atr: 2.0
+  take_profit_atr: 3.0
+filters: []
+version: 1
+timeframe: 4h
+universe:
+- BTC-KRW
+- XRP-KRW
+- ETH-KRW
+sizing:
+  entry_fraction: 0.5
