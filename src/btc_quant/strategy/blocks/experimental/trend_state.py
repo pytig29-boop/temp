@@ -78,3 +78,22 @@ def trend_ema_4h(bars: pd.DataFrame, ctx: Context, span: int = 180, band_bp: flo
 )
 def trend_ema_off(bars: pd.DataFrame, ctx: Context, span: int = 180, band_bp: float = 0.0) -> pd.Series:
     return as_signal(_ratio(bars, span) < 1.0 - float(band_bp) / 1e4, bars.index, warmup=int(span))
+
+
+_FILTER_RATIONALE = ("트랙 D(2026-11-12, 자율 연구 R2): 상승 추세 안의 다일 눌림목 매수. 4h 결정 봉에서는 공식 필터 "
+                     "trend_regime_1h 가 의미 없다(1h 재표본이 4시간에 한 번뿐 → 항상 False, 캠페인 검사가 거부). "
+                     "같은 자산의 결정 봉 종가 > EMA(span)·(1+band_bp/1e4) 를 필터로 쓴다 — trend_ema_4h 진입 블록과 "
+                     "같은 계산을 필터 자리에 둔 것. 메커니즘 M4(추세 속 되돌림은 디레버리징·유동성 주도라 추세 자금이 "
+                     "다시 들어오면 회복). 파라미터는 span·band_bp 의 사전 선언 격자뿐, 결과를 보고 고르지 않는다.")
+
+
+@REGISTRY.register_experimental(
+    "filter",
+    grid={"span": SPANS[:3], "band_bp": BANDS_BP[:3]},
+    description=("자기 자산 장기 추세 켜짐(필터): close_t > EMA(close, span)_t·(1 + band_bp/1e4). 앞 span 봉 False. "
+                 "4h 결정 봉용 (trend_regime_1h 는 1h 이하 전용)."),
+    rationale=_FILTER_RATIONALE, author=AUTHOR, created="2026-11-12",
+    lookback_bars=_ema_lookback, tf_note=_TF_NOTE,
+)
+def trend_ema_filter(bars: pd.DataFrame, ctx: Context, span: int = 42, band_bp: float = 0.0) -> pd.Series:
+    return as_signal(_ratio(bars, span) > 1.0 + float(band_bp) / 1e4, bars.index, warmup=int(span))

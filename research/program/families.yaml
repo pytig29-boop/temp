@@ -1,0 +1,15 @@
+# 계열 해제 기록 (autonomous_research_plan §3 · §12). lessons.trial_budget 이 읽는다.
+liq_meanrev:
+  released: false
+  ts: '2026-11-12T03:40:00+00:00'
+  reason: 'track D (plan §7 row 5): re-examine condition "decision interval change"
+    met - prior freeze (COST_EATEN x2, camp-000028/029) was 5m/15m maker ladders;
+    this tests 4h market-order dip buys inside an up-trend, no ladder. Condition for
+    track D (fewer than 2 T1 candidates from A-C) holds: 1.'
+  mechanism: M4 multi-day pullback inside up-trend (deleveraging, trend flows resume)
+  reexamine_if: screen fails -> refreeze; no 5m/15m ladder variants under this release
+  scope: 4h decisions only
+  refrozen:
+    ts: '2026-11-12T03:45:00+00:00'
+    reason: 'track D screen camp-000037 0/2 passed (bollinger+trend n 150 excess -1
+      bp; rsi+trend n 17): release condition "screen fails -> refreeze"'

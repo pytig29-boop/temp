@@ -1,0 +1,826 @@
+{
+  "campaign_id": "camp-000037",
+  "hypothesis_id": "hyp-000036",
+  "kind": "signal_screen",
+  "period": {
+    "segment": "dev",
+    "start": "2021-01-01T00:00:00+00:00",
+    "end": "2025-11-01T00:00:00+00:00"
+  },
+  "data_snapshot": "snap-93b066dd27ee41f0a0ec|XRP-KRW:snap-b636892dd83e17554616|ETH-KRW:snap-b46925c3bb3e2bfd5239",
+  "code_commit": "9f823ac78105381e738070c2440cd0d43c9c6bd5+dirty",
+  "params": {
+    "params_version": "7f1999c38d57",
+    "cost_versions": {
+      "coinone_base": 2,
+      "coinone_base@ETH-KRW": 1,
+      "coinone_base@XRP-KRW": 1,
+      "coinone_conservative": 2,
+      "coinone_conservative@ETH-KRW": 1,
+      "coinone_conservative@XRP-KRW": 1,
+      "coinone_stress": 2,
+      "coinone_stress@ETH-KRW": 1,
+      "coinone_stress@XRP-KRW": 2,
+      "upbit_base": 1,
+      "upbit_base@ETH-KRW": 1,
+      "upbit_base@XRP-KRW": 1,
+      "upbit_conservative": 1,
+      "upbit_conservative@ETH-KRW": 1,
+      "upbit_conservative@XRP-KRW": 1,
+      "upbit_stress": 1,
+      "upbit_stress@ETH-KRW": 1,
+      "upbit_stress@XRP-KRW": 1
+    },
+    "registry_version": 1,
+    "n_params": {
+      "1": 37,
+      "2": 117,
+      "3": 15
+    }
+  },
+  "decision": {
+    "method": "bh",
+    "alpha": 0.1,
+    "m_current": 2,
+    "m_prior": 30,
+    "m_total": 32,
+    "primary_horizons": [
+      480,
+      1440,
+      2880
+    ],
+    "rule": "pass ⇔ BH(α=0.1) rejects p_signal = min(1, 3·min_H p_H) over the screening family, n_events ≥ 300, mean net of coinone_conservative > 0 at the best primary horizon",
+    "n_passed": 0
+  },
+  "studies": [
+    {
+      "bar_minutes": 240,
+      "horizons": [
+        240,
+        480,
+        1440,
+        2880
+      ],
+      "primary_horizons": [
+        480,
+        1440,
+        2880
+      ],
+      "min_gap_min": 480.0,
+      "n_null": 1000,
+      "seed": 0,
+      "stratify": "hour_vol",
+      "costs": {
+        "coinone_conservative": 0.00039992001599675753,
+        "upbit_conservative": 0.0017983810973358771
+      },
+      "n_pool": 14656,
+      "n_raw_triggers": 208,
+      "n_events": 150,
+      "event_rate": 0.014192139737991267,
+      "first_event": "2021-02-07T16:00:00+00:00",
+      "last_event": "2025-10-30T00:00:00+00:00",
+      "min_events": 300,
+      "enough_events": false,
+      "universe": [
+        "BTC-KRW",
+        "XRP-KRW",
+        "ETH-KRW"
+      ],
+      "pooling": "events pooled across assets; null matched per asset",
+      "costs_by_asset": {
+        "BTC-KRW": {
+          "coinone_conservative": 0.00039992001599675753,
+          "upbit_conservative": 0.0017983810973358771
+        },
+        "XRP-KRW": {
+          "coinone_conservative": 0.0009995002498749406,
+          "upbit_conservative": 0.002267425751864005
+        },
+        "ETH-KRW": {
+          "coinone_conservative": 0.000799680127948732,
+          "upbit_conservative": 0.0019481001396900455
+        }
+      },
+      "table": [
+        {
+          "horizon": 240,
+          "n": 150,
+          "mean": 0.0009119798643648254,
+          "median": 0.0010294659854906962,
+          "std": 0.01467294057632114,
+          "hit_rate": 0.5533333333333333,
+          "se_iid": 0.001198040581272191,
+          "se_hac": 0.0012636751966526012,
+          "t_hac": 0.7216885057019435,
+          "p_zero": 0.23524300526129416,
+          "null_mean": 0.0009392939879546722,
+          "null_sd": 0.0013612937191614615,
+          "null_p05": -0.0013136657816561282,
+          "null_p95": 0.0032309305820220078,
+          "excess": -2.731412358984676e-05,
+          "z": -0.02006482745448344,
+          "p_value": 0.5080041709406803,
+          "p_null_emp": 0.5114885114885115,
+          "null_percentile": 0.489,
+          "mfe_mean": 0.010840446148948297,
+          "mfe_median": 0.008386575050730372,
+          "mae_mean": -0.014690145238003455,
+          "mae_median": -0.008225631425297086,
+          "mfe_q75": 0.01377656797997201,
+          "mae_q25": -0.017203490707460495,
+          "mean_net[coinone_conservative]": 0.00023651603526393097,
+          "hit_net[coinone_conservative]": 0.5133333333333333,
+          "t_net[coinone_conservative]": 0.1871652113537146,
+          "mean_net[upbit_conservative]": -0.0010369484814600086,
+          "hit_net[upbit_conservative]": 0.4533333333333333,
+          "t_net[upbit_conservative]": -0.8205814945223441
+        },
+        {
+          "horizon": 480,
+          "n": 150,
+          "mean": -0.0014404566433853469,
+          "median": -0.0007961751993860178,
+          "std": 0.022633832176092845,
+          "hit_rate": 0.48,
+          "se_iid": 0.0018480446585071762,
+          "se_hac": 0.0020565949898759457,
+          "t_hac": -0.7004085152771065,
+          "p_zero": 0.7581638900385902,
+          "null_mean": 0.0018503550661695385,
+          "null_sd": 0.0019301579093673605,
+          "null_p05": -0.0011345870892715,
+          "null_p95": 0.0051160702131950635,
+          "excess": -0.0032908117095548856,
+          "z": -1.6001262892084493,
+          "p_value": 0.9452147149896544,
+          "p_null_emp": 0.9630369630369631,
+          "null_percentile": 0.037,
+          "mfe_mean": 0.014767729109897501,
+          "mfe_median": 0.010054226688111956,
+          "mae_mean": -0.020695122385885095,
+          "mae_median": -0.012928670035473488,
+          "mfe_q75": 0.01798318673596344,
+          "mae_q25": -0.02313051343617059,
+          "mean_net[coinone_conservative]": -0.0021139478528357084,
+          "hit_net[coinone_conservative]": 0.47333333333333333,
+          "t_net[coinone_conservative]": -1.0278872910038657,
+          "mean_net[upbit_conservative]": -0.0033844516110656028,
+          "hit_net[upbit_conservative]": 0.4266666666666667,
+          "t_net[upbit_conservative]": -1.6456578119300747
+        },
+        {
+          "horizon": 1440,
+          "n": 150,
+          "mean": 0.004738704464169587,
+          "median": 0.005890696165891329,
+          "std": 0.03442207015132693,
+          "hit_rate": 0.6,
+          "se_iid": 0.002810550258701277,
+          "se_hac": 0.0030372093111337433,
+          "t_hac": 1.560216626097693,
+          "p_zero": 0.05935434896566953,
+          "null_mean": 0.0048644000103371925,
+          "null_sd": 0.0036657562198869798,
+          "null_p05": -0.0010823226909385775,
+          "null_p95": 0.010727339386810837,
+          "excess": -0.00012569554616760539,
+          "z": -0.034289117613904165,
+          "p_value": 0.5136766986728838,
+          "p_null_emp": 0.5164835164835165,
+          "null_percentile": 0.484,
+          "mfe_mean": 0.026755350830763223,
+          "mfe_median": 0.019601354203188204,
+          "mae_mean": -0.03024004963277443,
+          "mae_median": -0.018550008964078768,
+          "mfe_q75": 0.03524464079720979,
+          "mae_q25": -0.038993770227115226,
+          "mean_net[coinone_conservative]": 0.004060250742451732,
+          "hit_net[coinone_conservative]": 0.6,
+          "t_net[coinone_conservative]": 1.3368359986148282,
+          "mean_net[upbit_conservative]": 0.002781969468318703,
+          "hit_net[upbit_conservative]": 0.5733333333333334,
+          "t_net[upbit_conservative]": 0.9159623797150275
+        },
+        {
+          "horizon": 2880,
+          "n": 150,
+          "mean": 0.007345665113647782,
+          "median": 0.004264630309803397,
+          "std": 0.050878420463203976,
+          "hit_rate": 0.56,
+          "se_iid": 0.00415420563512093,
+          "se_hac": 0.005274832914560555,
+          "t_hac": 1.3925872596591522,
+          "p_zero": 0.08187231892153396,
+          "null_mean": 0.00955477063226628,
+          "null_sd": 0.005267379827760254,
+          "null_p05": 0.0009196155963155504,
+          "null_p95": 0.018492921788661847,
+          "excess": -0.0022091055186184982,
+          "z": -0.4188010415496807,
+          "p_value": 0.6623192282065009,
+          "p_null_emp": 0.6623376623376623,
+          "null_percentile": 0.338,
+          "mfe_mean": 0.03975413914490439,
+          "mfe_median": 0.026408379307236607,
+          "mae_mean": -0.03818871758275065,
+          "mae_median": -0.026101777733791742,
+          "mfe_q75": 0.05085703104444489,
+          "mae_q25": -0.04699090740193651,
+          "mean_net[coinone_conservative]": 0.006666013295839748,
+          "hit_net[coinone_conservative]": 0.56,
+          "t_net[coinone_conservative]": 1.2637392318985126,
+          "mean_net[upbit_conservative]": 0.005384397978175527,
+          "hit_net[upbit_conservative]": 0.5533333333333333,
+          "t_net[upbit_conservative]": 1.020771286103211
+        }
+      ],
+      "p_signal": 1.0,
+      "best_primary_horizon": 1440,
+      "info_horizon": null,
+      "saturation_horizon": null,
+      "profile": "none (excess ≤ 0 at all horizons)",
+      "suggestion": null,
+      "per_asset": {
+        "BTC-KRW": {
+          "n_events": 61,
+          "n_pool": 5446,
+          "n_raw_triggers": 81,
+          "vol_tercile_edges": [
+            0.0003357089568017834,
+            0.000546145514956663
+          ],
+          "p_signal": 1.0,
+          "info_horizon": 2880,
+          "best_primary_horizon": 2880,
+          "table": [
+            {
+              "horizon": 240,
+              "mean": -0.0009427536636237663,
+              "excess": -0.0014834663870231894,
+              "z": -1.0299025731811007,
+              "p_value": 0.8484721286489174
+            },
+            {
+              "horizon": 480,
+              "mean": -0.00197083732259748,
+              "excess": -0.0033064220831989103,
+              "z": -1.4887249846987816,
+              "p_value": 0.9317200984941596
+            },
+            {
+              "horizon": 1440,
+              "mean": 0.001390419214079396,
+              "excess": -0.001746153181458617,
+              "z": -0.4877408751330019,
+              "p_value": 0.6871333023708038
+            },
+            {
+              "horizon": 2880,
+              "mean": 0.005766388903268323,
+              "excess": 5.975314888212804e-05,
+              "z": 0.012126031577137536,
+              "p_value": 0.4951625318614241
+            }
+          ]
+        },
+        "XRP-KRW": {
+          "n_events": 28,
+          "n_pool": 4522,
+          "n_raw_triggers": 42,
+          "vol_tercile_edges": [
+            0.0006424630050149843,
+            0.001074511151659078
+          ],
+          "p_signal": 1.0,
+          "info_horizon": 240,
+          "best_primary_horizon": 1440,
+          "table": [
+            {
+              "horizon": 240,
+              "mean": 0.004571141213807893,
+              "excess": 0.002445040353771064,
+              "z": 0.478377566426219,
+              "p_value": 0.3161907488397407
+            },
+            {
+              "horizon": 480,
+              "mean": -0.002360742471428471,
+              "excess": -0.005741737307323431,
+              "z": -0.8273692743323384,
+              "p_value": 0.7959861048836385
+            },
+            {
+              "horizon": 1440,
+              "mean": 0.01285641905631025,
+              "excess": 0.0043585352109880675,
+              "z": 0.30844519811923266,
+              "p_value": 0.37887179708428415
+            },
+            {
+              "horizon": 2880,
+              "mean": 0.008158237444448832,
+              "excess": -0.009761171955601408,
+              "z": -0.4690060444876832,
+              "p_value": 0.6804673422456917
+            }
+          ]
+        },
+        "ETH-KRW": {
+          "n_events": 61,
+          "n_pool": 4688,
+          "n_raw_triggers": 85,
+          "vol_tercile_edges": [
+            0.0005287932307913579,
+            0.0008305244253277925
+          ],
+          "p_signal": 1.0,
+          "info_horizon": 240,
+          "best_primary_horizon": 1440,
+          "table": [
+            {
+              "horizon": 240,
+              "mean": 0.0010870983467074192,
+              "excess": 0.0002939869043335697,
+              "z": 0.14074603902714578,
+              "p_value": 0.4440352865957837
+            },
+            {
+              "horizon": 480,
+              "mean": -0.000487649682448501,
+              "excess": -0.002150186307426938,
+              "z": -0.7373970883253613,
+              "p_value": 0.7695595471931922
+            },
+            {
+              "horizon": 1440,
+              "mean": 0.004360825639178819,
+              "excess": -0.0005635733403906718,
+              "z": -0.09290503120211323,
+              "p_value": 0.5370104956417298
+            },
+            {
+              "horizon": 2880,
+              "mean": 0.008551957303331678,
+              "excess": -0.0010114418871761486,
+              "z": -0.13135888337222662,
+              "p_value": 0.5522542934618151
+            }
+          ]
+        }
+      },
+      "strata_events": {
+        "BTC-KRW": {
+          "4": 3,
+          "5": 7,
+          "15": 2,
+          "16": 3,
+          "17": 6,
+          "27": 1,
+          "28": 2,
+          "29": 5,
+          "39": 4,
+          "40": 2,
+          "41": 8,
+          "51": 2,
+          "52": 3,
+          "53": 4,
+          "64": 5,
+          "65": 4
+        },
+        "XRP-KRW": {
+          "3": 2,
+          "5": 4,
+          "17": 3,
+          "28": 2,
+          "29": 5,
+          "40": 1,
+          "41": 5,
+          "52": 1,
+          "63": 1,
+          "64": 2,
+          "65": 2
+        },
+        "ETH-KRW": {
+          "5": 7,
+          "16": 4,
+          "17": 8,
+          "27": 1,
+          "28": 3,
+          "29": 7,
+          "39": 3,
+          "40": 3,
+          "41": 5,
+          "51": 1,
+          "52": 2,
+          "53": 5,
+          "63": 1,
+          "64": 5,
+          "65": 6
+        }
+      },
+      "runtime_sec": 0.32,
+      "entry": {
+        "block": "bollinger_z_revert",
+        "params": {
+          "window": 24,
+          "z": 2.0
+        }
+      },
+      "filters": [
+        {
+          "block": "trend_ema_filter",
+          "params": {
+            "span": 90,
+            "band_bp": 0.0
+          }
+        }
+      ],
+      "label": "bollinger_z_revert(window=24,z=2.0) & trend_ema_filter(span=90,band_bp=0.0)",
+      "family": "liq_meanrev",
+      "decision": {
+        "significant": false,
+        "net_positive": true,
+        "passed": false,
+        "fail_reason": "not significant after correction"
+      }
+    },
+    {
+      "bar_minutes": 240,
+      "horizons": [
+        240,
+        480,
+        1440,
+        2880
+      ],
+      "primary_horizons": [
+        480,
+        1440,
+        2880
+      ],
+      "min_gap_min": 480.0,
+      "n_null": 1000,
+      "seed": 1,
+      "stratify": "hour_vol",
+      "costs": {
+        "coinone_conservative": 0.00039992001599675753,
+        "upbit_conservative": 0.0017983810973358771
+      },
+      "n_pool": 14656,
+      "n_raw_triggers": 17,
+      "n_events": 17,
+      "event_rate": 0.001159934497816594,
+      "first_event": "2021-04-18T16:00:00+00:00",
+      "last_event": "2025-07-24T12:00:00+00:00",
+      "min_events": 300,
+      "enough_events": false,
+      "universe": [
+        "BTC-KRW",
+        "XRP-KRW",
+        "ETH-KRW"
+      ],
+      "pooling": "events pooled across assets; null matched per asset",
+      "costs_by_asset": {
+        "BTC-KRW": {
+          "coinone_conservative": 0.00039992001599675753,
+          "upbit_conservative": 0.0017983810973358771
+        },
+        "XRP-KRW": {
+          "coinone_conservative": 0.0009995002498749406,
+          "upbit_conservative": 0.002267425751864005
+        },
+        "ETH-KRW": {
+          "coinone_conservative": 0.000799680127948732,
+          "upbit_conservative": 0.0019481001396900455
+        }
+      },
+      "table": [
+        {
+          "horizon": 240,
+          "n": 17,
+          "mean": -0.002386268208496059,
+          "median": -0.003057770012012795,
+          "std": 0.015268247157487863,
+          "hit_rate": 0.4117647058823529,
+          "se_iid": 0.0037030938675505333,
+          "se_hac": 0.003627656849390736,
+          "t_hac": -0.6577987686174981,
+          "p_zero": 0.7446662771192272,
+          "null_mean": 0.0006716705249374235,
+          "null_sd": 0.004527969025657046,
+          "null_p05": -0.005553322155060715,
+          "null_p95": 0.007349172817583846,
+          "excess": -0.0030579387334334824,
+          "z": -0.6753444460653638,
+          "p_value": 0.7502715240188726,
+          "p_null_emp": 0.7802197802197802,
+          "null_percentile": 0.22,
+          "mfe_mean": 0.010901436396410405,
+          "mfe_median": 0.007123352724682341,
+          "mae_mean": -0.014479377686808455,
+          "mae_median": -0.008773853915332364,
+          "mfe_q75": 0.017480194224380297,
+          "mae_q25": -0.017470145953118132,
+          "mean_net[coinone_conservative]": -0.0030771932000477997,
+          "hit_net[coinone_conservative]": 0.4117647058823529,
+          "t_net[coinone_conservative]": -0.8482591732910497,
+          "mean_net[upbit_conservative]": -0.004361236939733722,
+          "hit_net[upbit_conservative]": 0.4117647058823529,
+          "t_net[upbit_conservative]": -1.2022187105338231
+        },
+        {
+          "horizon": 480,
+          "n": 17,
+          "mean": 0.0037357101847008364,
+          "median": 0.00892249012396129,
+          "std": 0.03249339236314159,
+          "hit_rate": 0.7058823529411765,
+          "se_iid": 0.007880805226345353,
+          "se_hac": 0.008806978999995973,
+          "t_hac": 0.4241761204043457,
+          "p_zero": 0.33571868733092464,
+          "null_mean": 0.001689504598700283,
+          "null_sd": 0.005904956814463647,
+          "null_p05": -0.00702979980816321,
+          "null_p95": 0.010603089439980432,
+          "excess": 0.0020462055860005534,
+          "z": 0.23233910129699287,
+          "p_value": 0.40813732239096534,
+          "p_null_emp": 0.34465534465534464,
+          "null_percentile": 0.656,
+          "mfe_mean": 0.02115511354495798,
+          "mfe_median": 0.013694163677861138,
+          "mae_mean": -0.021250340173951346,
+          "mae_median": -0.01668597914252612,
+          "mfe_q75": 0.026094648385670105,
+          "mae_q25": -0.02068749999999997,
+          "mean_net[coinone_conservative]": 0.0030386645679652906,
+          "hit_net[coinone_conservative]": 0.7058823529411765,
+          "t_net[coinone_conservative]": 0.3450291601656686,
+          "mean_net[upbit_conservative]": 0.001746673464167145,
+          "hit_net[upbit_conservative]": 0.5882352941176471,
+          "t_net[upbit_conservative]": 0.19832833303769018
+        },
+        {
+          "horizon": 1440,
+          "n": 17,
+          "mean": 0.004568572594725827,
+          "median": -0.003783749118194013,
+          "std": 0.04146145829807505,
+          "hit_rate": 0.47058823529411764,
+          "se_iid": 0.010055880703241487,
+          "se_hac": 0.011178505772658847,
+          "t_hac": 0.40869260057099527,
+          "p_zero": 0.34138263231683763,
+          "null_mean": 0.004772721239700306,
+          "null_sd": 0.010926738316586517,
+          "null_p05": -0.011287898037375423,
+          "null_p95": 0.023975358923840152,
+          "excess": -0.00020414864497447956,
+          "z": -0.018262605855050885,
+          "p_value": 0.5072853206535783,
+          "p_null_emp": 0.47652347652347654,
+          "null_percentile": 0.524,
+          "mfe_mean": 0.035113975643676305,
+          "mfe_median": 0.021090372245070155,
+          "mae_mean": -0.03347746677632032,
+          "mae_median": -0.02068749999999997,
+          "mfe_q75": 0.051939058171745156,
+          "mae_q25": -0.04302719231189267,
+          "mean_net[coinone_conservative]": 0.003872896808520236,
+          "hit_net[coinone_conservative]": 0.4117647058823529,
+          "t_net[coinone_conservative]": 0.34645925737166333,
+          "mean_net[upbit_conservative]": 0.0025800430837562365,
+          "hit_net[upbit_conservative]": 0.4117647058823529,
+          "t_net[upbit_conservative]": 0.2308039317801027
+        },
+        {
+          "horizon": 2880,
+          "n": 17,
+          "mean": -0.00256013065383771,
+          "median": 0.0027590830561357027,
+          "std": 0.06264902533309,
+          "hit_rate": 0.5294117647058824,
+          "se_iid": 0.01519462051707804,
+          "se_hac": 0.01621584906754172,
+          "t_hac": -0.15787829814981247,
+          "p_zero": 0.5627236504274328,
+          "null_mean": 0.008978832293772644,
+          "null_sd": 0.01656399680525874,
+          "null_p05": -0.014423618617781558,
+          "null_p95": 0.03871794780288203,
+          "excess": -0.011538962947610355,
+          "z": -0.6966291459285336,
+          "p_value": 0.756982544541811,
+          "p_null_emp": 0.7552447552447552,
+          "null_percentile": 0.245,
+          "mfe_mean": 0.0444190009476471,
+          "mfe_median": 0.028544906010675275,
+          "mae_mean": -0.05132084708849871,
+          "mae_median": -0.029849220546894983,
+          "mfe_q75": 0.051939058171745156,
+          "mae_q25": -0.04380069524913088,
+          "mean_net[coinone_conservative]": -0.003252401583630826,
+          "hit_net[coinone_conservative]": 0.5294117647058824,
+          "t_net[coinone_conservative]": -0.20056930538043555,
+          "mean_net[upbit_conservative]": -0.004535854152869011,
+          "hit_net[upbit_conservative]": 0.5294117647058824,
+          "t_net[upbit_conservative]": -0.2797173391276905
+        }
+      ],
+      "p_signal": 1.0,
+      "best_primary_horizon": 480,
+      "info_horizon": 480,
+      "saturation_horizon": 480,
+      "profile": "peaked",
+      "suggestion": {
+        "max_hold_min": 480,
+        "basis_horizon": 480,
+        "tp_pct_q50_mfe": 1.3694163677861138,
+        "sl_pct_q75_absmae": 2.068749999999997,
+        "atr_window": 14,
+        "atr_pct_median": 2.2229595222295955,
+        "tp_atr": 0.8243206134673133,
+        "sl_atr": 0.8587533156498679,
+        "note": "suggestions from MFE/MAE quantiles (not optimized); fix before the exit campaign"
+      },
+      "per_asset": {
+        "BTC-KRW": {
+          "n_events": 7,
+          "n_pool": 5446,
+          "n_raw_triggers": 7,
+          "vol_tercile_edges": [
+            0.0003357089568017834,
+            0.000546145514956663
+          ],
+          "p_signal": 0.40785913495736326,
+          "info_horizon": 480,
+          "best_primary_horizon": 480,
+          "table": [
+            {
+              "horizon": 240,
+              "mean": 0.004278431831007924,
+              "excess": 0.004490152237296314,
+              "z": 0.8515302752047033,
+              "p_value": 0.19723742645191267
+            },
+            {
+              "horizon": 480,
+              "mean": 0.005192670048864383,
+              "excess": 0.005029009922058189,
+              "z": 1.0986836193368468,
+              "p_value": 0.13595304498578775
+            },
+            {
+              "horizon": 1440,
+              "mean": 0.010772099759825024,
+              "excess": 0.008819164833147123,
+              "z": 1.0274385077909955,
+              "p_value": 0.1521070134122603
+            },
+            {
+              "horizon": 2880,
+              "mean": -0.0020750400975713757,
+              "excess": -0.005756129174630914,
+              "z": -0.46660803294379066,
+              "p_value": 0.679609830637297
+            }
+          ]
+        },
+        "XRP-KRW": {
+          "n_events": 5,
+          "n_pool": 4522,
+          "n_raw_triggers": 5,
+          "vol_tercile_edges": [
+            0.0006424630050149843,
+            0.001074511151659078
+          ],
+          "p_signal": 0.5637538381058531,
+          "info_horizon": 480,
+          "best_primary_horizon": 480,
+          "table": [
+            {
+              "horizon": 240,
+              "mean": -0.0052091335194746295,
+              "excess": -0.00752872401293889,
+              "z": -0.5768320179139053,
+              "p_value": 0.717973530914674
+            },
+            {
+              "horizon": 480,
+              "mean": 0.018195260196721064,
+              "excess": 0.014806793824079293,
+              "z": 0.8855948419454945,
+              "p_value": 0.1879179460352844
+            },
+            {
+              "horizon": 1440,
+              "mean": -0.0008183251432499095,
+              "excess": -0.00882924139194442,
+              "z": -0.29013306520257937,
+              "p_value": 0.6141427795954989
+            },
+            {
+              "horizon": 2880,
+              "mean": 0.0022630682870203866,
+              "excess": -0.014238629121348063,
+              "z": -0.3046078295309943,
+              "p_value": 0.6196675719257446
+            }
+          ]
+        },
+        "ETH-KRW": {
+          "n_events": 5,
+          "n_pool": 4688,
+          "n_raw_triggers": 5,
+          "vol_tercile_edges": [
+            0.0005287932307913579,
+            0.0008305244253277925
+          ],
+          "p_signal": 1.0,
+          "info_horizon": null,
+          "best_primary_horizon": 1440,
+          "table": [
+            {
+              "horizon": 240,
+              "mean": -0.008893982952823065,
+              "excess": -0.009154480812949792,
+              "z": -1.2117681492821115,
+              "p_value": 0.8871994281405005
+            },
+            {
+              "horizon": 480,
+              "mean": -0.012763583637148357,
+              "excess": -0.014890308722558877,
+              "z": -0.6233617902980279,
+              "p_value": 0.7334765993980739
+            },
+            {
+              "horizon": 1440,
+              "mean": 0.001270532301562688,
+              "excess": -0.00421169476737478,
+              "z": -0.1469370667350459,
+              "p_value": 0.5584091527902683
+            },
+            {
+              "horizon": 2880,
+              "mean": -0.008062456373468673,
+              "excess": -0.01693526405604386,
+              "z": -0.33115196758309257,
+              "p_value": 0.629735150263965
+            }
+          ]
+        }
+      },
+      "strata_events": {
+        "BTC-KRW": {
+          "5": 2,
+          "15": 1,
+          "27": 1,
+          "28": 1,
+          "40": 1,
+          "51": 1
+        },
+        "XRP-KRW": {
+          "4": 1,
+          "5": 2,
+          "16": 1,
+          "65": 1
+        },
+        "ETH-KRW": {
+          "5": 1,
+          "27": 1,
+          "29": 1,
+          "53": 1,
+          "63": 1
+        }
+      },
+      "runtime_sec": 0.384,
+      "entry": {
+        "block": "rsi_oversold_bounce",
+        "params": {
+          "period": 14,
+          "level": 30
+        }
+      },
+      "filters": [
+        {
+          "block": "trend_ema_filter",
+          "params": {
+            "span": 90,
+            "band_bp": 0.0
+          }
+        }
+      ],
+      "label": "rsi_oversold_bounce(period=14,level=30) & trend_ema_filter(span=90,band_bp=0.0)",
+      "family": "liq_meanrev",
+      "decision": {
+        "significant": false,
+        "net_positive": true,
+        "passed": false,
+        "fail_reason": "not significant after correction"
+      }
+    }
+  ]
+}

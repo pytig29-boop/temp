@@ -3,7 +3,7 @@
 > `btc_quant.research.lessons.render_markdown()` 생성물. **직접 편집 금지** (원본: `research/lessons/*.jsonl`).
 > 사실(Facts)은 파이프라인 결과에서 자동 추출되어 불변이다. 해석(Interpretations)은 AI 작성이며
 > 후속 캠페인으로 verified/refuted 되기 전까지 **unverified** 이다. Val/잠금은 결과 코드만.
-> 생성: 2026-11-12T03:21:06+00:00 · 사실 33 · 해석 17 · 사후분석 7 · 파생 23
+> 생성: 2026-11-12T03:24:32+00:00 · 사실 34 · 해석 19 · 사후분석 7 · 파생 23
 
 ## 실패 유형 (자동 분류)
 
@@ -26,7 +26,7 @@
 
 | family | 캠페인 | 누적 시도 | 결과 | 주 실패 유형 |
 |---|---|---|---|---|
-| `liq_meanrev` | 11 | 66 | passed 4, failed 7 | `NO_SIGNAL`×3, `COST_EATEN`×2, `PARAM_SPIKE`×1, `UNSTABLE`×1 |
+| `liq_meanrev` | 12 | 68 | passed 4, failed 8 | `NO_SIGNAL`×4, `COST_EATEN`×2, `PARAM_SPIKE`×1, `UNSTABLE`×1 |
 | `managed_hold` | 1 | 4 | failed 1 | `NO_SIGNAL`×1 |
 | `vol_breakout` | 16 | 102 | passed 7, failed 8, validated 1 | `PARAM_SPIKE`×2, `VAL_FAIL`×2, `NO_SIGNAL`×2, `SELECTION_BIAS`×1, `COST_EATEN`×1 |
 | `xasset_btc_lead` | 2 | 4 | passed 1, failed 1 | `SELECTION_BIAS`×1 |
@@ -606,6 +606,29 @@
   - #1 `r2c_xasset_btc_lead_donch_4h_u3_half_d27e04b72e` SR_w=1.881 trades=500 first_failed=G5 → `SELECTION_BIAS` ['SELECTION_BIAS'] · val=not_run
 - 범위: coinone BTC-KRW 1m · dev 2021-01-01T00:00:00+00:00~2025-11-01T00:00:00+00:00 · 블록 donchian_breakout / [['btc_trend_filter']] · 재검토 기한 2027-05-11
 - 재검토 조건: Dev data period or segment boundaries change (new data, lockbox rolled into Dev/Val); venue or cost model changes (e.g. Coinone 0% fee promotion ends, Upbit fee changes); timeframe / decision interval changes (5m ↔ 1m); a block used here is re-implemented (new block version) or an engine bug is fixed; review date 2027-05-11 passes
+
+**해석 (AI, 검증 상태 표시)**
+
+- [UNVERIFIED] int-000018 (신뢰도 0.6): BTC-trend filter on alt breakouts did not rescue the alt sleeves: Dev XRP Sharpe 0.72, ETH 0.89 with the filter (BTC sleeve 1.84 unchanged). The 2-spec exit grid failed G5 on PBO 0.378 (DSR 0.999), i.e. TP 1.5 vs 3 ATR rank flips across CSCV splits; the pooled edge is still carried by the BTC sleeve, as in camp-000034.
+  - 근거: camp-000036; camp-000035; camp-000034
+  - 검증 방법: Do not re-run this hypothesis with a different exit grid (result shopping). Track C closed; next diversification must be a different mechanism (track D 4h dip-buy in up-trend).
+
+### fact-000034 · signal_screen `camp-000037` · family `liq_meanrev`
+
+**사실 (자동, 불변)**
+
+- 가설 hyp-000036: On the fixed Coinone universe [BTC-KRW, XRP-KRW, ETH-KRW] (D15, pooled, per-asset matched null) at 4h decisions, multi-day oversold dips (close >= 2 sd below the 24-bar = 4-day mean, bollinger_z_revert(24,2.0), or RSI(14) <= 30 bounce) taken only while the asset is above its own 90-bar 4h EMA (experimental trend_ema_filter span 90 = 15 days; trend_regime_1h is invalid on 4h bars) are followed by 8-48 h returns above the matched null, net of per-asset coinone_conservative cost.
+- 결과: **failed** · 주 실패 유형: `NO_SIGNAL` · 분포: `NO_SIGNAL`×2
+- 깔때기(전체 None 스펙): G1 None · SR_w>0 None · G4 None | 상위 None:  · Dev 생존 None
+  - `bollinger_z_revert(window=24,z=2.0) & trend_ema_filter(span=90,band_bp=0.0)` events=150 p=1.000 best_h=1440 → `NO_SIGNAL`
+  - `rsi_oversold_bounce(period=14,level=30) & trend_ema_filter(span=90,band_bp=0.0)` events=17 p=1.000 best_h=480 → `NO_SIGNAL`
+- 범위: coinone None 1m · dev 2021-01-01T00:00:00+00:00~2025-11-01T00:00:00+00:00 · 블록 ['bollinger_z_revert', 'rsi_oversold_bounce'] / None · 재검토 기한 2027-05-11
+- 재검토 조건: Dev data period changes; venue/cost model changes; decision interval changes (bar_minutes)
+
+**해석 (AI, 검증 상태 표시)**
+
+- [UNVERIFIED] int-000019 (신뢰도 0.7): At 4h decisions, multi-day oversold dips almost never occur while the asset stays above its 15-day EMA (bollinger 2 sd: 150 pooled events, excess -1 bp; RSI<=30: 17 events). Dip-buying inside a trend is not a separate 4h signal on Coinone BTC/XRP/ETH; the trend-following edge is captured by breakouts.
+  - 근거: camp-000037; camp-000012; camp-000011
 
 ## 파생 가설 (계열 상속)
 
