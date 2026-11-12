@@ -969,49 +969,89 @@ params:
 - key: gates.G6.size_includes_dev
   class: 2
   source: yaml:config/gates.yaml#G6.size_includes_dev
-  value: false
-  rationale: 'G6 크기 계산에 Dev 최대낙폭 포함 (엄격화)'
-  evidence: '자율 체제 옵션 추가(기본 = 기존 동작) — docs/prompts/autonomous_research_plan.md §5.1'
-  version: 1
-  last_updated: '2026-11-11'
+  value: true
+  rationale: G6 크기 계산에 Dev 최대낙폭 포함 (엄격화)
+  evidence: research/reports/certification_rs001_20261112.md
+  version: 2
+  last_updated: '2026-11-12'
   owner: human
-  history: []
+  history:
+  - version: 2
+    previous: false
+    value: true
+    date: '2026-11-12'
+    at: '2026-11-12T01:39:01+00:00'
+    by: human:ai:autonomy (cert-rs001)
+    proposal_id: pp-20261112-rs-001-initial-autonomous-ruleset-g6-siz-dba007
+    reason: rs-001 initial autonomous ruleset (G6 size incl. Dev drawdown and worst month -8%, 1 Val per campaign,
+      G8 replay paper)
+    applies_from_campaign: 32
 - key: gates.G6.worst_month_min
   class: 2
   source: yaml:config/gates.yaml#G6.worst_month_min
-  value: null
-  rationale: 'G6 크기 계산에 최악 달력 월 하한 포함 (엄격화)'
-  evidence: '자율 체제 옵션 추가(기본 = 기존 동작) — docs/prompts/autonomous_research_plan.md §5.1'
-  version: 1
-  last_updated: '2026-11-11'
+  value: -0.08
+  rationale: G6 크기 계산에 최악 달력 월 하한 포함 (엄격화)
+  evidence: research/reports/certification_rs001_20261112.md
+  version: 2
+  last_updated: '2026-11-12'
   owner: human
-  history: []
+  history:
+  - version: 2
+    previous: null
+    value: -0.08
+    date: '2026-11-12'
+    at: '2026-11-12T01:39:01+00:00'
+    by: human:ai:autonomy (cert-rs001)
+    proposal_id: pp-20261112-rs-001-initial-autonomous-ruleset-g6-siz-dba007
+    reason: rs-001 initial autonomous ruleset (G6 size incl. Dev drawdown and worst month -8%, 1 Val per campaign,
+      G8 replay paper)
+    applies_from_campaign: 32
 - key: gates.G6.max_val_per_campaign
   class: 2
   source: yaml:config/gates.yaml#G6.max_val_per_campaign
-  value: null
-  rationale: '캠페인당 Val 사용 후보 수 상한'
-  evidence: '자율 체제 옵션 추가(기본 = 기존 동작) — docs/prompts/autonomous_research_plan.md §5.1'
-  version: 1
-  last_updated: '2026-11-11'
+  value: 1
+  rationale: 캠페인당 Val 사용 후보 수 상한
+  evidence: research/reports/certification_rs001_20261112.md
+  version: 2
+  last_updated: '2026-11-12'
   owner: human
-  history: []
+  history:
+  - version: 2
+    previous: null
+    value: 1
+    date: '2026-11-12'
+    at: '2026-11-12T01:39:01+00:00'
+    by: human:ai:autonomy (cert-rs001)
+    proposal_id: pp-20261112-rs-001-initial-autonomous-ruleset-g6-siz-dba007
+    reason: rs-001 initial autonomous ruleset (G6 size incl. Dev drawdown and worst month -8%, 1 Val per campaign,
+      G8 replay paper)
+    applies_from_campaign: 32
 - key: gates.G8.paper_mode
   class: 2
   source: yaml:config/gates.yaml#G8.paper_mode
-  value: classic
-  rationale: '결선·페이퍼 판정 (gates.G8.paper_mode)'
-  evidence: '자율 체제 (D27·D28) — docs/prompts/autonomous_research_plan.md §5.2·§5.4'
-  version: 1
-  last_updated: '2026-11-11'
+  value: replay
+  rationale: 결선·페이퍼 판정 (gates.G8.paper_mode)
+  evidence: research/reports/certification_rs001_20261112.md
+  version: 2
+  last_updated: '2026-11-12'
   owner: human
-  history: []
+  history:
+  - version: 2
+    previous: classic
+    value: replay
+    date: '2026-11-12'
+    at: '2026-11-12T01:39:01+00:00'
+    by: human:ai:autonomy (cert-rs001)
+    proposal_id: pp-20261112-rs-001-initial-autonomous-ruleset-g6-siz-dba007
+    reason: rs-001 initial autonomous ruleset (G6 size incl. Dev drawdown and worst month -8%, 1 Val per campaign,
+      G8 replay paper)
+    applies_from_campaign: 32
 - key: gates.G8.paper_min_days
   class: 2
   source: yaml:config/gates.yaml#G8.paper_min_days
   value: 7
-  rationale: '결선·페이퍼 판정 (gates.G8.paper_min_days)'
-  evidence: '자율 체제 (D27·D28) — docs/prompts/autonomous_research_plan.md §5.2·§5.4'
+  rationale: 결선·페이퍼 판정 (gates.G8.paper_min_days)
+  evidence: 자율 체제 (D27·D28) — docs/prompts/autonomous_research_plan.md §5.2·§5.4
   version: 1
   last_updated: '2026-11-11'
   owner: human
@@ -1020,8 +1060,8 @@ params:
   class: 2
   source: yaml:config/gates.yaml#G8.paper_max_days
   value: 14
-  rationale: '결선·페이퍼 판정 (gates.G8.paper_max_days)'
-  evidence: '자율 체제 (D27·D28) — docs/prompts/autonomous_research_plan.md §5.2·§5.4'
+  rationale: 결선·페이퍼 판정 (gates.G8.paper_max_days)
+  evidence: 자율 체제 (D27·D28) — docs/prompts/autonomous_research_plan.md §5.2·§5.4
   version: 1
   last_updated: '2026-11-11'
   owner: human
@@ -1030,8 +1070,8 @@ params:
   class: 2
   source: yaml:config/gates.yaml#final.alpha_base
   value: 0.05
-  rationale: '결선·페이퍼 판정 (gates.final.alpha_base)'
-  evidence: '자율 체제 (D27·D28) — docs/prompts/autonomous_research_plan.md §5.2·§5.4'
+  rationale: 결선·페이퍼 판정 (gates.final.alpha_base)
+  evidence: 자율 체제 (D27·D28) — docs/prompts/autonomous_research_plan.md §5.2·§5.4
   version: 1
   last_updated: '2026-11-11'
   owner: human
@@ -1040,8 +1080,8 @@ params:
   class: 2
   source: yaml:config/gates.yaml#final.lockbox_budget
   value: 5
-  rationale: '결선·페이퍼 판정 (gates.final.lockbox_budget)'
-  evidence: '자율 체제 (D27·D28) — docs/prompts/autonomous_research_plan.md §5.2·§5.4'
+  rationale: 결선·페이퍼 판정 (gates.final.lockbox_budget)
+  evidence: 자율 체제 (D27·D28) — docs/prompts/autonomous_research_plan.md §5.2·§5.4
   version: 1
   last_updated: '2026-11-11'
   owner: human
@@ -1050,8 +1090,8 @@ params:
   class: 2
   source: yaml:config/gates.yaml#final.oos_alpha
   value: 0.1
-  rationale: '결선·페이퍼 판정 (gates.final.oos_alpha)'
-  evidence: '자율 체제 (D27·D28) — docs/prompts/autonomous_research_plan.md §5.2·§5.4'
+  rationale: 결선·페이퍼 판정 (gates.final.oos_alpha)
+  evidence: 자율 체제 (D27·D28) — docs/prompts/autonomous_research_plan.md §5.2·§5.4
   version: 1
   last_updated: '2026-11-11'
   owner: human
@@ -1060,8 +1100,8 @@ params:
   class: 2
   source: yaml:config/gates.yaml#final.max_mdd
   value: 0.2
-  rationale: '결선·페이퍼 판정 (gates.final.max_mdd)'
-  evidence: '자율 체제 (D27·D28) — docs/prompts/autonomous_research_plan.md §5.2·§5.4'
+  rationale: 결선·페이퍼 판정 (gates.final.max_mdd)
+  evidence: 자율 체제 (D27·D28) — docs/prompts/autonomous_research_plan.md §5.2·§5.4
   version: 1
   last_updated: '2026-11-11'
   owner: human
@@ -1070,8 +1110,8 @@ params:
   class: 2
   source: yaml:config/gates.yaml#final.max_mc_mdd95
   value: 0.2
-  rationale: '결선·페이퍼 판정 (gates.final.max_mc_mdd95)'
-  evidence: '자율 체제 (D27·D28) — docs/prompts/autonomous_research_plan.md §5.2·§5.4'
+  rationale: 결선·페이퍼 판정 (gates.final.max_mc_mdd95)
+  evidence: 자율 체제 (D27·D28) — docs/prompts/autonomous_research_plan.md §5.2·§5.4
   version: 1
   last_updated: '2026-11-11'
   owner: human
@@ -1080,8 +1120,8 @@ params:
   class: 2
   source: yaml:config/gates.yaml#final.worst_month_min
   value: -0.08
-  rationale: '결선·페이퍼 판정 (gates.final.worst_month_min)'
-  evidence: '자율 체제 (D27·D28) — docs/prompts/autonomous_research_plan.md §5.2·§5.4'
+  rationale: 결선·페이퍼 판정 (gates.final.worst_month_min)
+  evidence: 자율 체제 (D27·D28) — docs/prompts/autonomous_research_plan.md §5.2·§5.4
   version: 1
   last_updated: '2026-11-11'
   owner: human
@@ -1090,8 +1130,8 @@ params:
   class: 2
   source: yaml:config/gates.yaml#final.min_position_scale
   value: 0.25
-  rationale: '결선·페이퍼 판정 (gates.final.min_position_scale)'
-  evidence: '자율 체제 (D27·D28) — docs/prompts/autonomous_research_plan.md §5.2·§5.4'
+  rationale: 결선·페이퍼 판정 (gates.final.min_position_scale)
+  evidence: 자율 체제 (D27·D28) — docs/prompts/autonomous_research_plan.md §5.2·§5.4
   version: 1
   last_updated: '2026-11-11'
   owner: human
@@ -1100,8 +1140,8 @@ params:
   class: 2
   source: yaml:config/gates.yaml#final.require_beat_bh
   value: true
-  rationale: '결선·페이퍼 판정 (gates.final.require_beat_bh)'
-  evidence: '자율 체제 (D27·D28) — docs/prompts/autonomous_research_plan.md §5.2·§5.4'
+  rationale: 결선·페이퍼 판정 (gates.final.require_beat_bh)
+  evidence: 자율 체제 (D27·D28) — docs/prompts/autonomous_research_plan.md §5.2·§5.4
   version: 1
   last_updated: '2026-11-11'
   owner: human

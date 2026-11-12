@@ -46,9 +46,9 @@ G6:
   drawdown_mode: size          # reject = 낙폭 초과 시 탈락 | size = 크기 조절: position_scale = min(1, max_mdd/ValMDD,
                                #   max_mc_mdd95/MCMDD95) ≥ min_position_scale 이면 낙폭 조건 통과 (②; 하한은 ③)
   min_position_scale: 0.25     # size 모드 크기 하한 (③ 위험 선호)
-  size_includes_dev: false     # 자율 rs-001 옵션: 크기 계산에 Dev 최대낙폭도 넣음 (엄격화)
-  worst_month_min: null        # 자율 rs-001 옵션: 최악 달력 월(Dev·Val, 운용 크기) 하한 (예 -0.08) → 크기 계산에 포함
-  max_val_per_campaign: null   # 자율 rs-001 옵션: 캠페인당 Val 로 보내는 Dev 생존자 수 상한 (Val 예산 절약)
+  size_includes_dev: true      # 자율 rs-001 옵션: 크기 계산에 Dev 최대낙폭도 넣음 (엄격화)
+  worst_month_min: -0.08       # 자율 rs-001 옵션: 최악 달력 월(Dev·Val, 운용 크기) 하한 (예 -0.08) → 크기 계산에 포함
+  max_val_per_campaign: 1      # 자율 rs-001 옵션: 캠페인당 Val 로 보내는 Dev 생존자 수 상한 (Val 예산 절약)
   # Val 사용 원장 + 누적 Holm (PLAN §10b-4, §5.3 잠금 규칙과 같은 구조). 후보마다 Val 평가 *전에*
   # 원장 val_evaluations 에 기록(k번째 사용). 통계량 = primary 비용 Val 일간 수익 평균 > 0 의
   # 정상 블록 부트스트랩 단측 p (inference.bootstrap_mean_test). 기존 G6 조건에 더해 이 p 가
@@ -129,7 +129,7 @@ G8:
   min_paper_weeks: 3
   min_paper_trades: 30
   pnl_band: 0.90               # 손익이 백테스트 90% 구간 안
-  paper_mode: classic          # classic = 위 규칙 | replay = 자율 D28 (7일·연장 14일, P1~P4: research/paper_verdict.py)
+  paper_mode: replay           # classic = 위 규칙 | replay = 자율 D28 (7일·연장 14일, P1~P4: research/paper_verdict.py)
   paper_min_days: 7
   paper_max_days: 14
   # 전진 인큐베이션 (research/forward.py, PLAN §10b-5)

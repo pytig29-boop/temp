@@ -574,7 +574,7 @@ class Pipeline:
         n_trials = max(float(k_eff), n_family * k_eff / max(n_camp, 1))
         n_program = None
         from btc_quant.params.ruleset import autonomy_cfg
-        ps = autonomy_cfg(self._croot).get("program_start")
+        ps = autonomy_cfg(self.env.root).get("program_start")
         if ps:      # 자율 프로그램: 계열 이름을 바꿔 시도 수를 초기화하는 길을 막는다 — 프로그램 전체 시도를 바닥으로
             n_program = len({(r["campaign_id"], r["logic_hash"]) for r in self.env.ledger.records("runs")
                              if str(r.get("ts") or "") >= str(ps)})
@@ -714,7 +714,7 @@ class Pipeline:
     def loosening_penalty(self) -> int:
         """시도 계수 벌점 L_dev (자율 체제 §4-D): 프로그램 시작 뒤 개발 구간 규칙 느슨화 수. 프로그램 밖 = 0 (이전과 같다)."""
         from btc_quant.params.ruleset import autonomy_cfg
-        ps = autonomy_cfg(self._croot).get("program_start")
+        ps = autonomy_cfg(self.env.root).get("program_start")
         if not ps:
             return 0
         return int(self.env.ledger.loosenings(since_ts=ps, scopes=("dev",)))
@@ -858,8 +858,8 @@ class Pipeline:
                     "note": "logic_hash already used this Val; prior decision reused (not counted again)"
                             + ("" if prior["result"] else " — prior evaluation has no result (aborted) → fail")}
         from btc_quant.params.ruleset import RulesetError, autonomy_cfg, require_locked_ruleset, segment_consumed
-        rs_id = require_locked_ruleset(self._croot, "Val (G6) opening")      # 사전 잠금 (§4-C)
-        ac = autonomy_cfg(self._croot)
+        rs_id = require_locked_ruleset(self.env.root, "Val (G6) opening")    # 사전 잠금 (§4-C) — 실제 연구 저장소만
+        ac = autonomy_cfg(self.env.root)
         if rs_id and segment_consumed(led, "val", ac.get("program_start")):
             raise RulesetError("Val segment consumed (a Val-reading rule was loosened after Val was opened)")
         if rs_id and ac.get("program_start"):               # 판정 데이터 예산 (§4-E)

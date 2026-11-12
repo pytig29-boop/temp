@@ -12,14 +12,22 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 
 def _cfg(**g6):
-    c = copy.deepcopy(G.load_gate_config())
+    from btc_quant.params import gate_config_for_campaign
+    c = copy.deepcopy(gate_config_for_campaign("camp-000032"))       # R1(크기 조절) 위에서 옵션만 따로 켠다
+    c["G6"].update(size_includes_dev=False, worst_month_min=None, max_val_per_campaign=None)
     c["G6"].update(g6)
     return c
 
 
-def test_defaults_off():
-    c = G.load_gate_config()["G6"]
+def test_defaults_off_before_and_on_from_camp_32():
+    from btc_quant.params import gate_config_for_campaign
+    old = gate_config_for_campaign("camp-000031")
+    c = old["G6"]
     assert c["size_includes_dev"] is False and c["worst_month_min"] is None and c["max_val_per_campaign"] is None
+    assert old["G8"]["paper_mode"] == "classic"
+    new = gate_config_for_campaign("camp-000032")
+    assert (new["G6"]["size_includes_dev"], new["G6"]["worst_month_min"], new["G6"]["max_val_per_campaign"],
+            new["G8"]["paper_mode"]) == (True, -0.08, 1, "replay")
 
 
 def test_size_with_dev_and_worst_month():
@@ -41,7 +49,8 @@ def test_size_with_dev_and_worst_month():
 
 def test_val_per_campaign_cap_offline():
     from test_gate_review_study import _cand, _rec
-    pkg = GR.with_changes(GR.current_package(), val_per_campaign=1)
+    from btc_quant.params import gate_config_for_campaign
+    pkg = GR.with_changes(GR.current_package(gate_config_for_campaign("camp-000031")), val_per_campaign=1)  # Holm 기준
     ev = GR.evaluate_market(_rec([[_cand(1, val_p=0.001), _cand(2, val_p=0.001)]]), pkg)
     labs = [c["label"] for c in ev["cands"]]
     assert labs[1] == "Vcap" and ev["val_used"] == 1

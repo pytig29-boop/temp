@@ -1,0 +1,31 @@
+{
+  "id": "pp-20261112-rs-001-initial-autonomous-ruleset-g6-siz-dba007",
+  "approved_by": "ai:autonomy (cert-rs001)",
+  "ts": "2026-11-12T01:39:01+00:00",
+  "choice": null,
+  "note": "auto-apply (initial)",
+  "content_hash": "3096e64de2c863fb",
+  "applied": [
+    {
+      "key": "gates.G6.size_includes_dev",
+      "version": 2,
+      "applies_from_campaign": 32
+    },
+    {
+      "key": "gates.G6.worst_month_min",
+      "version": 2,
+      "applies_from_campaign": 32
+    },
+    {
+      "key": "gates.G6.max_val_per_campaign",
+      "version": 2,
+      "applies_from_campaign": 32
+    },
+    {
+      "key": "gates.G8.paper_mode",
+      "version": 2,
+      "applies_from_campaign": 32
+    }
+  ],
+  "criteria_revision": "crv-000001"
+}

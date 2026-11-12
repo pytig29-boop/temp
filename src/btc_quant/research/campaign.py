@@ -1176,7 +1176,7 @@ def run_campaign(template: CampaignTemplate | str | Path, root: str | Path | Non
     from btc_quant.params.floor import check_floor     # 바닥 규칙 (D29) → 원장 쓰기 전 거부
     check_floor(load_gate_config(config_root(env) / "config" / "gates.yaml"), config_root(env), tpl=tpl)
     from btc_quant.params.ruleset import require_locked_ruleset
-    ruleset_id = require_locked_ruleset(config_root(env), "campaign registration")   # 사전 잠금 (§4-C)
+    ruleset_id = require_locked_ruleset(env.root, "campaign registration")   # 사전 잠금 (§4-C) — 실제 연구 저장소만
     specs_all = tpl.enumerate()
     if len({s.logic_hash() for s in specs_all}) != len(specs_all):
         raise CampaignError("grid produces duplicate specs")
