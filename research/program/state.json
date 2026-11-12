@@ -77,10 +77,10 @@
   ],
   "background": [],
   "notes": [],
-  "updated": "2026-11-12T02:55:14+00:00",
+  "updated": "2026-11-12T02:55:38+00:00",
   "maintenance": {
-    "open": false,
-    "reason": "",
-    "ts": "2026-11-12T02:55:14+00:00"
+    "open": true,
+    "reason": "track C: make coinone_btc live-available (paper aux wiring + LIVE_AUX)",
+    "ts": "2026-11-12T02:55:38+00:00"
   }
 }

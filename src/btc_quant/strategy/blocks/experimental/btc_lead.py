@@ -10,7 +10,7 @@ XRP·ETH 슬리브가 **코인원 BTC-KRW 의 4시간 추세가 켜져 있을 �
 국면에서 지속성이 크다). 상대방: BTC 하락 국면에서 알트 돌파를 사는 늦은 추세 추종자. 동기 증거(Dev 만): camp-000034 심사에서
 XRP·ETH 슬리브만의 Sharpe 가 1.06 으로 약했다(XRP 중앙 거래 −5bp) — BTC 국면이 알트 돌파의 질을 가른다는 가설.
 잠금·Val 노출 없음. 파라미터는 span × band_bp(≤ 9), 사전 선언.
-live_ready=False: 페이퍼 서비스는 아직 슬리브 사이 보조 데이터(다른 심볼)를 공급하지 않는다 — 후보가 생기면 연결한다.
+live_ready=True: 페이퍼 서비스가 BTC 슬리브의 체결 1분봉 이력을 알트 슬리브의 coinone_btc 로 공유한다(paper.service).
 """
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ _RATIONALE = ("알트코인은 BTC 국면을 뒤따른다(공통 요인). XRP·E
     "filter",
     grid={"span": SPANS, "band_bp": BANDS_BP},
     description="코인원 BTC-KRW 결정 봉 종가 > EMA(span)·(1+band_bp/1e4) (BTC 추세 켜짐). 보조 데이터 coinone_btc 필요.",
-    rationale=_RATIONALE, author=AUTHOR, created=CREATED, requires=("coinone_btc",), live_ready=False,
+    rationale=_RATIONALE, author=AUTHOR, created=CREATED, requires=("coinone_btc",), live_ready=True,
     lookback_bars=_ema_lookback, tf_note="designed for 4h decision bars",
 )
 def btc_trend_filter(bars: pd.DataFrame, ctx: Context, span: int = 42, band_bp: float = 0.0) -> pd.Series:

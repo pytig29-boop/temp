@@ -4,3 +4,4 @@
 {"ts": "2026-11-12T02:15:46+00:00", "kind": "verdict", "candidate": "r1b_vol_breakout_donch_4h_u3_half_0dce65e919_v1", "verdict_kind": "judge", "value": "PASS"}
 {"ts": "2026-11-12T02:31:35+00:00", "kind": "maintenance", "op": "open", "reason": "track C: coinone_btc aux for alt sleeves + experimental btc_trend filter block"}
 {"ts": "2026-11-12T02:55:14+00:00", "kind": "maintenance", "op": "close", "reason": ""}
+{"ts": "2026-11-12T02:55:38+00:00", "kind": "maintenance", "op": "open", "reason": "track C: make coinone_btc live-available (paper aux wiring + LIVE_AUX)"}

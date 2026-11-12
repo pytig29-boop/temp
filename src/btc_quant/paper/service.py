@@ -299,6 +299,16 @@ class PaperService:
         for sym in need_aux_syms:
             self.aux_builders_by[sym]["upbit"] = MinuteBarBuilder(self.cfg.grace_seconds)
             self.aux_hist_by[sym]["upbit"] = M1History(max_rows=1, exchange="upbit")   # 크기는 아래에서 재설정
+        # 코인원 BTC 보조 데이터(ctx.aux["coinone_btc"], 트랙 C): 다른 슬리브가 BTC 슬리브의 체결 venue 1분봉 이력을 같이 읽는다
+        # (같은 M1History 객체 — BTC 슬리브가 매 분 먼저 갱신된다: self.symbols 는 BTC 가 첫 번째).
+        need_btc = {sym for s in slots if "coinone_btc" in spec_aux(s.spec) for sym in slot_symbols(s.spec)}
+        self._btc_hist = None
+        if need_btc:
+            if "BTC-KRW" not in self.symbols:
+                raise ValueError("coinone_btc aux needs BTC-KRW in a traded universe")
+            self._btc_hist = M1History(max_rows=1, exchange="coinone")          # 크기는 아래에서 재설정
+            for sym in need_btc:
+                self.aux_hist_by[sym]["coinone_btc"] = self._btc_hist
         self.aux_builders = self.aux_builders_by[self.primary]      # 단일 자산 호환 별칭
         self.aux_hist = self.aux_hist_by[self.primary]
         self.traders: dict[str, PaperTrader] = {}
@@ -326,11 +336,14 @@ class PaperService:
         max_rows = self.lookback_min + 2 * 1440
         self.builders = {sym: MinuteBarBuilder(self.cfg.grace_seconds) for sym in self.symbols}
         self.hists = {sym: M1History(max_rows=max_rows, exchange="coinone") for sym in self.symbols}   # 체결 venue
+        if self._btc_hist is not None:                              # BTC 체결 이력 = 알트 슬리브의 coinone_btc 보조 이력
+            self._btc_hist.max_rows = max_rows
+            self.hists["BTC-KRW"] = self._btc_hist
         self.builder = self.builders[self.primary]                  # 단일 자산 호환 별칭
         self.hist = self.hists[self.primary]
         for d in self.aux_hist_by.values():
             for h in d.values():
-                h.max_rows = max_rows
+                h.max_rows = max(h.max_rows, max_rows)
         self.ready = False
         self.pending_by: dict[str, list] = {sym: [] for sym in self.symbols}
         self.pending = self.pending_by[self.primary]
@@ -599,6 +612,8 @@ class PaperService:
             log.info("warm-up: fetching %d min of coinone %s 1m candles up to %s", self.lookback_min, sym, end)
             raw = await self._fetch_retry(end, "coinone", sym)
             for k, h in self.aux_hist_by[sym].items():
+                if k == "coinone_btc":          # BTC 슬리브 이력을 공유 — BTC 차례에 이미(또는 곧) 채워진다
+                    continue
                 araw = await self._fetch_retry(end, k, sym)
                 h.seed(araw)
                 for bar in self.aux_pending_by[sym].pop(k, []):

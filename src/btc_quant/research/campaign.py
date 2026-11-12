@@ -107,7 +107,7 @@ ATR_EXIT_KEYS = ("sl_atr", "tp_atr", "max_hold_min")        # ATR 배수 청산 
 EXIT_MODES = ("pct", "atr")
 HALF_LIFE_DAYS = 365          # PLAN D1
 # 실시간으로 만들 수 있는 보조 데이터 (paper.bars.LIVE_AUX 와 같은 값). 바이낸스는 실시간 수신 불가 → 캠페인 불가.
-LIVE_AUX = ("upbit",)
+LIVE_AUX = ("upbit", "coinone_btc")   # coinone_btc: 페이퍼가 BTC 슬리브 체결 이력을 공유 (트랙 C)
 # 비용 전(gross) 지표 (오답노트 COST_EATEN 분류용): 같은 스윕의 같은 거래를 zero-cost CostModel 로 다시 계산
 GROSS_KEYS = ("gross_sharpe_w", "gross_expectancy")
 

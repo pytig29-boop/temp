@@ -30,7 +30,7 @@ import pandas as pd
 
 KINDS = ("entry", "filter", "exit_signal")
 STATUSES = ("official", "experimental")
-KNOWN_AUX = ("binance", "upbit", "coinone_btc")   # ctx.aux 키. binance: 실시간 불가(live_ready=False 강제), upbit: 실시간 가능, coinone_btc: 다른 심볼(코인원 BTC-KRW, 트랙 C — 페이퍼 미연결)
+KNOWN_AUX = ("binance", "upbit", "coinone_btc")   # ctx.aux 키. binance: 실시간 불가(live_ready=False 강제), upbit: 실시간 가능, coinone_btc: 다른 심볼(코인원 BTC-KRW, 트랙 C — 페이퍼는 BTC 슬리브 이력 공유)
 
 
 @dataclass
