@@ -1,0 +1,233 @@
+{
+  "campaign_id": "camp-000036",
+  "hypothesis_id": "hyp-000035",
+  "template": "r2c_xasset_btc_lead_donch_4h_u3_half",
+  "family": "xasset_btc_lead",
+  "created": "2026-11-12T03:20:49+00:00",
+  "data": {
+    "exchange": "coinone",
+    "symbol": "BTC-KRW",
+    "timeframe": "1m",
+    "rows_1m": 7624800,
+    "filled_frac": 0.13291469940195152,
+    "aux": [
+      "coinone_btc"
+    ],
+    "aux_rows_1m": {
+      "coinone_btc": 2541600
+    },
+    "universe": [
+      "BTC-KRW",
+      "XRP-KRW",
+      "ETH-KRW"
+    ],
+    "by_symbol": {
+      "BTC-KRW": {
+        "rows_1m": 2541600,
+        "filled_frac": 0.07562873780295877,
+        "aux_rows_1m": {
+          "coinone_btc": 2541600
+        }
+      },
+      "XRP-KRW": {
+        "rows_1m": 2541600,
+        "filled_frac": 0.1320900220333648,
+        "aux_rows_1m": {
+          "coinone_btc": 2541600
+        }
+      },
+      "ETH-KRW": {
+        "rows_1m": 2541600,
+        "filled_frac": 0.191025338369531,
+        "aux_rows_1m": {
+          "coinone_btc": 2541600
+        }
+      }
+    }
+  },
+  "timeframe": "4h",
+  "exits": {
+    "mode": "atr",
+    "atr_bars": 14,
+    "n_variants": 2
+  },
+  "period": {
+    "segment": "dev",
+    "start": "2021-01-01T00:00:00+00:00",
+    "end": "2025-11-01T00:00:00+00:00"
+  },
+  "data_snapshot": "snap-93b066dd27ee41f0a0ec|coinone_btc:snap-93b066dd27ee41f0a0ec|XRP-KRW:snap-b636892dd83e17554616|coinone_btc/XRP-KRW:snap-93b066dd27ee41f0a0ec|ETH-KRW:snap-b46925c3bb3e2bfd5239|coinone_btc/ETH-KRW:snap-93b066dd27ee41f0a0ec",
+  "code_commit": "eeb463d8908e4ad78bbeea7efaac4013224f0eaa",
+  "n_specs": 2,
+  "n_runs": 4,
+  "costs": {
+    "primary": "coinone_conservative",
+    "grade": "upbit_conservative",
+    "stress": "coinone_stress",
+    "grade_stress": "upbit_stress"
+  },
+  "evaluated_costs": [
+    "coinone_conservative",
+    "upbit_conservative"
+  ],
+  "runtime_sec": 9.76,
+  "half_life_days": 365,
+  "power": {
+    "n_grid": 2,
+    "family": "xasset_btc_lead",
+    "n_family_prior": 2,
+    "ratio": 0.5,
+    "ratio_source": "history median of 13 campaigns; floored at 1/n_grid = 0.5 (single-cluster small grid, pm-000007)",
+    "k_eff_est": 1.0,
+    "n_trials_dsr": 2.0,
+    "n_days": 1765,
+    "var_trial_sr": 0.000285467327657304,
+    "var_source": "history median",
+    "min_dsr": 0.95,
+    "required_sharpe_ann": 0.9164153853769328,
+    "required_sharpe_ann_single_trial": 0.7484985921568781,
+    "target_sharpe_ann": 1.5,
+    "max_trials_for_target": 56.902857628624616,
+    "max_grid_for_target": 111.80571525724923,
+    "markdown": "- 계획 격자 2 스펙, 계열 `xasset_btc_lead` 기존 시도 2, 압축비 0.5 (history median of 13 campaigns; floored at 1/n_grid = 0.5 (single-cluster small grid, pm-000007)) → 실질 시도 ≈ 2.0\n- Dev 1765일, V=0.000285 (history median), 왜도 0, 첨도 3, DSR ≥ 0.95\n- **G5 통과 최소 연 Sharpe ≈ 0.92** (시도 1회였다면 0.75)\n- 목표 연 Sharpe 1.5 로 감당 가능한 실질 시도 ≈ 57 (격자 ≈ 112 스펙)",
+    "warning": null,
+    "strict": true,
+    "ok": true
+  },
+  "screen": {
+    "from_screen": "camp-000035",
+    "requires_screen_pass": false,
+    "n_configs": 1,
+    "matches": [
+      {
+        "config": "donchian_breakout{'lookback': 48} & btc_trend_filter{'span': 90, 'band_bp': 0.0}",
+        "screen_id": "camp-000035",
+        "run_id": "run-000284",
+        "p_signal": 0.0014675248194123245,
+        "n_events": 742,
+        "info_horizon": 1440,
+        "exchange": "coinone",
+        "aux": [
+          "coinone_btc"
+        ]
+      }
+    ],
+    "rule": "every (entry params × filter params × timeframe × exchange × universe) config passed a recorded screen"
+  },
+  "benchmark": {
+    "kind": "equal-weight 3-asset buy & hold (BTC-KRW, XRP-KRW, ETH-KRW; same venue 1m close, daily-rebalanced sleeves like the strategy, no cost)",
+    "bh_total_return": 11.453458533296132,
+    "bh_sharpe": 1.1483918657371714,
+    "bh_max_dd": 0.7300752572392226,
+    "bh_n_up_days": 938,
+    "bh_n_down_days": 827,
+    "bh_n_up_regime_days": 978,
+    "bh_n_down_regime_days": 757,
+    "bh_dd1_depth": 0.7300752572392226,
+    "bh_dd1_start": "2021-11-09",
+    "bh_dd1_end": "2022-06-18",
+    "bh_dd2_depth": 0.5722037489457583,
+    "bh_dd2_start": "2021-05-09",
+    "bh_dd2_end": "2021-07-20",
+    "bh_dd3_depth": 0.4249143469285672,
+    "bh_dd3_start": "2025-01-18",
+    "bh_dd3_end": "2025-04-08"
+  },
+  "params": {
+    "params_version": "7f1999c38d57",
+    "cost_versions": {
+      "coinone_base": 2,
+      "coinone_base@ETH-KRW": 1,
+      "coinone_base@XRP-KRW": 1,
+      "coinone_conservative": 2,
+      "coinone_conservative@ETH-KRW": 1,
+      "coinone_conservative@XRP-KRW": 1,
+      "coinone_stress": 2,
+      "coinone_stress@ETH-KRW": 1,
+      "coinone_stress@XRP-KRW": 2,
+      "upbit_base": 1,
+      "upbit_base@ETH-KRW": 1,
+      "upbit_base@XRP-KRW": 1,
+      "upbit_conservative": 1,
+      "upbit_conservative@ETH-KRW": 1,
+      "upbit_conservative@XRP-KRW": 1,
+      "upbit_stress": 1,
+      "upbit_stress@ETH-KRW": 1,
+      "upbit_stress@XRP-KRW": 1
+    },
+    "registry_version": 1,
+    "n_params": {
+      "1": 37,
+      "2": 117,
+      "3": 15
+    }
+  },
+  "params_version": "7f1999c38d57",
+  "cost_versions": {
+    "coinone_base": 2,
+    "coinone_base@ETH-KRW": 1,
+    "coinone_base@XRP-KRW": 1,
+    "coinone_conservative": 2,
+    "coinone_conservative@ETH-KRW": 1,
+    "coinone_conservative@XRP-KRW": 1,
+    "coinone_stress": 2,
+    "coinone_stress@ETH-KRW": 1,
+    "coinone_stress@XRP-KRW": 2,
+    "upbit_base": 1,
+    "upbit_base@ETH-KRW": 1,
+    "upbit_base@XRP-KRW": 1,
+    "upbit_conservative": 1,
+    "upbit_conservative@ETH-KRW": 1,
+    "upbit_conservative@XRP-KRW": 1,
+    "upbit_stress": 1,
+    "upbit_stress@ETH-KRW": 1,
+    "upbit_stress@XRP-KRW": 1
+  },
+  "daily_returns": "mtm",
+  "ruleset": "rs-003",
+  "position": {
+    "sizing": {
+      "entry_fraction": [
+        0.5
+      ]
+    },
+    "ladder": null,
+    "n_variants": 1,
+    "gridded_mode_params": 0,
+    "max_exposure_cap": 1.0,
+    "accounting": "sleeve equity; tranche size = max_exposure/N of equity at the first fill; cash earns 0; mark-to-market daily returns at each UTC day close (PLAN D18)",
+    "fill_model": {
+      "name": "through_1tick",
+      "through_ticks": 1,
+      "tick": 0.0,
+      "through_bp": 0.0,
+      "fill_prob": 1.0,
+      "min_volume": 0.0,
+      "seed": 0,
+      "tick_from_data": true
+    }
+  },
+  "universe": [
+    "BTC-KRW",
+    "XRP-KRW",
+    "ETH-KRW"
+  ],
+  "sleeves": {
+    "weight": 0.3333333333333333,
+    "accounting": "equal fixed sleeves; portfolio daily return = mean of sleeve daily returns; trades pooled (G1 = sum over assets)",
+    "costs": {
+      "BTC-KRW": {
+        "coinone_conservative": "coinone_conservative",
+        "upbit_conservative": "upbit_conservative"
+      },
+      "XRP-KRW": {
+        "coinone_conservative": "coinone_conservative@XRP-KRW",
+        "upbit_conservative": "upbit_conservative@XRP-KRW"
+      },
+      "ETH-KRW": {
+        "coinone_conservative": "coinone_conservative@ETH-KRW",
+        "upbit_conservative": "upbit_conservative@ETH-KRW"
+      }
+    }
+  }
+}

@@ -1,0 +1,67 @@
+# Autonomous program R2 track C campaign (2026-11-12), from screen camp-000035. Entry and filter fixed to the strongest screened config (span 90);
+# exits = screen suggestion rounded (same as camp-000034). Power target written from the screen z BEFORE the power check (decisions.md rule).
+name: r2c_xasset_btc_lead_donch_4h_u3_half
+universe:
+- BTC-KRW
+- XRP-KRW
+- ETH-KRW
+data:
+  exchange: coinone
+  timeframe: 1m
+  aux:
+  - coinone_btc
+timeframe: 4h
+entry:
+  block: donchian_breakout
+  grid:
+    lookback:
+    - 48
+filters:
+- - block: btc_trend_filter
+    grid:
+      span:
+      - 90
+      band_bp:
+      - 0.0
+exits:
+  mode: atr
+  sl_atr:
+  - 2.0
+  tp_atr:
+  - 1.5
+  - 3.0
+  max_hold_min:
+  - 1440
+  atr_bars: 14
+sizing:
+  entry_fraction:
+  - 0.5
+from_screen: camp-000035
+power:
+  target_sharpe: 1.50
+costs:
+  primary: coinone_conservative
+  grade: upbit_conservative
+  stress: coinone_stress
+  grade_stress: upbit_stress
+budget: 2
+family: xasset_btc_lead
+hypothesis:
+  text: 'Coinone 3-asset universe [BTC-KRW, XRP-KRW, ETH-KRW] (D15, pooled, equal
+    sleeves), 4h decisions: donchian_breakout(48) entries taken only while Coinone
+    BTC-KRW closes above its 90-bar (15-day) 4h EMA (experimental btc_trend_filter,
+    aux coinone_btc), half-size entries (entry_fraction 0.5), ATR exits (SL 2 ATR,
+    TP 1.5/3 ATR, max hold 1440 min) earn positive per-asset coinone_conservative
+    net MTM returns that pass G0-G6 (rs-003) and the robustness suite.'
+  rationale: 'Autonomous program R2 track C. Mechanism: alt breakouts persist when
+    the market leader (BTC) trends up (common crypto factor) and fail otherwise.
+    Counterparty: late chasers buying alt breakouts against a falling BTC; counter-trend
+    sellers at multi-day highs. Kills: BTC sleeve nearly identical to camp-000034
+    candidate (correlation; final pooling by cluster), XRP still not significant
+    alone, regime concentration, 2022 bear. Evidence (Dev only; lockbox none, Val
+    none): screen camp-000035 span 90 n 742 p 0.0015 z 3.30 excess 62 bp net 104
+    bp @1440 (span 42: n 757 p 0.0058). Exits = screen suggestion (TP ~1.5 ATR, SL
+    ~1.8 ATR -> 2.0) and 2x TP, hold = information horizon 1440. Target Sharpe =
+    screen z / sqrt(Dev years) = 3.30/sqrt(4.83) = 1.50, fixed before the power check.'
+  success_criteria: G0-G6 under ruleset rs-003, robustness suite, per-asset results
+    reported (XRP/ETH vs camp-000034).
