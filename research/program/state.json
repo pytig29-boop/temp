@@ -1,21 +1,21 @@
 {
   "version": 1,
   "plan": "docs/prompts/autonomous_research_plan.md",
-  "phase": "build",
-  "plan_phase": "2",
-  "cycle": null,
+  "phase": "research",
+  "plan_phase": "4",
+  "cycle": "R1",
   "queue": [
-    {
-      "task": "Phase 2 final verdict + certification bank + rs-001",
-      "added": "2026-11-11T23:05:28+00:00"
-    },
-    {
-      "task": "Phase 3 dry run",
-      "added": "2026-11-11T23:05:30+00:00"
-    },
     {
       "task": "Phase 4 research program R1-R3",
       "added": "2026-11-11T23:05:31+00:00"
+    },
+    {
+      "task": "R1 track A: managed_hold screen → campaign (research/program/track_A_R1.md)",
+      "added": "2026-11-12T01:56:19+00:00"
+    },
+    {
+      "task": "R1 track B: 4h slow-trend screen (research/program/track_B_R1.md)",
+      "added": "2026-11-12T01:56:19+00:00"
     }
   ],
   "done": [
@@ -35,16 +35,19 @@
       "added": "2026-11-11T23:05:27+00:00",
       "done": "2026-11-12T00:08:03+00:00",
       "note": "done except guard hook (env permission denied, deferred to user)"
-    }
-  ],
-  "background": [
+    },
     {
-      "job": "certify bank",
-      "log": "logs/certify_bank.log",
-      "out": "research/certifications/bank-v1",
-      "note": "bank_*.json locally excluded until finished; then git add -f"
+      "task": "Phase 2 final verdict + certification bank + rs-001",
+      "added": "2026-11-11T23:05:28+00:00",
+      "done": "2026-11-12T01:56:19+00:00"
+    },
+    {
+      "task": "Phase 3 dry run",
+      "added": "2026-11-11T23:05:30+00:00",
+      "done": "2026-11-12T01:56:19+00:00"
     }
   ],
+  "background": [],
   "notes": [],
-  "updated": "2026-11-12T00:08:03+00:00"
+  "updated": "2026-11-12T01:56:19+00:00"
 }
