@@ -1,0 +1,20 @@
+candidate_id: r1b_vol_breakout_donch_4h_u3_half_0dce65e919_v1
+strategy_id: r1b_vol_breakout_donch_4h_u3_half_0dce65e919
+version: 1
+logic_hash: 0dce65e919fc1171
+state: validated
+requested_at: '2026-11-12T08:39:46+00:00'
+requested_by: ai (mcp)
+lockbox_id: lb1
+openings_used: 0
+cap: 10
+justification: 'User decided 2026-11-12 to open the lockbox now (before the day-7
+  paper verdict) to speed up the final round. Candidate is T1: G0-G6 pass under rs-001,
+  grade A, robustness pass, skeptic SURVIVES (WEAK), judge PASS. Paper continues;
+  final approval still requires paper PASS.'
+review_report: research/reports/r1b_vol_breakout_donch_4h_u3_half_0dce65e919_v1_skeptic.md
+uses_experimental: []
+human_block_review_required: false
+status: pending_human_approval
+human_next_step: python -m btc_quant.registry.admin_cli approve-lockbox r1b_vol_breakout_donch_4h_u3_half_0dce65e919_v1
+  --logic-hash 0dce65e919fc1171  (interactive, human only)
