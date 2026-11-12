@@ -3,7 +3,7 @@
 > `btc_quant.research.lessons.render_markdown()` 생성물. **직접 편집 금지** (원본: `research/lessons/*.jsonl`).
 > 사실(Facts)은 파이프라인 결과에서 자동 추출되어 불변이다. 해석(Interpretations)은 AI 작성이며
 > 후속 캠페인으로 verified/refuted 되기 전까지 **unverified** 이다. Val/잠금은 결과 코드만.
-> 생성: 2026-11-12T01:58:35+00:00 · 사실 30 · 해석 16 · 사후분석 7 · 파생 23
+> 생성: 2026-11-12T02:00:42+00:00 · 사실 31 · 해석 16 · 사후분석 7 · 파생 23
 
 ## 실패 유형 (자동 분류)
 
@@ -28,7 +28,7 @@
 |---|---|---|---|---|
 | `liq_meanrev` | 11 | 66 | passed 4, failed 7 | `NO_SIGNAL`×3, `COST_EATEN`×2, `PARAM_SPIKE`×1, `UNSTABLE`×1 |
 | `managed_hold` | 1 | 4 | failed 1 | `NO_SIGNAL`×1 |
-| `vol_breakout` | 15 | 100 | passed 7, failed 8 | `PARAM_SPIKE`×2, `VAL_FAIL`×2, `NO_SIGNAL`×2, `SELECTION_BIAS`×1, `COST_EATEN`×1 |
+| `vol_breakout` | 16 | 102 | passed 7, failed 8, validated 1 | `PARAM_SPIKE`×2, `VAL_FAIL`×2, `NO_SIGNAL`×2, `SELECTION_BIAS`×1, `COST_EATEN`×1 |
 | `xvenue_upbit_lead` | 3 | 16 | failed 2, passed 1 | `COST_EATEN`×1, `LOW_SAMPLE`×1 |
 
 ## 교훈 (사실 → 해석)
@@ -561,6 +561,19 @@
   - `ema_slope(span=24,min_slope_bp=5.0)` events=6523 p=0.011 best_h=480 → PASS
 - 범위: coinone None 1m · dev 2021-01-01T00:00:00+00:00~2025-11-01T00:00:00+00:00 · 블록 ['atr_channel_breakout', 'donchian_breakout', 'ema_slope'] / None · 재검토 기한 2027-05-11
 - 재검토 조건: Dev data period changes; venue/cost model changes; decision interval changes (bar_minutes)
+
+### fact-000031 · campaign `camp-000034` · family `vol_breakout`
+
+**사실 (자동, 불변)**
+
+- 가설 hyp-000033: [redacted: Val/lockbox detail]
+- 결과: **validated** · 주 실패 유형: `None` · 분포: –
+- 깔때기(전체 2 스펙): G1 2 · SR_w>0 2 · G4 2 | 상위 5: G0 1 · G1 1 · G2 1 · G3 1 · G4 1 · G5 1 · Dev 생존 1
+- 선택편향 입력: n_campaign_specs=2, k_eff_clusters=1, n_family_trials=102, n_global_trials=188, n_trials_dsr=51.000, pbo=0.228, cluster_threshold=0.500
+- Val(G6): 평가 1 · 통과 1 (결과 코드만) · 잠금: not_accessed
+  - #1 `r1b_vol_breakout_donch_4h_u3_half_0dce65e919` SR_w=1.827 trades=554 first_failed=None → `None` [] · val=pass
+- 범위: coinone BTC-KRW 1m · dev 2021-01-01T00:00:00+00:00~2025-11-01T00:00:00+00:00 · 블록 donchian_breakout / [[]] · 재검토 기한 2027-05-11
+- 재검토 조건: Dev data period or segment boundaries change (new data, lockbox rolled into Dev/Val); venue or cost model changes (e.g. Coinone 0% fee promotion ends, Upbit fee changes); timeframe / decision interval changes (5m ↔ 1m); a block used here is re-implemented (new block version) or an engine bug is fixed; review date 2027-05-11 passes
 
 ## 파생 가설 (계열 상속)
 

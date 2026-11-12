@@ -1,0 +1,43 @@
+grade: A
+position_scale: 1.0
+limits:
+  daily_loss: -0.03
+  weekly_loss: -0.06
+  max_drawdown: -0.12
+  max_trades_per_day: 5
+  expected_fee_rate: 0.0
+source:
+  campaign_id: camp-000034
+  logic_hash: 0dce65e919fc1171
+  formula: PLAN §7 via evaluation.gates.risk_limits_from_validation (Val)
+  inputs:
+    daily_p1: -0.005268236017352304
+    weekly_p1: -0.012784371672455807
+    mc_mdd95: 0.04183153069640617
+    avg_trades_per_day: 0.20994475138121546
+  cost_primary: coinone_conservative
+  uses_experimental: []
+  written: '2026-11-12T02:00:42.434086+00:00'
+universe:
+- BTC-KRW
+- XRP-KRW
+- ETH-KRW
+sleeve_limits:
+  BTC-KRW:
+    daily_loss: -0.03
+    weekly_loss: -0.06
+    max_drawdown: -0.12
+    max_trades_per_day: 5
+    expected_fee_rate: 0.0
+  XRP-KRW:
+    daily_loss: -0.03
+    weekly_loss: -0.06
+    max_drawdown: -0.12
+    max_trades_per_day: 5
+    expected_fee_rate: 0.0
+  ETH-KRW:
+    daily_loss: -0.03
+    weekly_loss: -0.06
+    max_drawdown: -0.15853488368447757
+    max_trades_per_day: 5
+    expected_fee_rate: 0.0
