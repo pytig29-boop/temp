@@ -59,8 +59,9 @@ def test_registry_contents():
     for d in ALL:
         assert d.description and 1 <= len(d.grid) <= 2
         assert all(3 <= len(v) <= 5 for v in d.grid.values())
-        assert d.live_ready == ("binance" not in d.requires)
-        assert set(d.requires) <= {"binance", "upbit"}
+        # live_ready: binance·coinone_btc(트랙 C, 페이퍼 미연결) 요구 블록은 False
+        assert d.live_ready == (not ({"binance", "coinone_btc"} & set(d.requires)))
+        assert set(d.requires) <= {"binance", "upbit", "coinone_btc"}
         assert d.status in ("official", "experimental")
     # 기존 16개는 공식, 기본 all() 은 공식만
     assert all(REGISTRY.get(n).status == "official" for n in expected)

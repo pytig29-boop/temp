@@ -914,10 +914,12 @@ def dev_aux_context(env, tpl: ScreenTemplate, symbol: str | None = None) -> Cont
     from btc_quant.research.campaign import CampaignError, aux_context, prepare_m1
     aux_m1 = {}
     for a in tpl.aux:
-        raw = env.data.read("dev", a, symbol or tpl.symbol, tpl.timeframe)
+        from .campaign import aux_source
+        ex, s2 = aux_source(a, symbol or tpl.symbol)
+        raw = env.data.read("dev", ex, s2, tpl.timeframe)
         if raw.empty:
             raise CampaignError(f"no {a} aux data on dev")
-        aux_m1[a] = prepare_m1(raw, a)
+        aux_m1[a] = prepare_m1(raw, ex)
     return aux_context(aux_m1, tpl.bar_minutes)
 
 

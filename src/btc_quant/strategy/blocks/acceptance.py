@@ -90,7 +90,8 @@ def synthetic_market(days: int = 60, seed: int = 0, bar_minutes: int = 5
     bn = resample_bars(_m1_from_logret(rb, idx, 60_000.0, vb, rng), lag)
     up = resample_bars(_m1_from_logret(ru, idx, 90_000_000.0, vu, rng), lag)
     tg = resample_bars(_m1_from_logret(rl, idx, 90_000_000.0, vl, rng), lag)
-    return tg, {"binance": bn.reindex(tg.index), "upbit": up.reindex(tg.index)}
+    # coinone_btc (트랙 C): 다른 심볼(BTC)의 같은 거래소 KRW 봉 — 합성에서는 업비트 경로를 쓴다(인과·비퇴화 검사용)
+    return tg, {"binance": bn.reindex(tg.index), "upbit": up.reindex(tg.index), "coinone_btc": up.reindex(tg.index)}
 
 
 @lru_cache(maxsize=8)

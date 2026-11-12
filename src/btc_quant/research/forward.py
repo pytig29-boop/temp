@@ -404,7 +404,9 @@ def forward_aux_context(env: ResearchEnv, spec, fwd_start: pd.Timestamp, window_
     aux_m1, rows = {}, {}
     for a in keys:
         try:
-            raw = env.data.read_range(fwd_start, window_end, a, symbol, TIMEFRAME)
+            from .campaign import aux_source
+            ex_a, sym_a = aux_source(a, symbol)
+            raw = env.data.read_range(fwd_start, window_end, ex_a, sym_a, TIMEFRAME)
         except _NO_DATA:
             raw = pd.DataFrame()
         if raw.empty:

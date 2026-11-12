@@ -41,6 +41,7 @@ True@t = 봉 t가 닫힌 시점(t+봉길이)까지의 정보로 조건 성립. �
 | `composite_z_upbit` | entry · 합성 점수 · 교차거래소 | `composite_z` 와 같은 z·클립·평균. lead=(r_1(upbit), r_1(upbit)−r_1(target)), lead_gap=(r_1(upbit), −g), g=log close−log upbit_close, upbit_capitulation=(−r_6, −boll_48, +log1p upbit vol) | preset="lead_gap", threshold=1.5 | preset [lead, lead_gap, upbit_capitulation]; threshold [0.5,1,1.5,2] | ✓ (requires `upbit`) | experimental |
 | `trend_ema_4h` | entry · 장기 추세 상태 (managed_hold) | 상태형: `close_t > EMA(close,span)_t·(1+band_bp/1e4)` — 추세 중 계속 True, 앞 span 봉 False. `trend_ema_off` 와 같은 값으로 묶어(`signal_exit.match_entry`) '추세 동안 보유' (docs/MANAGED_HOLD.md) | span=180, band_bp=0 | span [42,90,180,360] (4h: 7/15/30/60일); band_bp [0,50,100,200] | ✓ | experimental |
 | `trend_ema_off` | exit_signal · 장기 추세 꺼짐 (managed_hold) | `close_t < EMA(close,span)_t·(1−band_bp/1e4)`, 앞 span 봉 False. band_bp > 0 = 진입과 히스테리시스 띠 | span=180, band_bp=0 | span [42,90,180,360]; band_bp [0,50,100,200] | ✓ | experimental |
+| `btc_trend_filter` | filter · BTC 추세 켜짐 (트랙 C, 보조 coinone_btc) | 코인원 BTC-KRW 결정 봉 종가 > EMA(span)·(1+band_bp/1e4) — 알트 슬리브 진입을 BTC 추세 국면으로 제한. 앞 span 봉 False | span=42, band_bp=0 | span [42,90,180] (4h: 7/15/30일); band_bp [0,50,100] | ✗ (페이퍼 미연결) | experimental |
 
 ## 결정 주기 호환성 (15m / 1h / 4h, PLAN §10 스윙 연구 — 2026-11-09 추가)
 격자는 봉 개수 단위라 긴 봉에서는 같은 파라미터가 훨씬 긴 벽시계 창이 된다(4h 에서 `lookback=48` = 8일).

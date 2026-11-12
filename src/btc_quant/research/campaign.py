@@ -924,12 +924,21 @@ def load_aux_m1(env: ResearchEnv, tpl: "CampaignTemplate", start=None, end=None,
     out = {}
     sym = symbol or tpl.symbol
     for a in tpl.aux:
-        raw = (env.data.read(segment, a, sym, tpl.timeframe) if segment is not None
-               else env.data.read_range(start, end, a, sym, tpl.timeframe))
+        ex, s2 = aux_source(a, sym)
+        raw = (env.data.read(segment, ex, s2, tpl.timeframe) if segment is not None
+               else env.data.read_range(start, end, ex, s2, tpl.timeframe))
         if raw.empty:
             raise CampaignError(f"no {a} aux data for {segment or (start, end)}")
-        out[a] = prepare_m1(raw, a)
+        out[a] = prepare_m1(raw, ex)
     return out
+
+
+CROSS_SYMBOL_AUX = {"coinone_btc": ("coinone", "BTC-KRW")}   # 보조 키 → (거래소, 고정 심볼) — 다른 심볼을 읽는 보조 데이터
+
+
+def aux_source(key: str, symbol: str) -> tuple[str, str]:
+    """보조 데이터 키 → (거래소, 심볼). 기본은 같은 심볼의 다른 거래소(예: upbit); coinone_btc 는 어떤 슬리브든 코인원 BTC-KRW."""
+    return CROSS_SYMBOL_AUX.get(key, (key, symbol))
 
 
 def data_snapshot(env: ResearchEnv, tpl: "CampaignTemplate", start, end) -> str:
@@ -937,13 +946,15 @@ def data_snapshot(env: ResearchEnv, tpl: "CampaignTemplate", start, end) -> str:
     다자산 유니버스: 첫 자산은 위와 같은 형식, 다른 자산은 `|<SYM>:<id>` 와 `|<aux>/<SYM>:<id>` 를 이어 붙인다."""
     snap = snapshot_id(tpl.exchange, tpl.symbol, tpl.timeframe, start, end, data_root=env.data.data_root)
     for a in tpl.aux:
-        snap += f"|{a}:" + snapshot_id(a, tpl.symbol, tpl.timeframe, start, end, data_root=env.data.data_root)
+        ex, s2 = aux_source(a, tpl.symbol)
+        snap += f"|{a}:" + snapshot_id(ex, s2, tpl.timeframe, start, end, data_root=env.data.data_root)
     for sym in tpl.universe:
         if sym == tpl.symbol:
             continue
         snap += f"|{sym}:" + snapshot_id(tpl.exchange, sym, tpl.timeframe, start, end, data_root=env.data.data_root)
         for a in tpl.aux:
-            snap += f"|{a}/{sym}:" + snapshot_id(a, sym, tpl.timeframe, start, end, data_root=env.data.data_root)
+            ex, s2 = aux_source(a, sym)
+            snap += f"|{a}/{sym}:" + snapshot_id(ex, s2, tpl.timeframe, start, end, data_root=env.data.data_root)
     return snap
 
 
