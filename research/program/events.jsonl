@@ -14,3 +14,4 @@
 {"ts": "2026-11-12T12:09:44+00:00", "kind": "resume", "ops": {"data_present": true, "collector_running": true, "collector_heartbeat_age_s": 4, "collector_watchdog": true, "paper_running": true}}
 {"ts": "2026-11-12T15:09:42+00:00", "kind": "resume", "ops": {"data_present": true, "collector_running": true, "collector_heartbeat_age_s": 5, "collector_watchdog": true, "paper_running": true}}
 {"ts": "2026-11-12T18:08:35+00:00", "kind": "resume", "ops": {"data_present": true, "collector_running": true, "collector_heartbeat_age_s": 0, "collector_watchdog": true, "paper_running": true}}
+{"ts": "2026-11-12T21:07:40+00:00", "kind": "resume", "ops": {"data_present": true, "collector_running": true, "collector_heartbeat_age_s": 2, "collector_watchdog": true, "paper_running": true}}
