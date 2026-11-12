@@ -1,0 +1,143 @@
+{
+  "C1": {
+    "x": 2,
+    "n": 400,
+    "upper95": 0.015655179936468217,
+    "pass": true
+  },
+  "C2": {
+    "x": 1,
+    "n": 200,
+    "rate": 0.005,
+    "upper95": 0.023498470434950704,
+    "pass": true
+  },
+  "C3": {
+    "x": 0,
+    "n": 400,
+    "rate": 0.0,
+    "pass": true
+  },
+  "C4": {
+    "x": 0,
+    "n": 30,
+    "shop_x": 0,
+    "pass": true
+  },
+  "C5": {
+    "x": 0,
+    "n": 40,
+    "rate": 0.0,
+    "pass": true
+  },
+  "C6": {
+    "detection": {
+      "1.5": {
+        "n": 60,
+        "t1": 16,
+        "final": 13,
+        "final_and_beats_bh": 7
+      },
+      "2": {
+        "n": 80,
+        "t1": 32,
+        "final": 20,
+        "final_and_beats_bh": 12
+      },
+      "3": {
+        "n": 60,
+        "t1": 44,
+        "final": 41,
+        "final_and_beats_bh": 29
+      }
+    },
+    "pass": true
+  },
+  "C8": {
+    "x": 0,
+    "pass": true
+  },
+  "passed_safety": true,
+  "detection_ok": true,
+  "failed": [],
+  "kind": "neutral",
+  "t2_gain_pp": 0.0,
+  "hold_out": {
+    "C1": {
+      "x": 1,
+      "n": 200,
+      "upper95": 0.023498470434950704,
+      "pass": false
+    },
+    "C2": {
+      "x": 0,
+      "n": 100,
+      "rate": 0.0,
+      "upper95": 0.029513049607039925,
+      "pass": true
+    },
+    "C3": {
+      "x": 0,
+      "n": 200,
+      "rate": 0.0,
+      "pass": true
+    },
+    "passed_safety": false
+  },
+  "C7": {
+    "markets": 36,
+    "mismatches": 0,
+    "pass": true
+  },
+  "C9": {
+    "t1_x": 0,
+    "n": 80,
+    "pass": true
+  },
+  "passed": true,
+  "changes": [],
+  "base_ruleset": "52663b7f8d67490acda98e160b782559a17f44c9a4619ab8e5c60aad7e1d8d3c",
+  "package": {
+    "g1_min_trades": 300,
+    "g1_min_recent": 60,
+    "g2_frac": 0.05,
+    "g2_min_sharpe": 0.0,
+    "g3_ratio": 0.25,
+    "g4_roll": 0.6,
+    "g4_recent": 0.0,
+    "g5_dsr": 0.95,
+    "g5_pbo": 0.3,
+    "dsr_n": "current",
+    "g6_sharpe": 0.0,
+    "g6_mdd": 0.2,
+    "g6_stress": null,
+    "g6_mc": 0.2,
+    "g6_dd_mode": "size",
+    "g6_min_scale": 0.25,
+    "g6_size_dev": true,
+    "g6_worst_month": -0.08,
+    "val_per_campaign": 1,
+    "val_mode": "stouffer",
+    "val_alpha": 0.05,
+    "val_cap": 20,
+    "rob_latency": 0.5,
+    "rob_outliers": 0.0,
+    "rob_loyo": 0.0,
+    "rob_cost_mult": 1.5,
+    "rob_regime": 0.7,
+    "rob_alpha_t": 1.5
+  },
+  "final": {
+    "alpha_base": 0.05,
+    "lockbox_budget": 5,
+    "oos_alpha": 0.1,
+    "max_mdd": 0.2,
+    "max_mc_mdd95": 0.2,
+    "worst_month_min": -0.08,
+    "min_position_scale": 0.25,
+    "require_beat_bh": true
+  },
+  "L": 0,
+  "n_bank": 670,
+  "created": "2026-11-12T03:18:01.059194+00:00"
+}
