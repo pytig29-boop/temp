@@ -26,3 +26,17 @@ def test_no_program_keeps_defaults(tmp_path):
     led = Ledger(tmp_path / "research" / "ledger")
     b = LessonBook(tmp_path / "research" / "lessons", ledger=led).trial_budget("x")
     assert b["global_cap"] == 2000 and "program_cap" not in b
+
+
+def test_pre_program_trials_do_not_count(tmp_path):
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
+    book = _book(tmp_path, start=now.isoformat(timespec="seconds"))
+    old = (now - timedelta(days=1)).isoformat(timespec="seconds")
+    for i in range(200):
+        book.ledger.append("runs", {"campaign_id": "camp-old", "logic_hash": f"h{i}", "family": "f"})
+    recs = book.ledger.path("runs").read_text().splitlines()
+    import json
+    book.ledger.path("runs").write_text("\n".join(json.dumps({**json.loads(x), "ts": old}) for x in recs) + "\n")
+    b = book.trial_budget("newfam")
+    assert b["remaining"] == 60 and b["global_used_7d"] == 0

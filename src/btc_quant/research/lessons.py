@@ -1202,6 +1202,11 @@ class LessonBook:
                 allowance, reason = int(pc.get("family_weekly_trials", 60)), f"released by AI: {rel.get('reason')}"
             allowance = min(allowance, int(pc.get("family_weekly_trials", 60)))
             gcap = min(gcap, int(pc.get("weekly_trials", 150)))
+            ps = str(prog["start"])         # 프로그램 주간 예산은 프로그램 시작 이후 시도만 센다
+            glob_used = {k for k in glob_used if k in {(r["campaign_id"], r["logic_hash"])
+                                                      for r in self.ledger.records("runs")
+                                                      if (r.get("ts") or "") >= max(since, ps)}}
+            fam_used = {k for k in fam_used if k in glob_used}
             used_prog = {(r["campaign_id"], r["logic_hash"]) for r in self.ledger.records("runs")
                          if (r.get("ts") or "") >= str(prog["start"])}
             total_left = int(pc.get("max_trials", 400)) - len(used_prog)
