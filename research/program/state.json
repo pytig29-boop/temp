@@ -24,6 +24,10 @@
     {
       "task": "report to user: guard hook floor/autonomy rule change still needs user approval (AUTONOMY.md deviation)",
       "added": "2026-11-12T03:25:02+00:00"
+    },
+    {
+      "task": "lockbox human-approval path ready (final_human, request filed); user has no local PC now. If user later pushes research/lockbox_approvals/<cid>.yaml -> run `python -m btc_quant.research.final_human run --candidate r1b_vol_breakout_donch_4h_u3_half_0dce65e919_v1 --round 1`. Otherwise use autonomous path after paper PASS (2026-11-19).",
+      "added": "2026-11-12T08:42:01+00:00"
     }
   ],
   "done": [
@@ -89,7 +93,7 @@
   ],
   "background": [],
   "notes": [],
-  "updated": "2026-11-12T03:25:02+00:00",
+  "updated": "2026-11-12T08:42:01+00:00",
   "maintenance": {
     "open": false,
     "reason": "",
