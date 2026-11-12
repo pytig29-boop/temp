@@ -1,0 +1,71 @@
+name: managed_hold_4h_u3_screen
+family: managed_hold
+universe:
+- BTC-KRW
+- XRP-KRW
+- ETH-KRW
+data:
+  exchange: coinone
+  timeframe: 1m
+  aux: []
+bar_minutes: 240
+signals:
+- entry:
+    block: trend_ema_4h
+    grid:
+      span:
+      - 42
+      - 90
+      - 180
+      - 360
+      band_bp:
+      - 0.0
+  filters:
+  - []
+study:
+  horizons:
+  - 240
+  - 1440
+  - 2880
+  - 4320
+  - 10080
+  primary_horizons:
+  - 2880
+  - 4320
+  - 10080
+  min_gap_min: 1440
+  n_null: 1000
+  seed: 0
+  min_events: 300
+  stratify: hour_vol
+costs:
+  primary: coinone_conservative
+  grade: upbit_conservative
+correction:
+  method: bh
+  alpha: 0.1
+budget: 4
+hypothesis:
+  text: On the fixed Coinone universe [BTC-KRW, XRP-KRW, ETH-KRW] (D15, pooled) at
+    4h decisions, the long-horizon trend state trend_ema_4h(span, band 0) - close
+    above EMA(close, span) for span 42/90/180/360 4h bars (7/15/30/60 days) - is followed
+    by 2-7 day returns above a per-asset matched (KST hour x vol) null, net of per-asset
+    coinone_conservative round-trip cost (D17).
+  rationale: 'Mechanism M3 at long horizons (time-series momentum / moving-average
+    timing; research/knowledge/mechanisms.md): trend-following capital and leverage-liquidation
+    cascades make crypto down-trends persistent, so being out of the market while
+    price is below a slow EMA should avoid part of the deep drawdowns at a small cost
+    in up-trends. Counterparty: holders who keep buying early in a down-trend and
+    sell late into it. Purpose (user decision B, docs/MANAGED_HOLD.md): risk-managed
+    holding of the equal-weight basket - the target is drawdown reduction and a better
+    Sharpe than equal-weight B&H, not a high-frequency edge. This screen only asks
+    whether the trend state carries timing information (conditional forward return
+    vs matched random decision times). Kills: whipsaw cost around the EMA, late exits
+    in fast crashes (gap risk), long sideways regimes, drift confound (the matched
+    null keeps the drift). Evidence (Dev only; lockbox none, Val none): none - prepared
+    before any data was looked at; spans are the block grid.'
+  success_criteria: 'Per config: BH q=0.10 over the managed_hold family screen set,
+    pooled n_events >= 300, per-asset coinone_conservative net mean > 0 at the best
+    primary horizon (2880/4320/10080). A strategy campaign (research/campaign_templates/managed_hold_4h_u3.yaml)
+    is run only after the gate review AND only for spans that pass. Per-asset rows
+    are report-only.'

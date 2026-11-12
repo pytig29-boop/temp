@@ -1,0 +1,5 @@
+label,family,entry,filters,n_events,p_signal,best_h,excess_bp,z,net_bp[coinone_conservative],net_bp[upbit_conservative],info_h,profile,n_events[BTC-KRW],n_events[XRP-KRW],n_events[ETH-KRW],significant,passed,fail_reason
+donchian_breakout(lookback=24),vol_breakout,donchian_breakout,-,1088,0.00540737,1440,51.3948,2.91081,74.6447,61.8062,1440,peaked,401,299,388,True,True,
+donchian_breakout(lookback=48),vol_breakout,donchian_breakout,-,807,0.000823266,1440,71.5754,3.45571,95.4944,82.6372,1440,peaked,303,205,299,True,True,
+"atr_channel_breakout(span=24,mult=3.0)",vol_breakout,atr_channel_breakout,-,944,0.0032999,480,37.0081,3.06182,38.2345,25.4318,480,peaked,360,243,341,True,True,
+"ema_slope(span=24,min_slope_bp=5.0)",vol_breakout,ema_slope,-,6523,0.0110736,480,9.29479,2.67908,8.28741,-4.42786,480,peaked,2171,2070,2282,True,True,

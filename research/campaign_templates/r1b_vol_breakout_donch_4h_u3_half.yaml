@@ -1,0 +1,65 @@
+# Autonomous program R1 track B campaign (2026-11-12), exits fixed from screen camp-000033 suggestions before running. Grid: lookback 48 only (power check).
+name: r1b_vol_breakout_donch_4h_u3_half
+universe:
+- BTC-KRW
+- XRP-KRW
+- ETH-KRW
+data:
+  exchange: coinone
+  timeframe: 1m
+  aux: []
+timeframe: 4h
+entry:
+  block: donchian_breakout
+  grid:
+    lookback:
+    - 48
+filters:
+- []
+exits:
+  mode: atr
+  sl_atr:
+  - 2.0
+  tp_atr:
+  - 1.5
+  - 3.0
+  max_hold_min:
+  - 1440
+  atr_bars: 14
+sizing:
+  entry_fraction:
+  - 0.5
+from_screen: camp-000033
+power:
+  target_sharpe: 1.57
+costs:
+  primary: coinone_conservative
+  grade: upbit_conservative
+  stress: coinone_stress
+  grade_stress: upbit_stress
+budget: 2
+family: vol_breakout
+hypothesis:
+  text: 'Coinone 3-asset universe [BTC-KRW, XRP-KRW, ETH-KRW] (D15, pooled, equal
+    sleeves), 4h decisions: donchian_breakout(48) with half-size entries (entry_fraction
+    0.5) and ATR exits (SL 2 ATR, TP 1.5/3 ATR, max hold 1440 min) earns positive
+    per-asset coinone_conservative net MTM returns that pass G0-G6 (rs-001) and the
+    robustness suite.'
+  rationale: 'Autonomous program R1 track B. Mechanism M3 at multi-day horizons (time-series
+    momentum; stop/short-liquidation cascades; trend-following flows). Counterparty:
+    counter-trend limit sellers and liquidated shorts at 4-8 day highs; late chasers
+    at exit. Kills: long-only bear regime 2022, regime concentration, per-asset spreads
+    (D17), BTC sleeve re-uses a family with VAL_FAIL history (skeptic must weigh).
+    Exits fixed from the screen before the campaign: SL = |MAE| p75 suggestion 1.85-1.91
+    ATR rounded to 2.0; TP = MFE-median suggestion 1.34-1.43 ATR rounded to 1.5 and
+    2x; max hold = information horizon 1440 min. Evidence (Dev only; lockbox none,
+    Val none): screen camp-000033 pooled donchian 24 n 1088 p 0.0054 excess 51 bp
+    net 75 bp @1440; donchian 48 n 807 p 0.0008 excess 72 bp net 96 bp @1440. Plausible
+    Sharpe z/sqrt(4.83 y) ~1.4. Grid shrunk to the screen''s strongest entry (lookback
+    48) before running: with lookback 24 included the strict power check required
+    Sharpe 1.41 > plausible 1.40 (family vol_breakout already has 100 trials). Target
+    Sharpe = screen z at the information horizon / sqrt(Dev years) = 3.46/sqrt(4.83)
+    = 1.57 (same convention as earlier campaigns); the 1.40 first written was a rough
+    pair-level figure.'
+  success_criteria: G0-G6 under ruleset rs-001 (MTM, size scaling, combined Val evidence),
+    robustness suite, and per-asset results reported.

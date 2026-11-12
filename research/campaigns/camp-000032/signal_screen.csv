@@ -1,0 +1,5 @@
+label,family,entry,filters,n_events,p_signal,best_h,excess_bp,z,net_bp[coinone_conservative],net_bp[upbit_conservative],info_h,profile,n_events[BTC-KRW],n_events[XRP-KRW],n_events[ETH-KRW],significant,passed,fail_reason
+"trend_ema_4h(span=42,band_bp=0.0)",managed_hold,trend_ema_4h,-,3027,0.349871,4320,28.9203,1.19204,83.4891,70.6553,240,decaying (z maximal at the shortest horizon),1044,942,1041,False,False,not significant after correction
+"trend_ema_4h(span=90,band_bp=0.0)",managed_hold,trend_ema_4h,-,2840,0.202817,2880,25.3805,1.49386,61.3173,48.4803,1440,peaked,1012,891,937,False,False,not significant after correction
+"trend_ema_4h(span=180,band_bp=0.0)",managed_hold,trend_ema_4h,-,2795,0.306046,2880,20.9695,1.27015,56.5392,43.7058,1440,peaked,997,880,918,False,False,not significant after correction
+"trend_ema_4h(span=360,band_bp=0.0)",managed_hold,trend_ema_4h,-,2853,1,2880,6.28412,0.396311,38.758,25.9626,1440,peaked,1007,885,961,False,False,not significant after correction

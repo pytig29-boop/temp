@@ -3,7 +3,7 @@
 > `btc_quant.research.lessons.render_markdown()` 생성물. **직접 편집 금지** (원본: `research/lessons/*.jsonl`).
 > 사실(Facts)은 파이프라인 결과에서 자동 추출되어 불변이다. 해석(Interpretations)은 AI 작성이며
 > 후속 캠페인으로 verified/refuted 되기 전까지 **unverified** 이다. Val/잠금은 결과 코드만.
-> 생성: 2026-11-10T07:12:02+00:00 · 사실 28 · 해석 16 · 사후분석 7 · 파생 23
+> 생성: 2026-11-12T01:58:35+00:00 · 사실 30 · 해석 16 · 사후분석 7 · 파생 23
 
 ## 실패 유형 (자동 분류)
 
@@ -27,7 +27,8 @@
 | family | 캠페인 | 누적 시도 | 결과 | 주 실패 유형 |
 |---|---|---|---|---|
 | `liq_meanrev` | 11 | 66 | passed 4, failed 7 | `NO_SIGNAL`×3, `COST_EATEN`×2, `PARAM_SPIKE`×1, `UNSTABLE`×1 |
-| `vol_breakout` | 14 | 96 | passed 6, failed 8 | `PARAM_SPIKE`×2, `VAL_FAIL`×2, `NO_SIGNAL`×2, `SELECTION_BIAS`×1, `COST_EATEN`×1 |
+| `managed_hold` | 1 | 4 | failed 1 | `NO_SIGNAL`×1 |
+| `vol_breakout` | 15 | 100 | passed 7, failed 8 | `PARAM_SPIKE`×2, `VAL_FAIL`×2, `NO_SIGNAL`×2, `SELECTION_BIAS`×1, `COST_EATEN`×1 |
 | `xvenue_upbit_lead` | 3 | 16 | failed 2, passed 1 | `COST_EATEN`×1, `LOW_SAMPLE`×1 |
 
 ## 교훈 (사실 → 해석)
@@ -532,6 +533,34 @@
   - #1 `c4_vol_breakout_roc_1h_u3_half_91a6706e89` SR_w=-0.483 trades=5702 first_failed=G2 → `COST_EATEN` ['COST_EATEN', 'UNSTABLE', 'SELECTION_BIAS'] · val=not_run
 - 범위: coinone BTC-KRW 1m · dev 2021-01-01T00:00:00+00:00~2025-11-01T00:00:00+00:00 · 블록 roc_threshold / [[]] · 재검토 기한 2027-05-09
 - 재검토 조건: Dev data period or segment boundaries change (new data, lockbox rolled into Dev/Val); venue or cost model changes (e.g. Coinone 0% fee promotion ends, Upbit fee changes); timeframe / decision interval changes (5m ↔ 1m); a block used here is re-implemented (new block version) or an engine bug is fixed; review date 2027-05-09 passes
+
+### fact-000029 · signal_screen `camp-000032` · family `managed_hold`
+
+**사실 (자동, 불변)**
+
+- 가설 hyp-000031: On the fixed Coinone universe [BTC-KRW, XRP-KRW, ETH-KRW] (D15, pooled) at 4h decisions, the long-horizon trend state trend_ema_4h(span, band 0) - close above EMA(close, span) for span 42/90/180/360 4h bars (7/15/30/60 days) - is followed by 2-7 day returns above a per-asset matched (KST hour x vol) null, net of per-asset coinone_conservative round-trip cost (D17).
+- 결과: **failed** · 주 실패 유형: `NO_SIGNAL` · 분포: `NO_SIGNAL`×4
+- 깔때기(전체 None 스펙): G1 None · SR_w>0 None · G4 None | 상위 None:  · Dev 생존 None
+  - `trend_ema_4h(span=42,band_bp=0.0)` events=3027 p=0.350 best_h=4320 → `NO_SIGNAL`
+  - `trend_ema_4h(span=90,band_bp=0.0)` events=2840 p=0.203 best_h=2880 → `NO_SIGNAL`
+  - `trend_ema_4h(span=180,band_bp=0.0)` events=2795 p=0.306 best_h=2880 → `NO_SIGNAL`
+  - `trend_ema_4h(span=360,band_bp=0.0)` events=2853 p=1.000 best_h=2880 → `NO_SIGNAL`
+- 범위: coinone None 1m · dev 2021-01-01T00:00:00+00:00~2025-11-01T00:00:00+00:00 · 블록 ['trend_ema_4h'] / None · 재검토 기한 2027-05-11
+- 재검토 조건: Dev data period changes; venue/cost model changes; decision interval changes (bar_minutes)
+
+### fact-000030 · signal_screen `camp-000033` · family `vol_breakout`
+
+**사실 (자동, 불변)**
+
+- 가설 hyp-000032: On the fixed Coinone universe [BTC-KRW, XRP-KRW, ETH-KRW] (D15, pooled, per-asset matched null) at 4h decisions, the same pre-registered entries as the BTC-only 4h screen camp-000013-era c2b (donchian_breakout 24/48, atr_channel_breakout(24,3), ema_slope(24,5bp)) are followed by 8-48 h returns above a matched (KST hour x vol) null, net of per-asset coinone_conservative cost (D17).
+- 결과: **passed** · 주 실패 유형: `None` · 분포: –
+- 깔때기(전체 None 스펙): G1 None · SR_w>0 None · G4 None | 상위 None:  · Dev 생존 None
+  - `donchian_breakout(lookback=24)` events=1088 p=0.005 best_h=1440 → PASS
+  - `donchian_breakout(lookback=48)` events=807 p=0.001 best_h=1440 → PASS
+  - `atr_channel_breakout(span=24,mult=3.0)` events=944 p=0.003 best_h=480 → PASS
+  - `ema_slope(span=24,min_slope_bp=5.0)` events=6523 p=0.011 best_h=480 → PASS
+- 범위: coinone None 1m · dev 2021-01-01T00:00:00+00:00~2025-11-01T00:00:00+00:00 · 블록 ['atr_channel_breakout', 'donchian_breakout', 'ema_slope'] / None · 재검토 기한 2027-05-11
+- 재검토 조건: Dev data period changes; venue/cost model changes; decision interval changes (bar_minutes)
 
 ## 파생 가설 (계열 상속)
 
