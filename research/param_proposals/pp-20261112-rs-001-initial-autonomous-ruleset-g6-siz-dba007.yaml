@@ -1,0 +1,30 @@
+# 파라미터 변경 제안 — 사람 승인 전에는 아무 효과 없음. 승인: python -m btc_quant.params approve <id>
+id: pp-20261112-rs-001-initial-autonomous-ruleset-g6-siz-dba007
+created: '2026-11-12T01:27:34+00:00'
+created_by: ai:autonomy (plan Phase 2.8, initial ruleset rs-001)
+class: 2
+kind: criterion
+title: rs-001 initial autonomous ruleset (G6 size incl. Dev drawdown and worst month -8%, 1 Val per campaign, G8
+  replay paper)
+evidence: research/reports/certification_rs001_20261112.md
+rationale: Initial ruleset fixed before the program and before any new Val/lockbox use (not counted in L). Synthetic
+  certification bank-v1 (670 markets).
+changes:
+- key: gates.G6.size_includes_dev
+  from: false
+  to: true
+  target: param:gates.G6.size_includes_dev
+- key: gates.G6.worst_month_min
+  from: null
+  to: -0.08
+  target: param:gates.G6.worst_month_min
+- key: gates.G6.max_val_per_campaign
+  from: null
+  to: 1
+  target: param:gates.G6.max_val_per_campaign
+- key: gates.G8.paper_mode
+  from: classic
+  to: replay
+  target: param:gates.G8.paper_mode
+status: pending
+content_hash: 3096e64de2c863fb
