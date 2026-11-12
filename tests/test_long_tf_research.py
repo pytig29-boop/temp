@@ -82,7 +82,8 @@ def test_rejected_blocks_are_actually_degenerate_at_4h():
 def test_allowed_blocks_run_causally_on_long_bars(b):
     m1 = _m1(60, seed=b)
     bars = to_tf(m1, b)
-    aux = {"upbit": bars.assign(close=bars["close"] * 1.0003), "binance": bars.assign(close=bars["close"] * 0.9998)}
+    aux = {"upbit": bars.assign(close=bars["close"] * 1.0003), "binance": bars.assign(close=bars["close"] * 0.9998),
+           "coinone_btc": bars.assign(close=bars["close"] * 1.0001)}
     ctx = Context(aux=aux, bar=pd.Timedelta(minutes=b))
     cut = len(bars) * 2 // 3
     for d in REGISTRY.all(include_experimental=True):
