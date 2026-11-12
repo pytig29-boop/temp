@@ -6,3 +6,4 @@
 {"ts": "2026-11-12T02:55:14+00:00", "kind": "maintenance", "op": "close", "reason": ""}
 {"ts": "2026-11-12T02:55:38+00:00", "kind": "maintenance", "op": "open", "reason": "track C: make coinone_btc live-available (paper aux wiring + LIVE_AUX)"}
 {"ts": "2026-11-12T03:06:46+00:00", "kind": "resume", "ops": {"data_present": true, "collector_running": true, "collector_heartbeat_age_s": 1, "collector_watchdog": true, "paper_running": true}}
+{"ts": "2026-11-12T03:18:03+00:00", "kind": "maintenance", "op": "close", "reason": ""}
