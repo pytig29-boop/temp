@@ -11,3 +11,4 @@
 {"ts": "2026-11-12T06:11:36+00:00", "kind": "resume", "ops": {"data_present": true, "collector_running": true, "collector_heartbeat_age_s": 0, "collector_watchdog": true, "paper_running": true}}
 {"ts": "2026-11-12T08:42:01+00:00", "kind": "decision", "note": "user: no local PC; continue paper, lockbox waits"}
 {"ts": "2026-11-12T09:07:03+00:00", "kind": "resume", "ops": {"data_present": true, "collector_running": true, "collector_heartbeat_age_s": 4, "collector_watchdog": true, "paper_running": true}}
+{"ts": "2026-11-12T12:09:44+00:00", "kind": "resume", "ops": {"data_present": true, "collector_running": true, "collector_heartbeat_age_s": 4, "collector_watchdog": true, "paper_running": true}}
