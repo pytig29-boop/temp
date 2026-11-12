@@ -160,7 +160,8 @@ def build_dossier(strategy_id: str, version: int, root=None) -> Path:
     vals = [x for x in led.records("val_evaluations") if x.get("event") == "open" and x.get("logic_hash") == lh]
     meta = {"candidate_id": cid, "strategy_id": strategy_id, "version": version, "state": st, "logic_hash": lh,
             "canonical_hash": spec.canonical_hash(), "campaign_id": camp_id, "family": fam,
-            "family_trials": led.trials_count(family=fam) if fam else None, "program_trials_floor_used": True,
+            "family_trials": led.trials_count(family=fam) if fam else None,
+            "dsr_trials_rule": "max(k_eff, max(N_family, N_program_since_start) * k_eff / n_campaign_specs) * (1 + L_dev)",
             "loosenings_L": led.loosenings(), "val_openings": [{"id": x["id"], "ruleset": x.get("ruleset"),
                                                                  "ts": x["ts"]} for x in vals],
             "rule_locks": sorted(p.name for p in (r / "research" / "rule_locks").glob("rs-*.json")),

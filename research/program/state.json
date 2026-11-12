@@ -6,15 +6,7 @@
   "cycle": "R1",
   "queue": [
     {
-      "task": "skeptic review r1b_..._0dce65e919 (running)",
-      "added": "2026-11-12T02:03:10+00:00"
-    },
-    {
       "task": "paper 7-14d r1b_..._0dce65e919 (started 2026-11-12)",
-      "added": "2026-11-12T02:03:10+00:00"
-    },
-    {
-      "task": "judge audit + dossier after skeptic",
       "added": "2026-11-12T02:03:10+00:00"
     },
     {
@@ -63,9 +55,19 @@
       "task": "R1 track B screen camp-000033 + campaign camp-000034",
       "done": "2026-11-12T02:03:10+00:00",
       "note": "1 validated: r1b_vol_breakout_donch_4h_u3_half_0dce65e919"
+    },
+    {
+      "task": "skeptic r1b_..._0dce65e919",
+      "done": "2026-11-12T02:15:46+00:00",
+      "note": "SURVIVES (weak)"
+    },
+    {
+      "task": "judge r1b_..._0dce65e919",
+      "done": "2026-11-12T02:15:46+00:00",
+      "note": "PASS"
     }
   ],
   "background": [],
   "notes": [],
-  "updated": "2026-11-12T02:03:10+00:00"
+  "updated": "2026-11-12T02:15:46+00:00"
 }

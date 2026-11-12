@@ -8,7 +8,7 @@
  "campaign_id": "camp-000034",
  "family": "vol_breakout",
  "family_trials": 102,
- "program_trials_floor_used": true,
+ "dsr_trials_rule": "max(k_eff, max(N_family, N_program_since_start) * k_eff / n_campaign_specs) * (1 + L_dev)",
  "loosenings_L": 0,
  "val_openings": [
   {
@@ -23,5 +23,5 @@
  "blocks": [
   "donchian_breakout"
  ],
- "built": "2026-11-12T02:08:44+00:00"
+ "built": "2026-11-12T02:15:46+00:00"
 }
