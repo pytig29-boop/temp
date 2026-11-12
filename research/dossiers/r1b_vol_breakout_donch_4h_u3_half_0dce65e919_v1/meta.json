@@ -1,0 +1,27 @@
+{
+ "candidate_id": "r1b_vol_breakout_donch_4h_u3_half_0dce65e919_v1",
+ "strategy_id": "r1b_vol_breakout_donch_4h_u3_half_0dce65e919",
+ "version": 1,
+ "state": "validated",
+ "logic_hash": "0dce65e919fc1171",
+ "canonical_hash": "46fb49eb5868af4f",
+ "campaign_id": "camp-000034",
+ "family": "vol_breakout",
+ "family_trials": 102,
+ "program_trials_floor_used": true,
+ "loosenings_L": 0,
+ "val_openings": [
+  {
+   "id": "val-000005",
+   "ruleset": "rs-001",
+   "ts": "2026-11-12T01:59:53+00:00"
+  }
+ ],
+ "rule_locks": [
+  "rs-001.json"
+ ],
+ "blocks": [
+  "donchian_breakout"
+ ],
+ "built": "2026-11-12T02:08:44+00:00"
+}

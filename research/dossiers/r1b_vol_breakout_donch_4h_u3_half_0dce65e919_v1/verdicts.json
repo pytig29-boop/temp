@@ -1,0 +1,19 @@
+{
+ "logic_hash": "0dce65e919fc1171",
+ "skeptic": "SURVIVES",
+ "notes": {
+  "skeptic": "WEAK, medium confidence. Major: power target re-derived 1.40->1.57 after the strict check failed; BTC sleeve repeats camp-000010 BTC 4h screen; XRP+ETH-only Sharpe 1.06 < required 1.49; family came back to 4h knowing 1h Val fails. Reproduction gap 554 vs 560 explained (skeptic script skipped prepare_m1); '+dirty' Val stamp: Val opening carries rs-001, ruleset files clean."
+ },
+ "history": [
+  {
+   "ts": "2026-11-12T02:08:44+00:00",
+   "kind": "skeptic",
+   "value": "SURVIVES"
+  },
+  {
+   "ts": "2026-11-12T02:08:52+00:00",
+   "kind": "skeptic",
+   "value": "SURVIVES"
+  }
+ ]
+}

@@ -128,6 +128,65 @@ def resume(root=None) -> dict:
     return out
 
 
+def build_dossier(strategy_id: str, version: int, root=None) -> Path:
+    """후보 서류 묶음 `research/dossiers/<후보>/` (§4-F): judge 에게 주는 유일한 입력. 연구자 설명·대화·Val 수치는 넣지 않는다."""
+    import shutil
+    from btc_quant.registry.ledger import Ledger
+    from btc_quant.registry.strategies import StrategyRegistry, key_of
+    r = repo_root(root)
+    reg = StrategyRegistry(r)
+    cid = key_of(strategy_id, version)
+    st = reg.state_of(strategy_id, version)
+    spec = reg.load(strategy_id, version)
+    lh = spec.logic_hash()
+    led = Ledger(r / "research" / "ledger")
+    camp_id = next(((t.get("evidence") or {}).get("campaign_id") for t in led.transitions(strategy_id)
+                    if (t.get("evidence") or {}).get("campaign_id")), None)
+    d = r / "research" / "dossiers" / cid
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "spec.yaml").write_text(spec.to_yaml(), encoding="utf-8")
+    camp = led.get("campaigns", camp_id) if camp_id else None
+    hyp = led.get("hypotheses", camp["hypothesis_id"]) if camp else None
+    dev_runs = [x for x in led.records("runs") if x.get("campaign_id") == camp_id and x.get("logic_hash") == lh
+                and (x.get("period") or {}).get("segment", "dev") == "dev"]
+    for x in dev_runs:
+        x.pop("spec", None)
+    (d / "preregistration.json").write_text(json.dumps({"hypothesis": hyp, "campaign": camp, "dev_runs": dev_runs},
+                                                       ensure_ascii=False, indent=1, default=str), encoding="utf-8")
+    pp = r / "research" / "campaigns" / str(camp_id) / "pipeline_public.json"
+    if pp.exists():
+        shutil.copy(pp, d / "pipeline_public.json")
+    fam = (camp or {}).get("family")
+    vals = [x for x in led.records("val_evaluations") if x.get("event") == "open" and x.get("logic_hash") == lh]
+    meta = {"candidate_id": cid, "strategy_id": strategy_id, "version": version, "state": st, "logic_hash": lh,
+            "canonical_hash": spec.canonical_hash(), "campaign_id": camp_id, "family": fam,
+            "family_trials": led.trials_count(family=fam) if fam else None, "program_trials_floor_used": True,
+            "loosenings_L": led.loosenings(), "val_openings": [{"id": x["id"], "ruleset": x.get("ruleset"),
+                                                                 "ts": x["ts"]} for x in vals],
+            "rule_locks": sorted(p.name for p in (r / "research" / "rule_locks").glob("rs-*.json")),
+            "blocks": sorted({b for b in [spec.entry.block, *[f.block for f in spec.filters]]}),
+            "built": utcnow()}
+    (d / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
+    vp = d / "verdicts.json"
+    if not vp.exists():
+        vp.write_text(json.dumps({"logic_hash": lh}, indent=1), encoding="utf-8")
+    return d
+
+
+def set_verdict(candidate_id: str, kind: str, value: str, root=None, note: str = "") -> dict:
+    if kind not in ("skeptic", "judge", "paper"):
+        raise ProgramError("verdict kind must be skeptic|judge|paper")
+    vp = repo_root(root) / "research" / "dossiers" / candidate_id / "verdicts.json"
+    v = json.loads(vp.read_text(encoding="utf-8")) if vp.exists() else {}
+    v[kind] = value
+    v.setdefault("notes", {})[kind] = note
+    v.setdefault("history", []).append({"ts": utcnow(), "kind": kind, "value": value})
+    vp.parent.mkdir(parents=True, exist_ok=True)
+    vp.write_text(json.dumps(v, ensure_ascii=False, indent=1), encoding="utf-8")
+    log_event("verdict", root, candidate=candidate_id, verdict_kind=kind, value=value)
+    return v
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="btc_quant.research.program")
     ap.add_argument("--root", default=None)
