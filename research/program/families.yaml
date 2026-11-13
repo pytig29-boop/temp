@@ -1,4 +1,4 @@
-# 계열 해제 기록 (autonomous_research_plan §3 · §12). lessons.trial_budget 이 읽는다.
+# 계열 해제·신설 기록 (autonomous_research_plan §3 · §12). lessons.trial_budget 이 읽는다.
 liq_meanrev:
   released: false
   ts: '2026-11-12T03:40:00+00:00'
@@ -13,3 +13,14 @@ liq_meanrev:
     ts: '2026-11-12T03:45:00+00:00'
     reason: 'track D screen camp-000037 0/2 passed (bollinger+trend n 150 excess -1
       bp; rsi+trend n 17): release condition "screen fails -> refreeze"'
+session_premium:
+  created: '2026-11-13'
+  released: true
+  reason: new family (R4 track E, docs/prompts/opus_r4_plan.md)
+  mechanism: C1 risk premium for holding crypto while major equity markets are closed
+    (21:00 UTC); C4 KST 09:00 daily-boundary bot liquidation pressure reversal
+  counterparty: participants de-risking at equity close; bots selling at 09:00 KST
+    regardless of price
+  reexamine_if: screen fails -> family closed; no other clock times / weekday / regime
+    variants (R4 plan R2)
+  scope: BTC-KRW, 1h and 5m decisions, two clock times only (21:00 UTC, 00:05 UTC)

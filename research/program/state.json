@@ -3,7 +3,7 @@
   "plan": "docs/prompts/autonomous_research_plan.md",
   "phase": "research",
   "plan_phase": "4",
-  "cycle": "R3-closed",
+  "cycle": "R4-open",
   "queue": [
     {
       "task": "paper 7-14d r1b_..._0dce65e919 (started 2026-11-12)",
@@ -18,7 +18,7 @@
       "added": "2026-11-12T02:16:10+00:00"
     },
     {
-      "task": "after paper PASS (day 7 = 2026-11-19, or EXTEND to 14d = 2026-11-26): phase final -> final_verdict.run(1) -> lockbox auto-authorize (<=5) -> phase report -> final report §10 -> user approval of bundle",
+      "task": "after paper PASS (day 7 = 2026-11-19, or EXTEND to 14d = 2026-11-26): phase final -> final_verdict.run(1) -> lockbox auto-authorize (<=5) -> phase report -> final report §10 -> user approval of bundle — ONLY AFTER R4 closes (docs/prompts/opus_r4_plan.md §8; deadline 2026-12-01)",
       "added": "2026-11-12T03:25:02+00:00"
     },
     {
@@ -28,6 +28,26 @@
     {
       "task": "lockbox human-approval path ready (final_human, request filed); user has no local PC now. If user later pushes research/lockbox_approvals/<cid>.yaml -> run `python -m btc_quant.research.final_human run --candidate r1b_vol_breakout_donch_4h_u3_half_0dce65e919_v1 --round 1`. Otherwise use autonomous path after paper PASS (2026-11-19).",
       "added": "2026-11-12T08:42:01+00:00"
+    },
+    {
+      "task": "R4 step 0-1: clock_entry_utc block, signal_study vol stratum, log_exploration 24 (literature), data-steward session check",
+      "added": "2026-11-13T08:42:09+00:00"
+    },
+    {
+      "task": "R4 track E: screens E1 (21:00 UTC 1h) / E2 (00:05 UTC 5m) -> campaigns if pass",
+      "added": "2026-11-13T08:42:09+00:00"
+    },
+    {
+      "task": "R4 track F: vol overlay report calc (F-1) -> vol_cap screen/campaign if gate",
+      "added": "2026-11-13T08:42:09+00:00"
+    },
+    {
+      "task": "R4 track G: KRW premium data prep (2h cap, no screen)",
+      "added": "2026-11-13T08:42:09+00:00"
+    },
+    {
+      "task": "R4 close by 2026-11-17 24:00 UTC: cycleR4 report, lessons, mechanisms.md, state R4-closed",
+      "added": "2026-11-13T08:42:09+00:00"
     }
   ],
   "done": [
@@ -93,7 +113,7 @@
   ],
   "background": [],
   "notes": [],
-  "updated": "2026-11-12T08:42:01+00:00",
+  "updated": "2026-11-13T08:42:09+00:00",
   "maintenance": {
     "open": false,
     "reason": "",
