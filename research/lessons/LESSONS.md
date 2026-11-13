@@ -3,7 +3,7 @@
 > `btc_quant.research.lessons.render_markdown()` 생성물. **직접 편집 금지** (원본: `research/lessons/*.jsonl`).
 > 사실(Facts)은 파이프라인 결과에서 자동 추출되어 불변이다. 해석(Interpretations)은 AI 작성이며
 > 후속 캠페인으로 verified/refuted 되기 전까지 **unverified** 이다. Val/잠금은 결과 코드만.
-> 생성: 2026-11-13T08:48:50+00:00 · 사실 37 · 해석 19 · 사후분석 7 · 파생 24
+> 생성: 2026-11-13T08:50:26+00:00 · 사실 38 · 해석 19 · 사후분석 7 · 파생 24
 
 ## 실패 유형 (자동 분류)
 
@@ -28,7 +28,7 @@
 |---|---|---|---|---|
 | `liq_meanrev` | 12 | 68 | passed 4, failed 8 | `NO_SIGNAL`×4, `COST_EATEN`×2, `PARAM_SPIKE`×1, `UNSTABLE`×1 |
 | `managed_hold` | 1 | 4 | failed 1 | `NO_SIGNAL`×1 |
-| `session_premium` | 2 | 26 | passed 1, failed 1 | `NO_SIGNAL`×1 |
+| `session_premium` | 3 | 28 | passed 1, failed 2 | `NO_SIGNAL`×1, `COST_EATEN`×1 |
 | `vol_breakout` | 17 | 104 | passed 8, failed 8, validated 1 | `PARAM_SPIKE`×2, `VAL_FAIL`×2, `NO_SIGNAL`×2, `SELECTION_BIAS`×1, `COST_EATEN`×1 |
 | `xasset_btc_lead` | 2 | 4 | passed 1, failed 1 | `SELECTION_BIAS`×1 |
 | `xvenue_upbit_lead` | 3 | 16 | failed 2, passed 1 | `COST_EATEN`×1, `LOW_SAMPLE`×1 |
@@ -663,6 +663,19 @@
   - `donchian_breakout(lookback=48) & vol_cap(window=48,max_pct=0.67)` events=425 p=0.004 best_h=1440 → PASS
 - 범위: coinone None 1m · dev 2021-01-01T00:00:00+00:00~2025-11-01T00:00:00+00:00 · 블록 ['donchian_breakout'] / None · 재검토 기한 2027-05-12
 - 재검토 조건: Dev data period changes; venue/cost model changes; decision interval changes (bar_minutes)
+
+### fact-000038 · campaign `camp-000044` · family `session_premium`
+
+**사실 (자동, 불변)**
+
+- 가설 hyp-000043: 코인원 BTC-KRW, 1시간 결정: 매일 21:00 UTC(06:00 KST)에 전액 매수하고 ATR 청산(손절 0.89 ATR, 익절 0.56/1.12 ATR, 최대 보유 120분)하는 규칙이 coinone_conservative 순 MTM 수익으로 G0~G6(현행 규칙 묶음)과 견고성 검사를 통과한다.
+- 결과: **failed** · 주 실패 유형: `COST_EATEN` · 분포: `COST_EATEN`×1
+- 깔때기(전체 2 스펙): G1 2 · SR_w>0 1 · G4 0 | 상위 5: G0 1 · G1 1 · G2 1 · G3 0 · G4 0 · G5 0 · Dev 생존 0
+- 선택편향 입력: n_campaign_specs=2, k_eff_clusters=1, n_family_trials=28, n_global_trials=225, n_trials_dsr=23.500, pbo=0.002, cluster_threshold=0.500
+- Val(G6): 평가 0 · 통과 0 (결과 코드만) · 잠금: not_accessed
+  - #1 `r4e_session_2123utc_1h_320ca54e51` SR_w=0.522 trades=1630 first_failed=G3 → `COST_EATEN` ['COST_EATEN', 'UNSTABLE', 'SELECTION_BIAS'] · val=not_run
+- 범위: coinone BTC-KRW 1m · dev 2021-01-01T00:00:00+00:00~2025-11-01T00:00:00+00:00 · 블록 clock_entry_utc / [[]] · 재검토 기한 2027-05-12
+- 재검토 조건: Dev data period or segment boundaries change (new data, lockbox rolled into Dev/Val); venue or cost model changes (e.g. Coinone 0% fee promotion ends, Upbit fee changes); timeframe / decision interval changes (5m ↔ 1m); a block used here is re-implemented (new block version) or an engine bug is fixed; review date 2027-05-12 passes
 
 ## 파생 가설 (계열 상속)
 

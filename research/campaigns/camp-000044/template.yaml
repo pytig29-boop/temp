@@ -1,0 +1,57 @@
+name: r4e_session_2123utc_1h
+universe:
+- BTC-KRW
+data:
+  exchange: coinone
+  timeframe: 1m
+  aux: []
+timeframe: 1h
+entry:
+  block: clock_entry_utc
+  grid:
+    hour:
+    - 21
+    minute:
+    - 0
+filters:
+- []
+exits:
+  mode: atr
+  sl_atr:
+  - 0.89
+  tp_atr:
+  - 0.56
+  - 1.12
+  max_hold_min:
+  - 120
+  atr_bars: 14
+sizing:
+  entry_fraction:
+  - 1.0
+from_screen: camp-000040
+power:
+  target_sharpe: 1.74
+costs:
+  primary: coinone_conservative
+  grade: upbit_conservative
+  stress: coinone_stress
+  grade_stress: upbit_stress
+budget: 2
+family: session_premium
+hypothesis:
+  text: '코인원 BTC-KRW, 1시간 결정: 매일 21:00 UTC(06:00 KST)에 전액 매수하고 ATR 청산(손절 0.89 ATR,
+    익절 0.56/1.12 ATR, 최대 보유 120분)하는 규칙이 coinone_conservative 순 MTM 수익으로 G0~G6(현행 규칙
+    묶음)과 견고성 검사를 통과한다.'
+  rationale: '메커니즘은 주요 주식 시장이 모두 닫힌 시간대에 위험을 드는 대가이고, 반대편은 장 마감에 맞춰 위험을 줄이는 참여자다.
+    하루 몫이 수 bp 라 수수료가 있으면 먹을 수 없어서 남아 있다. 새벽 스프레드, 2021년 이후 시간대 이동, 원화 시장 미전이, 약세장이
+    이를 죽일 수 있다. 근거: Quantpedia 2023-09-13·2024-11-12(외부 문헌, 잠금·Val 노출 없음, 비용 미반영·다른
+    거래소)와 선별 camp-000040(개발 구간만; 사건 1630, p 6.4e-05, 120분 초과 8.1 bp, z 3.83, coinone_conservative
+    순 +4.7 bp, upbit_conservative 순 -9.3 bp). 문헌의 시각 탐색 24건을 계열 시도로 계상했다. 청산은 실행 전
+    선별 제안값으로 고정: 손절 = |MAE| 75% 분위 0.89 ATR, 익절 = MFE 중앙 0.56 ATR 와 그 2배 1.12 ATR,
+    최대 보유 = 정보 지평 120분. 목표 Sharpe = 선별 z / √(개발 연수) = 3.83/√4.83 = 1.74. 미리 아는 약점:
+    (1) 문헌 표본과 개발 구간이 2021~2023 에서 겹쳐 독립 재현이 아니다; (2) 미국 서머타임으로 뉴욕 장 마감은 20시/21시 UTC
+    로 움직이는데 규칙은 UTC 고정이다; (3) 한국 새벽 코인원 호가가 얇아 1분봉 시가에 실제로 살 수 있었는지 확인이 필요하다; (4)
+    하루 몫이 비용과 같은 자릿수라 비용 ×1.5 견고성이 관건이다; (5) 0% 수수료 이벤트가 끝나면 사라지는 B등급일 가능성이 있다. 데이터
+    점검(단계 1.4)의 조건은 해당하지 않아 stress 비용 성공 기준은 추가하지 않았다.'
+  success_criteria: G0-G6 under the current ruleset (MTM, size scaling, combined Val
+    evidence) and the robustness suite; grade reported (A/B).

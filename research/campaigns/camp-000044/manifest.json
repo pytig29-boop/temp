@@ -1,0 +1,154 @@
+{
+  "campaign_id": "camp-000044",
+  "hypothesis_id": "hyp-000043",
+  "template": "r4e_session_2123utc_1h",
+  "family": "session_premium",
+  "created": "2026-11-13T08:50:18+00:00",
+  "data": {
+    "exchange": "coinone",
+    "symbol": "BTC-KRW",
+    "timeframe": "1m",
+    "rows_1m": 2541600,
+    "filled_frac": 0.07562873780295877,
+    "aux": [],
+    "aux_rows_1m": {}
+  },
+  "timeframe": "1h",
+  "exits": {
+    "mode": "atr",
+    "atr_bars": 14,
+    "n_variants": 2
+  },
+  "period": {
+    "segment": "dev",
+    "start": "2021-01-01T00:00:00+00:00",
+    "end": "2025-11-01T00:00:00+00:00"
+  },
+  "data_snapshot": "snap-93b066dd27ee41f0a0ec",
+  "code_commit": "6d111b38360245f611331aad182280cc9c3ab911",
+  "n_specs": 2,
+  "n_runs": 4,
+  "costs": {
+    "primary": "coinone_conservative",
+    "grade": "upbit_conservative",
+    "stress": "coinone_stress",
+    "grade_stress": "upbit_stress"
+  },
+  "evaluated_costs": [
+    "coinone_conservative",
+    "upbit_conservative"
+  ],
+  "runtime_sec": 2.46,
+  "half_life_days": 365,
+  "power": {
+    "n_grid": 2,
+    "family": "session_premium",
+    "n_family_prior": 26,
+    "ratio": 0.5,
+    "ratio_source": "history median of 14 campaigns; floored at 1/n_grid = 0.5 (single-cluster small grid, pm-000007)",
+    "k_eff_est": 1.0,
+    "n_trials_dsr": 14.0,
+    "n_days": 1765,
+    "var_trial_sr": 0.0002825554649306722,
+    "var_source": "history median",
+    "min_dsr": 0.95,
+    "required_sharpe_ann": 1.3073773252590342,
+    "required_sharpe_ann_single_trial": 0.7484985921568781,
+    "target_sharpe_ann": 1.74,
+    "max_trials_for_target": 554.4779434921878,
+    "max_grid_for_target": 1082.9558869843756,
+    "markdown": "- 계획 격자 2 스펙, 계열 `session_premium` 기존 시도 26, 압축비 0.5 (history median of 14 campaigns; floored at 1/n_grid = 0.5 (single-cluster small grid, pm-000007)) → 실질 시도 ≈ 14.0\n- Dev 1765일, V=0.000283 (history median), 왜도 0, 첨도 3, DSR ≥ 0.95\n- **G5 통과 최소 연 Sharpe ≈ 1.31** (시도 1회였다면 0.75)\n- 목표 연 Sharpe 1.74 로 감당 가능한 실질 시도 ≈ 554 (격자 ≈ 1083 스펙)",
+    "warning": null,
+    "strict": true,
+    "ok": true
+  },
+  "screen": {
+    "from_screen": "camp-000040",
+    "requires_screen_pass": false,
+    "n_configs": 1,
+    "matches": [
+      {
+        "config": "clock_entry_utc{'hour': 21, 'minute': 0}",
+        "screen_id": "camp-000040",
+        "run_id": "run-000316",
+        "p_signal": 6.394888724255638e-05,
+        "n_events": 1630,
+        "info_horizon": 120,
+        "exchange": "coinone",
+        "aux": []
+      }
+    ],
+    "rule": "every (entry params × filter params × timeframe × exchange × universe) config passed a recorded screen"
+  },
+  "benchmark": {
+    "kind": "BTC buy & hold (same venue 1m close, no cost)",
+    "bh_total_return": 4.12084827693746,
+    "bh_sharpe": 0.914882564442411,
+    "bh_max_dd": 0.7414165725232089,
+    "bh_n_up_days": 877,
+    "bh_n_down_days": 883,
+    "bh_n_up_regime_days": 980,
+    "bh_n_down_regime_days": 755,
+    "bh_dd1_depth": 0.7414165725232089,
+    "bh_dd1_start": "2021-11-09",
+    "bh_dd1_end": "2022-12-28",
+    "bh_dd2_depth": 0.5627441981617689,
+    "bh_dd2_start": "2021-04-14",
+    "bh_dd2_end": "2021-07-20",
+    "bh_dd3_depth": 0.2903387607068444,
+    "bh_dd3_start": "2024-03-14",
+    "bh_dd3_end": "2024-09-07"
+  },
+  "params": {
+    "params_version": "7f1999c38d57",
+    "cost_versions": {
+      "coinone_base": 2,
+      "coinone_base@ETH-KRW": 1,
+      "coinone_base@XRP-KRW": 1,
+      "coinone_conservative": 2,
+      "coinone_conservative@ETH-KRW": 1,
+      "coinone_conservative@XRP-KRW": 1,
+      "coinone_stress": 2,
+      "coinone_stress@ETH-KRW": 1,
+      "coinone_stress@XRP-KRW": 2,
+      "upbit_base": 1,
+      "upbit_base@ETH-KRW": 1,
+      "upbit_base@XRP-KRW": 1,
+      "upbit_conservative": 1,
+      "upbit_conservative@ETH-KRW": 1,
+      "upbit_conservative@XRP-KRW": 1,
+      "upbit_stress": 1,
+      "upbit_stress@ETH-KRW": 1,
+      "upbit_stress@XRP-KRW": 1
+    },
+    "registry_version": 1,
+    "n_params": {
+      "1": 37,
+      "2": 117,
+      "3": 15
+    }
+  },
+  "params_version": "7f1999c38d57",
+  "cost_versions": {
+    "coinone_base": 2,
+    "coinone_base@ETH-KRW": 1,
+    "coinone_base@XRP-KRW": 1,
+    "coinone_conservative": 2,
+    "coinone_conservative@ETH-KRW": 1,
+    "coinone_conservative@XRP-KRW": 1,
+    "coinone_stress": 2,
+    "coinone_stress@ETH-KRW": 1,
+    "coinone_stress@XRP-KRW": 2,
+    "upbit_base": 1,
+    "upbit_base@ETH-KRW": 1,
+    "upbit_base@XRP-KRW": 1,
+    "upbit_conservative": 1,
+    "upbit_conservative@ETH-KRW": 1,
+    "upbit_conservative@XRP-KRW": 1,
+    "upbit_stress": 1,
+    "upbit_stress@ETH-KRW": 1,
+    "upbit_stress@XRP-KRW": 1
+  },
+  "daily_returns": "mtm",
+  "ruleset": "rs-003"
+}
