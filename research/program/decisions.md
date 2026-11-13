@@ -16,3 +16,4 @@
 - 사용자 지시로 R4 개시 — R3 "기본 종료" 결정(2026-11-12)을 사용자 지시로 대체. 계획: `docs/prompts/opus_r4_plan.md`, 근거 조사 `research/knowledge/mechanism_survey_20261112.md`.
 - 결선은 R4 종료 뒤 **한 번** (모든 T1 후보 페이퍼 판정 뒤, 늦어도 2026-12-01). 기존 후보 페이퍼 7일차 판정(11-19)은 예정대로.
 - §1.1 코드 사실 확인: final_verdict 가 Pipeline.campaign_stats() 재계산(67행) ✓, signal_study.STRATIFY = (hour_vol, hour, none) ✓, program.set_phase 앞으로만 ✓.
+- 단계 1.3: 문헌(Quantpedia 2023)의 24개 시각 탐색을 `session_premium` 시도로 계상 (log_exploration camp-000038, 24건; 프로그램 시도 40/400). 09:05 KST(C4)는 관행에서 온 값이라 계상하지 않음 — 표본 안에서 고른 통계가 아님.
