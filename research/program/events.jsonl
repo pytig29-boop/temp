@@ -22,3 +22,4 @@
 {"ts": "2026-11-13T08:51:39+00:00", "kind": "cycle", "to": "R4-closed", "t1_new": 0, "r4_trials": 31, "program_trials": 47}
 {"ts": "2026-11-13T09:07:32+00:00", "kind": "resume", "ops": {"data_present": true, "collector_running": true, "collector_heartbeat_age_s": 1, "collector_watchdog": true, "paper_running": true}}
 {"ts": "2026-11-13T12:09:47+00:00", "kind": "resume", "ops": {"data_present": true, "collector_running": true, "collector_heartbeat_age_s": 4, "collector_watchdog": true, "paper_running": true}}
+{"ts": "2026-11-13T15:34:34+00:00", "kind": "resume", "ops": {"data_present": true, "collector_running": true, "collector_heartbeat_age_s": 0, "collector_watchdog": true, "paper_running": true}}
