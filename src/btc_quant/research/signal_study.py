@@ -98,7 +98,11 @@ ATR_WINDOW = 14                   # 제안용 ATR(결정 봉, 단순 평균 TR)
 SATURATION = 0.9
 SL_QUANTILE = 0.75                # 손절 제안: 이벤트 75% 가 정보 지평 안에 닿지 않는 |MAE|/ATR
 TP_QUANTILE = 0.50                # 익절 제안: 정보 지평 안 MFE/ATR 중앙값
-STRATIFY = ("hour_vol", "hour", "none")
+STRATIFY = ("hour_vol", "hour", "none", "vol")
+# 벽시계 진입 블록 (R4, docs/prompts/opus_r4_plan.md 단계 1.2): 진입이 시각으로 정해지므로 시각으로 짝지은 귀무
+# (hour_vol·hour)와는 정의상 같아져 초과가 0 이 된다 → 변동성만 맞추는 층 "vol" 을 쓴다. "vol" 은 이 블록에만 허용
+# (다른 신호에 쓰면 시각 효과가 초과로 새어 들어온다).
+CLOCK_BLOCKS = ("clock_entry_utc",)
 KIND = "signal_screen"            # 원장 runs.metrics.kind
 # 원장 기록용 자리표시 청산 (이벤트 스터디는 청산을 쓰지 않음 — 같은 선별의 모든 시도가 같은 값을 가져
 # logic_hash 는 진입·필터·결정 봉으로만 갈린다).
@@ -349,6 +353,8 @@ def _event_arrays(m1: pd.DataFrame, bars_index, entry, filter_ok, bm: int, horiz
         strata = hours * N_VOL_BINS + vbin
     elif stratify == "hour":
         strata = hours.astype(int)
+    elif stratify == "vol":
+        strata = np.asarray(vbin, dtype=int)
     else:
         strata = np.zeros(len(pool), dtype=int)
 
@@ -726,6 +732,14 @@ class ScreenTemplate:
                 fsets.append([_block_grid(_grid_from(f), "filter", registry) for f in fs])
             sigs.append((eg, fsets))
         st = d.get("study") or {}
+        _strat = str(st.get("stratify", "hour_vol"))
+        _clock = [eg.block in CLOCK_BLOCKS for eg, _ in sigs]
+        if any(_clock) and _strat != "vol":
+            raise CampaignError("wall-clock entry blocks need study.stratify 'vol' (hour-matched nulls equal the "
+                                "signal by construction)")
+        if _strat == "vol" and not all(_clock):
+            raise CampaignError("study.stratify 'vol' is only allowed for wall-clock entry blocks "
+                                f"{list(CLOCK_BLOCKS)} (otherwise hour effects leak into the excess)")
         bm = int(d.get("bar_minutes", 5))
         if bm not in TIMEFRAMES.values():
             raise CampaignError(f"bar_minutes must be one of {sorted(TIMEFRAMES.values())} "

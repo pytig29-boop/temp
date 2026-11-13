@@ -61,7 +61,11 @@ H > 60 지평에서 남는 수익 창 겹침은 아래 HAC 표준오차가 처�
   "밤에만 뜨는 신호"가 밤의 드리프트를 정보로 오인하지 않게 한다(테스트
   `test_hour_stratification_removes_time_of_day_effect`).
 - 귀무 추출은 군집 제거를 하지 않는다 → 귀무 평균의 분산이 약간 커져 보수적.
-- `stratify` = `hour_vol`(기본) | `hour` | `none`.
+- `stratify` = `hour_vol`(기본) | `hour` | `none` | `vol`.
+  - `vol` (R4, 2026-11-13): 층 = 변동성 3분위만(시각 무시). **벽시계 진입 블록(`clock_entry_utc`) 전용** — 시각으로 정해지는
+    진입은 시각으로 짝지은 귀무(`hour_vol`·`hour`)와 정의상 같아 초과가 0 이 되므로. 템플릿 검증이 강제한다: 벽시계 진입이면
+    `vol` 이어야 하고, `vol` 은 벽시계 진입에만 허용(다른 신호에 쓰면 시각 효과가 초과로 새어 들어온다).
+    귀무 보정·검출 테스트: `tests/test_signal_study_stratify_vol.py`.
 
 ### 검정통계량
 z_H = (신호 평균 − 귀무 중심) / max(SE_HAC, 귀무 표준편차), p_H = 1 − Φ(z_H) (단측, 현물 롱 전용).
