@@ -3,7 +3,7 @@
 > `btc_quant.research.lessons.render_markdown()` 생성물. **직접 편집 금지** (원본: `research/lessons/*.jsonl`).
 > 사실(Facts)은 파이프라인 결과에서 자동 추출되어 불변이다. 해석(Interpretations)은 AI 작성이며
 > 후속 캠페인으로 verified/refuted 되기 전까지 **unverified** 이다. Val/잠금은 결과 코드만.
-> 생성: 2026-11-13T08:50:26+00:00 · 사실 38 · 해석 19 · 사후분석 7 · 파생 24
+> 생성: 2026-11-13T08:51:10+00:00 · 사실 38 · 해석 22 · 사후분석 7 · 파생 24
 
 ## 실패 유형 (자동 분류)
 
@@ -653,6 +653,11 @@
 - 범위: coinone None 1m · dev 2021-01-01T00:00:00+00:00~2025-11-01T00:00:00+00:00 · 블록 ['clock_entry_utc'] / None · 재검토 기한 2027-05-12
 - 재검토 조건: Dev data period changes; venue/cost model changes; decision interval changes (bar_minutes)
 
+**해석 (AI, 검증 상태 표시)**
+
+- [UNVERIFIED] int-000021 (신뢰도 0.6): No reversal of a 09:00 KST daily-boundary bot selling pressure is visible at 30-120 min on Coinone BTC-KRW (z 0.83 at 60 min, net -2 bp). The 'bots sell at 09:00' mechanism is either too small, spread over time, or already absorbed.
+  - 근거: camp-000041
+
 ### fact-000037 · signal_screen `camp-000043` · family `vol_breakout`
 
 **사실 (자동, 불변)**
@@ -663,6 +668,11 @@
   - `donchian_breakout(lookback=48) & vol_cap(window=48,max_pct=0.67)` events=425 p=0.004 best_h=1440 → PASS
 - 범위: coinone None 1m · dev 2021-01-01T00:00:00+00:00~2025-11-01T00:00:00+00:00 · 블록 ['donchian_breakout'] / None · 재검토 기한 2027-05-12
 - 재검토 조건: Dev data period changes; venue/cost model changes; decision interval changes (bar_minutes)
+
+**해석 (AI, 검증 상태 표시)**
+
+- [UNVERIFIED] int-000022 (신뢰도 0.6): Excluding high-volatility regimes (vol_cap 48, 0.67) from 4h donchian-48 breakouts halves the events without raising the per-event edge (excess 70 bp vs 72 bp unfiltered in camp-000033); the vol filter does not add information, and with the vol_breakout family at 104 trials its plausible Sharpe (1.36) no longer clears the power bar (1.49).
+  - 근거: camp-000043; camp-000033; camp-000039
 
 ### fact-000038 · campaign `camp-000044` · family `session_premium`
 
@@ -676,6 +686,12 @@
   - #1 `r4e_session_2123utc_1h_320ca54e51` SR_w=0.522 trades=1630 first_failed=G3 → `COST_EATEN` ['COST_EATEN', 'UNSTABLE', 'SELECTION_BIAS'] · val=not_run
 - 범위: coinone BTC-KRW 1m · dev 2021-01-01T00:00:00+00:00~2025-11-01T00:00:00+00:00 · 블록 clock_entry_utc / [[]] · 재검토 기한 2027-05-12
 - 재검토 조건: Dev data period or segment boundaries change (new data, lockbox rolled into Dev/Val); venue or cost model changes (e.g. Coinone 0% fee promotion ends, Upbit fee changes); timeframe / decision interval changes (5m ↔ 1m); a block used here is re-implemented (new block version) or an engine bug is fixed; review date 2027-05-12 passes
+
+**해석 (AI, 검증 상태 표시)**
+
+- [UNVERIFIED] int-000020 (신뢰도 0.65): The 21:00 UTC (06:00 KST) session premium on Coinone BTC-KRW is real before costs (screen excess 8 bp at 120 min, z 3.8) but too small to survive exits and cost: campaign best spec Dev Sharpe 0.95 / Sharpe_w 0.52, yearly 2021 +72% then 2022 -13%, 2023 -4%, 2024 +13%, 2025 +3%. The edge sits mostly in 2021, the period that overlaps the literature sample, so it looks like an in-sample effect that faded after publication rather than a persistent premium on a KRW venue.
+  - 근거: camp-000040; camp-000044
+  - 검증 방법: None in this program; no other clock times or regime variants (R4 rule R2).
 
 ## 파생 가설 (계열 상속)
 
