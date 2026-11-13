@@ -1,0 +1,2 @@
+label,family,entry,filters,n_events,p_signal,best_h,excess_bp,z,net_bp[coinone_conservative],net_bp[upbit_conservative],info_h,profile,significant,passed,fail_reason
+"clock_entry_utc(hour=0,minute=5)",session_premium,clock_entry_utc,-,1616,0.203169,60,1.58061,0.830356,-2.08822,-16.0755,30,decaying (z maximal at the shortest horizon),False,False,not significant after correction

@@ -1,0 +1,44 @@
+name: r4e_kst09_open_5m_screen
+family: session_premium
+data:
+  exchange: coinone
+  symbol: BTC-KRW
+  timeframe: 1m
+  aux: []
+bar_minutes: 5
+signals:
+- entry:
+    block: clock_entry_utc
+    params:
+      hour: 0
+      minute: 5
+  filters:
+  - []
+study:
+  n_null: 1000
+  seed: 0
+  min_events: 300
+  stratify: vol
+  horizons:
+  - 30
+  - 60
+  - 120
+  primary_horizons:
+  - 60
+costs:
+  primary: coinone_conservative
+  grade: upbit_conservative
+correction:
+  method: bh
+  alpha: 0.1
+budget: 1
+hypothesis:
+  text: 코인원 BTC-KRW 에서 매일 00:05 UTC(09:05 KST)에 사서 60분 보유한 수익이, 직전 변동성으로 짝지은 다른 시각의
+    60분 보유(귀무)보다 높고 coinone_conservative 비용을 뺀 평균이 0 보다 크다.
+  rationale: 메커니즘은 국내 변동성 돌파 봇이 09시(KST)에 일괄 시장가로 매도하면서 만든 일시적 하방 압력이 이후 되돌려지는 것이다.
+    반대편은 09시에 가격과 무관하게 파는 봇 사용자로, 규칙에 묶여 있어 체결 가격을 따지지 않는다. 이 효과를 죽일 수 있는 것은 봇 사용이
+    줄거나 매도 시각이 분산되는 것, 개장 직후의 스프레드, 비용, 약세장이다. 근거는 국내 관행에 대한 서술뿐이며 수익 통계는 없다(외부 서술이라
+    잠금·Val 노출 없음). "09시 변동 집중" 관찰(K-P0-3)은 잠금·Val 노출 항목이므로 가설의 동기로만 썼고, 시각·보유·성공 기준을
+    정하는 데는 쓰지 않았다. 요일·추세·변동성 조건은 두지 않는다.
+  success_criteria: BH q=0.10(계열 선별 구성 전체), 사건 ≥ 300, 주 지평 60분에서 coinone_conservative
+    순 평균 > 0. 통과한 구성만 캠페인.

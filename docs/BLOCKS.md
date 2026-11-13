@@ -44,6 +44,7 @@ True@t = 봉 t가 닫힌 시점(t+봉길이)까지의 정보로 조건 성립. �
 | `btc_trend_filter` | filter · BTC 추세 켜짐 (트랙 C, 보조 coinone_btc) | 코인원 BTC-KRW 결정 봉 종가 > EMA(span)·(1+band_bp/1e4) — 알트 슬리브 진입을 BTC 추세 국면으로 제한. 앞 span 봉 False | span=42, band_bp=0 | span [42,90,180] (4h: 7/15/30일); band_bp [0,50,100] | ✓ (BTC 슬리브 이력 공유) | experimental |
 | `trend_ema_filter` | filter · 자기 자산 장기 추세 켜짐 (트랙 D) | 결정 봉 종가 > EMA(span)·(1+band_bp/1e4) — 4h 봉에서 추세 국면으로 진입 제한 (trend_regime_1h 는 1h 이하 전용). 앞 span 봉 False | span=42, band_bp=0 | span [42,90,180] (4h: 7/15/30일); band_bp [0,50,100] | ✓ | experimental |
 | `clock_entry_utc` | entry · 벽시계 진입 (R4 트랙 E) | 봉 종료 시각(index+봉 길이)이 UTC hour:minute 과 같으면 True (하루 1번). 결측 봉과 무관하게 시각 기준. 4h 봉 거부(max_tf_min 60) | hour=21, minute=0 | hour [0,12,21]; minute [0,5,30] (쓰는 값 (21,0)·(0,5) 뿐, 나머지는 격자 요건) | ✓ | experimental |
+| `vol_cap` | filter · 변동성 상한 (R4 트랙 F) | rv = std(1봉 로그수익률, window봉)의 직전 7일 롤링 백분위 ≤ max_pct — vol_regime 과 같은 계산의 반대쪽(고변동 진입 제외) | window=48, max_pct=0.67 | window [12,24,48]; max_pct [0.5,0.67,0.8] (쓰는 값 (48,0.67) 뿐) | ✓ | experimental |
 
 ## 결정 주기 호환성 (15m / 1h / 4h, PLAN §10 스윙 연구 — 2026-11-09 추가)
 격자는 봉 개수 단위라 긴 봉에서는 같은 파라미터가 훨씬 긴 벽시계 창이 된다(4h 에서 `lookback=48` = 8일).
