@@ -21,7 +21,7 @@ from test_research_lessons import cand, gate
 from test_research_synth import make_root, template_dict
 
 # 긴 봉에서 무의미해서 거부되는 블록 (docs/BLOCKS.md "결정 주기 호환성")
-REJECT_4H = {"session_kst", "trend_regime_1h", "range_compression_break"}
+REJECT_4H = {"session_kst", "trend_regime_1h", "range_compression_break", "clock_entry_utc"}   # clock: R4 벽시계 블록
 
 
 def _m1(days=40, seed=0, start="2025-01-01"):
@@ -70,6 +70,8 @@ def test_rejected_blocks_are_actually_degenerate_at_4h():
     assert not REGISTRY.evaluate(BlockRef("session_kst", {"session": "us_open"}), bars, ctx).any()
     assert not REGISTRY.evaluate(BlockRef("range_compression_break", {"lookback": 12, "squeeze_pct": 0.1}),
                                  bars, ctx).any()
+    # 벽시계 21:30 UTC 는 4h 봉 종료 시각(0/4/8/12/16/20시 정각)에 오지 않는다
+    assert not REGISTRY.evaluate(BlockRef("clock_entry_utc", {"hour": 21, "minute": 30}), bars, ctx).any()
     # 1h 에서 trend_regime_1h = 결정 봉 자신의 종가 > EMA(span 봉)
     b1 = to_tf(m1, 60)
     got = REGISTRY.evaluate(BlockRef("trend_regime_1h", {"span": 12}), b1, Context(bar=pd.Timedelta("1h")))
