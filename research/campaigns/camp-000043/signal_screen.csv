@@ -1,0 +1,2 @@
+label,family,entry,filters,n_events,p_signal,best_h,excess_bp,z,net_bp[coinone_conservative],net_bp[upbit_conservative],info_h,profile,n_events[BTC-KRW],n_events[XRP-KRW],n_events[ETH-KRW],significant,passed,fail_reason
+"donchian_breakout(lookback=48) & vol_cap(window=48,max_pct=0.67)",vol_breakout,donchian_breakout,vol_cap,425,0.00419983,1440,69.7971,2.98889,77.9464,65.0752,1440,peaked,175,88,162,True,True,

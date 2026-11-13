@@ -3,7 +3,7 @@
 > `btc_quant.research.lessons.render_markdown()` 생성물. **직접 편집 금지** (원본: `research/lessons/*.jsonl`).
 > 사실(Facts)은 파이프라인 결과에서 자동 추출되어 불변이다. 해석(Interpretations)은 AI 작성이며
 > 후속 캠페인으로 verified/refuted 되기 전까지 **unverified** 이다. Val/잠금은 결과 코드만.
-> 생성: 2026-11-13T08:46:36+00:00 · 사실 36 · 해석 19 · 사후분석 7 · 파생 23
+> 생성: 2026-11-13T08:48:50+00:00 · 사실 37 · 해석 19 · 사후분석 7 · 파생 24
 
 ## 실패 유형 (자동 분류)
 
@@ -29,7 +29,7 @@
 | `liq_meanrev` | 12 | 68 | passed 4, failed 8 | `NO_SIGNAL`×4, `COST_EATEN`×2, `PARAM_SPIKE`×1, `UNSTABLE`×1 |
 | `managed_hold` | 1 | 4 | failed 1 | `NO_SIGNAL`×1 |
 | `session_premium` | 2 | 26 | passed 1, failed 1 | `NO_SIGNAL`×1 |
-| `vol_breakout` | 16 | 103 | passed 7, failed 8, validated 1 | `PARAM_SPIKE`×2, `VAL_FAIL`×2, `NO_SIGNAL`×2, `SELECTION_BIAS`×1, `COST_EATEN`×1 |
+| `vol_breakout` | 17 | 104 | passed 8, failed 8, validated 1 | `PARAM_SPIKE`×2, `VAL_FAIL`×2, `NO_SIGNAL`×2, `SELECTION_BIAS`×1, `COST_EATEN`×1 |
 | `xasset_btc_lead` | 2 | 4 | passed 1, failed 1 | `SELECTION_BIAS`×1 |
 | `xvenue_upbit_lead` | 3 | 16 | failed 2, passed 1 | `COST_EATEN`×1, `LOW_SAMPLE`×1 |
 
@@ -653,6 +653,17 @@
 - 범위: coinone None 1m · dev 2021-01-01T00:00:00+00:00~2025-11-01T00:00:00+00:00 · 블록 ['clock_entry_utc'] / None · 재검토 기한 2027-05-12
 - 재검토 조건: Dev data period changes; venue/cost model changes; decision interval changes (bar_minutes)
 
+### fact-000037 · signal_screen `camp-000043` · family `vol_breakout`
+
+**사실 (자동, 불변)**
+
+- 가설 hyp-000042: On the fixed Coinone universe [BTC-KRW, XRP-KRW, ETH-KRW] (pooled, per-asset matched null) at 4h decisions, donchian_breakout(48) entries taken only while the 48-bar realised volatility is at or below its trailing 7-day 67th percentile (experimental vol_cap(48, 0.67)) are followed by 8-48 h returns above the matched null, net of per-asset coinone_conservative cost.
+- 결과: **passed** · 주 실패 유형: `None` · 분포: –
+- 깔때기(전체 None 스펙): G1 None · SR_w>0 None · G4 None | 상위 None:  · Dev 생존 None
+  - `donchian_breakout(lookback=48) & vol_cap(window=48,max_pct=0.67)` events=425 p=0.004 best_h=1440 → PASS
+- 범위: coinone None 1m · dev 2021-01-01T00:00:00+00:00~2025-11-01T00:00:00+00:00 · 블록 ['donchian_breakout'] / None · 재검토 기한 2027-05-12
+- 재검토 조건: Dev data period changes; venue/cost model changes; decision interval changes (bar_minutes)
+
 ## 파생 가설 (계열 상속)
 
 | id | 부모 | family | override | 가설 |
@@ -680,6 +691,7 @@
 | drv-000021 | fact-000023 | `liq_meanrev` | – | Coinone 3-asset universe [BTC-KRW, XRP-KRW, ETH-KRW] (D15, pooled, equal sleeves), 15m: after the equal-weight reversion composite composite_z(reversion) >= 2.0 a maker scale-in ladder (first tranche market, 3-4 equal tranches with limit rungs every 0.5/1.0 ATR below, maker take-profit 1.25 ATR per tranche or on average cost, aggregate stop 1.5 ATR below the last rung, max hold 60 min) earns positive per-asset coinone_conservative net MTM returns that pass G0-G5 on Dev, beat the ladder-matched random-entry null and pass the binding tail check. |
 | drv-000022 | fact-000024 | `vol_breakout` | – | Coinone 3-asset universe [BTC-KRW, XRP-KRW, ETH-KRW] (D15, pooled, equal sleeves), 1h: atr_channel_breakout(24,3) with half-size entries (entry_fraction 0.5) and ATR exits (SL 2 ATR x TP 1.5/3 ATR, max hold 480/960 min) earns positive per-asset coinone_conservative net MTM returns that pass G0-G5 on Dev and the robustness suite. |
 | drv-000023 | fact-000024 | `vol_breakout` | – | Coinone 3-asset universe [BTC-KRW, XRP-KRW, ETH-KRW] (D15, pooled, equal sleeves), 1h: roc_threshold(12,100) with half-size entries (entry_fraction 0.5) and ATR exits (SL 2 ATR x TP 1/2 ATR, max hold 480/960 min) earns positive per-asset coinone_conservative net MTM returns that pass G0-G5 on Dev and the robustness suite. |
+| drv-000024 | fact-000031 | `vol_breakout` | – | On the fixed Coinone universe [BTC-KRW, XRP-KRW, ETH-KRW] (pooled, per-asset matched null) at 4h decisions, donchian_breakout(48) entries taken only while the 48-bar realised volatility is at or below its trailing 7-day 67th percentile (experimental vol_cap(48, 0.67)) are followed by 8-48 h returns above the matched null, net of per-asset coinone_conservative cost. |
 
 ## 과정 사후분석 (버그·데이터·절차)
 
