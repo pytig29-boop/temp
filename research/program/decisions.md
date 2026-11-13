@@ -17,3 +17,6 @@
 - 결선은 R4 종료 뒤 **한 번** (모든 T1 후보 페이퍼 판정 뒤, 늦어도 2026-12-01). 기존 후보 페이퍼 7일차 판정(11-19)은 예정대로.
 - §1.1 코드 사실 확인: final_verdict 가 Pipeline.campaign_stats() 재계산(67행) ✓, signal_study.STRATIFY = (hour_vol, hour, none) ✓, program.set_phase 앞으로만 ✓.
 - 단계 1.3: 문헌(Quantpedia 2023)의 24개 시각 탐색을 `session_premium` 시도로 계상 (log_exploration camp-000038, 24건; 프로그램 시도 40/400). 09:05 KST(C4)는 관행에서 온 값이라 계상하지 않음 — 표본 안에서 고른 통계가 아님.
+- 트랙 F: F-1 규칙 근소 통과(평균 w 0.987) → F-2 선별 camp-000043 통과(n 425, p 0.0042, z 2.99, 순 78bp; 무필터 camp-000033 대비 사건 절반·사건당 엣지 개선 없음) → F-3 검정력 strict 실패(필요 1.49 > 목표 1.36) → **R3 규칙대로 캠페인 없이 종료**. vol_breakout 추가 시도 2 (탐색 1 + 선별 1), 계열 104.
+- 트랙 G: 원/달러 이력(FRED) 확보, 실시간 BTC 달러 가격 가능, 그러나 독립 사건 BTC 131 < 300, XRP·ETH 해외 이력 없음 → 검증 불가로 종료.
+- 트랙 E: E1(21:00 UTC) 선별 통과 camp-000040, E2(09:05 KST) NO_SIGNAL camp-000041. 데이터 점검(단계 1.4) 규칙 (i)(ii) 미발동 → E1 캠페인 진행(stress 추가 기준 없음).
