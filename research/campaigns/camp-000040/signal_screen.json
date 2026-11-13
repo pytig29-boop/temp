@@ -1,0 +1,225 @@
+{
+  "campaign_id": "camp-000040",
+  "hypothesis_id": "hyp-000039",
+  "kind": "signal_screen",
+  "period": {
+    "segment": "dev",
+    "start": "2021-01-01T00:00:00+00:00",
+    "end": "2025-11-01T00:00:00+00:00"
+  },
+  "data_snapshot": "snap-93b066dd27ee41f0a0ec",
+  "code_commit": "149ab58b6d6f6f377a0f9fe4ee5ea907d9c8a2ba+dirty",
+  "params": {
+    "params_version": "7f1999c38d57",
+    "cost_versions": {
+      "coinone_base": 2,
+      "coinone_base@ETH-KRW": 1,
+      "coinone_base@XRP-KRW": 1,
+      "coinone_conservative": 2,
+      "coinone_conservative@ETH-KRW": 1,
+      "coinone_conservative@XRP-KRW": 1,
+      "coinone_stress": 2,
+      "coinone_stress@ETH-KRW": 1,
+      "coinone_stress@XRP-KRW": 2,
+      "upbit_base": 1,
+      "upbit_base@ETH-KRW": 1,
+      "upbit_base@XRP-KRW": 1,
+      "upbit_conservative": 1,
+      "upbit_conservative@ETH-KRW": 1,
+      "upbit_conservative@XRP-KRW": 1,
+      "upbit_stress": 1,
+      "upbit_stress@ETH-KRW": 1,
+      "upbit_stress@XRP-KRW": 1
+    },
+    "registry_version": 1,
+    "n_params": {
+      "1": 37,
+      "2": 117,
+      "3": 15
+    }
+  },
+  "decision": {
+    "method": "bh",
+    "alpha": 0.1,
+    "m_current": 1,
+    "m_prior": 0,
+    "m_total": 1,
+    "primary_horizons": [
+      120
+    ],
+    "rule": "pass ⇔ BH(α=0.1) rejects p_signal = min(1, 1·min_H p_H) over the screening family, n_events ≥ 300, mean net of coinone_conservative > 0 at the best primary horizon",
+    "n_passed": 1
+  },
+  "studies": [
+    {
+      "bar_minutes": 60,
+      "horizons": [
+        60,
+        120,
+        240
+      ],
+      "primary_horizons": [
+        120
+      ],
+      "min_gap_min": 120.0,
+      "n_null": 1000,
+      "seed": 0,
+      "stratify": "vol",
+      "costs": {
+        "coinone_conservative": 0.00039992001599675753,
+        "upbit_conservative": 0.0017983810973358771
+      },
+      "n_pool": 41009,
+      "n_raw_triggers": 1630,
+      "n_events": 1630,
+      "event_rate": 0.03974737252798166,
+      "first_event": "2021-01-01T21:00:00+00:00",
+      "last_event": "2025-10-30T21:00:00+00:00",
+      "vol_tercile_edges": [
+        0.0003598953209742754,
+        0.0006182945743563525
+      ],
+      "min_events": 300,
+      "enough_events": true,
+      "table": [
+        {
+          "horizon": 60,
+          "n": 1630,
+          "mean": 0.0005325393639780656,
+          "median": 0.0003792065574617087,
+          "std": 0.005795777643104028,
+          "hit_rate": 0.5484662576687117,
+          "se_iid": 0.00014355486432921538,
+          "se_hac": 0.0001435548643292154,
+          "t_hac": 3.7096573945191382,
+          "p_zero": 0.00010376995158573069,
+          "null_mean": 1.1429338323965074e-05,
+          "null_sd": 0.00014524920631284205,
+          "null_p05": -0.00022478742191615463,
+          "null_p95": 0.00025896349103001756,
+          "excess": 0.0005211100256541006,
+          "z": 3.587696200774539,
+          "p_value": 0.00016680633889853036,
+          "p_null_emp": 0.000999000999000999,
+          "null_percentile": 1.0,
+          "mfe_mean": 0.003890122479858676,
+          "mfe_median": 0.002306377095882106,
+          "mae_mean": -0.003512273911242464,
+          "mae_median": -0.0020881347683079365,
+          "mfe_q75": 0.004930739658898564,
+          "mae_q25": -0.004207062794693045,
+          "mean_net[coinone_conservative]": 0.00013240637483034705,
+          "hit_net[coinone_conservative]": 0.496319018404908,
+          "t_net[coinone_conservative]": 0.9223398694919773,
+          "mean_net[upbit_conservative]": -0.0012667994420835754,
+          "hit_net[upbit_conservative]": 0.3165644171779141,
+          "t_net[upbit_conservative]": -8.82449680826151
+        },
+        {
+          "horizon": 120,
+          "n": 1630,
+          "mean": 0.0008677251451991791,
+          "median": 0.0004748679679286161,
+          "std": 0.008267521603519071,
+          "hit_rate": 0.5521472392638037,
+          "se_iid": 0.00020477716972875507,
+          "se_hac": 0.00020477716972875507,
+          "t_hac": 4.237411554952906,
+          "p_zero": 1.130557222227623e-05,
+          "null_mean": 6.21286498207981e-05,
+          "null_sd": 0.00021031260133971575,
+          "null_p05": -0.0002624969292508935,
+          "null_p95": 0.0004171488577972295,
+          "excess": 0.000805596495378381,
+          "z": 3.8304718321519373,
+          "p_value": 6.394888724255638e-05,
+          "p_null_emp": 0.000999000999000999,
+          "null_percentile": 1.0,
+          "mfe_mean": 0.0057312656008208585,
+          "mfe_median": 0.003440613734665088,
+          "mae_mean": -0.005015088709275245,
+          "mae_median": -0.0028163349844354535,
+          "mfe_q75": 0.007434170126100426,
+          "mae_q25": -0.006106632094296738,
+          "mean_net[coinone_conservative]": 0.00046745810854847194,
+          "hit_net[coinone_conservative]": 0.5079754601226993,
+          "t_net[coinone_conservative]": 2.2827647689811337,
+          "mean_net[upbit_conservative]": -0.0009322164526355068,
+          "hit_net[upbit_conservative]": 0.3803680981595092,
+          "t_net[upbit_conservative]": -4.552345624613855
+        },
+        {
+          "horizon": 240,
+          "n": 1630,
+          "mean": 0.00047309085519709013,
+          "median": 0.0002215020437950077,
+          "std": 0.012133755937659765,
+          "hit_rate": 0.5184049079754601,
+          "se_iid": 0.0003005394262333495,
+          "se_hac": 0.0003005394262333495,
+          "t_hac": 1.574139077612285,
+          "p_zero": 0.057727650026630245,
+          "null_mean": 0.0001561386947392034,
+          "null_sd": 0.0002881720173792105,
+          "null_p05": -0.00032823973062268955,
+          "null_p95": 0.0006193284511742413,
+          "excess": 0.00031695216045788673,
+          "z": 1.0546109188742305,
+          "p_value": 0.14580165397961936,
+          "p_null_emp": 0.13786213786213786,
+          "null_percentile": 0.863,
+          "mfe_mean": 0.008420525453130876,
+          "mfe_median": 0.005248100516316412,
+          "mae_mean": -0.00776189569272352,
+          "mae_median": -0.004594413762914196,
+          "mfe_q75": 0.010630784403231064,
+          "mae_q25": -0.010102375714992257,
+          "mean_net[coinone_conservative]": 7.298164069795568e-05,
+          "hit_net[coinone_conservative]": 0.48895705521472393,
+          "t_net[coinone_conservative]": 0.24283549620305103,
+          "mean_net[upbit_conservative]": -0.0013261410397900958,
+          "hit_net[upbit_conservative]": 0.39754601226993863,
+          "t_net[upbit_conservative]": -4.412536007040996
+        }
+      ],
+      "p_signal": 6.394888724255638e-05,
+      "best_primary_horizon": 120,
+      "info_horizon": 120,
+      "saturation_horizon": 120,
+      "profile": "peaked",
+      "suggestion": {
+        "max_hold_min": 120,
+        "basis_horizon": 120,
+        "tp_pct_q50_mfe": 0.3440613734665088,
+        "sl_pct_q75_absmae": 0.6106632094296738,
+        "atr_window": 14,
+        "atr_pct_median": 0.6598354546822489,
+        "tp_atr": 0.5631489671651073,
+        "sl_atr": 0.8921850099061083,
+        "note": "suggestions from MFE/MAE quantiles (not optimized); fix before the exit campaign"
+      },
+      "strata_events": {
+        "0": 414,
+        "1": 563,
+        "2": 653
+      },
+      "runtime_sec": 0.161,
+      "entry": {
+        "block": "clock_entry_utc",
+        "params": {
+          "hour": 21,
+          "minute": 0
+        }
+      },
+      "filters": [],
+      "label": "clock_entry_utc(hour=21,minute=0)",
+      "family": "session_premium",
+      "decision": {
+        "significant": true,
+        "net_positive": true,
+        "passed": true,
+        "fail_reason": null
+      }
+    }
+  ]
+}

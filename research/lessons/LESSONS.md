@@ -3,7 +3,7 @@
 > `btc_quant.research.lessons.render_markdown()` 생성물. **직접 편집 금지** (원본: `research/lessons/*.jsonl`).
 > 사실(Facts)은 파이프라인 결과에서 자동 추출되어 불변이다. 해석(Interpretations)은 AI 작성이며
 > 후속 캠페인으로 verified/refuted 되기 전까지 **unverified** 이다. Val/잠금은 결과 코드만.
-> 생성: 2026-11-12T03:24:32+00:00 · 사실 34 · 해석 19 · 사후분석 7 · 파생 23
+> 생성: 2026-11-13T08:46:22+00:00 · 사실 35 · 해석 19 · 사후분석 7 · 파생 23
 
 ## 실패 유형 (자동 분류)
 
@@ -28,7 +28,8 @@
 |---|---|---|---|---|
 | `liq_meanrev` | 12 | 68 | passed 4, failed 8 | `NO_SIGNAL`×4, `COST_EATEN`×2, `PARAM_SPIKE`×1, `UNSTABLE`×1 |
 | `managed_hold` | 1 | 4 | failed 1 | `NO_SIGNAL`×1 |
-| `vol_breakout` | 16 | 102 | passed 7, failed 8, validated 1 | `PARAM_SPIKE`×2, `VAL_FAIL`×2, `NO_SIGNAL`×2, `SELECTION_BIAS`×1, `COST_EATEN`×1 |
+| `session_premium` | 1 | 25 | passed 1 |  |
+| `vol_breakout` | 16 | 103 | passed 7, failed 8, validated 1 | `PARAM_SPIKE`×2, `VAL_FAIL`×2, `NO_SIGNAL`×2, `SELECTION_BIAS`×1, `COST_EATEN`×1 |
 | `xasset_btc_lead` | 2 | 4 | passed 1, failed 1 | `SELECTION_BIAS`×1 |
 | `xvenue_upbit_lead` | 3 | 16 | failed 2, passed 1 | `COST_EATEN`×1, `LOW_SAMPLE`×1 |
 
@@ -629,6 +630,17 @@
 
 - [UNVERIFIED] int-000019 (신뢰도 0.7): At 4h decisions, multi-day oversold dips almost never occur while the asset stays above its 15-day EMA (bollinger 2 sd: 150 pooled events, excess -1 bp; RSI<=30: 17 events). Dip-buying inside a trend is not a separate 4h signal on Coinone BTC/XRP/ETH; the trend-following edge is captured by breakouts.
   - 근거: camp-000037; camp-000012; camp-000011
+
+### fact-000035 · signal_screen `camp-000040` · family `session_premium`
+
+**사실 (자동, 불변)**
+
+- 가설 hyp-000039: 코인원 BTC-KRW 에서 매일 21:00 UTC(06:00 KST)에 사서 120분 보유한 수익이, 직전 변동성으로 짝지은 다른 시각의 120분 보유(귀무)보다 높고 coinone_conservative 비용을 뺀 평균이 0 보다 크다.
+- 결과: **passed** · 주 실패 유형: `None` · 분포: –
+- 깔때기(전체 None 스펙): G1 None · SR_w>0 None · G4 None | 상위 None:  · Dev 생존 None
+  - `clock_entry_utc(hour=21,minute=0)` events=1630 p=0.000 best_h=120 → PASS
+- 범위: coinone None 1m · dev 2021-01-01T00:00:00+00:00~2025-11-01T00:00:00+00:00 · 블록 ['clock_entry_utc'] / None · 재검토 기한 2027-05-12
+- 재검토 조건: Dev data period changes; venue/cost model changes; decision interval changes (bar_minutes)
 
 ## 파생 가설 (계열 상속)
 

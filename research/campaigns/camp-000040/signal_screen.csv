@@ -1,0 +1,2 @@
+label,family,entry,filters,n_events,p_signal,best_h,excess_bp,z,net_bp[coinone_conservative],net_bp[upbit_conservative],info_h,profile,significant,passed,fail_reason
+"clock_entry_utc(hour=21,minute=0)",session_premium,clock_entry_utc,-,1630,6.39489e-05,120,8.05596,3.83047,4.67458,-9.32216,120,peaked,True,True,

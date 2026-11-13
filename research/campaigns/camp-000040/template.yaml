@@ -1,0 +1,45 @@
+name: r4e_session_2123utc_1h_screen
+family: session_premium
+data:
+  exchange: coinone
+  symbol: BTC-KRW
+  timeframe: 1m
+  aux: []
+bar_minutes: 60
+signals:
+- entry:
+    block: clock_entry_utc
+    params:
+      hour: 21
+      minute: 0
+  filters:
+  - []
+study:
+  n_null: 1000
+  seed: 0
+  min_events: 300
+  stratify: vol
+  horizons:
+  - 60
+  - 120
+  - 240
+  primary_horizons:
+  - 120
+costs:
+  primary: coinone_conservative
+  grade: upbit_conservative
+correction:
+  method: bh
+  alpha: 0.1
+budget: 1
+hypothesis:
+  text: 코인원 BTC-KRW 에서 매일 21:00 UTC(06:00 KST)에 사서 120분 보유한 수익이, 직전 변동성으로 짝지은 다른 시각의
+    120분 보유(귀무)보다 높고 coinone_conservative 비용을 뺀 평균이 0 보다 크다.
+  rationale: 메커니즘은 주요 주식 시장이 모두 닫힌 시간대에 위험을 드는 데 대한 대가(위험 보유 프리미엄)이다. 반대편은 장 마감에 맞춰
+    위험을 줄이는 참여자로, 이들이 이 시간대 직전에 포지션을 덜어 내며 가격을 눌러 둔다. 이 효과가 남아 있는 이유는 하루 몫이 수 bp 수준이라
+    수수료가 있는 거래소에서는 먹을 수 없기 때문이다. 이 효과를 죽일 수 있는 것은 새벽 시간대의 넓은 스프레드, 2021년 이후의 시간대 이동,
+    효과가 원화 시장으로 옮겨오지 않았을 가능성, 그리고 약세장이다. 근거는 Quantpedia 2023-09-13 및 2024-11-12 글이며,
+    외부 문헌이므로 잠금·Val 노출은 없다. 다만 문헌 결과는 비용을 반영하지 않았고 다른 거래소 자료다. 시각과 보유 기간은 문헌 규칙을 그대로
+    따랐고, 요일·추세·변동성 조건은 두지 않는다. 문헌이 시각을 탐색한 24건을 이 계열의 시도로 계상한다.
+  success_criteria: BH q=0.10(계열 선별 구성 전체), 사건 ≥ 300, 주 지평 120분에서 coinone_conservative
+    순 평균 > 0. 통과한 구성만 캠페인.
