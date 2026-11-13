@@ -1,0 +1,56 @@
+# Autonomous program R4 track F-2 (2026-11-13): vol_cap filter on the existing T1 4h donchian(48) candidate (camp-000034). Hypothesis derived via drv-000024.
+name: r4f_vol_breakout_volcap_4h_u3_screen
+data:
+  exchange: coinone
+  timeframe: 1m
+  aux: []
+bar_minutes: 240
+signals:
+- entry:
+    block: donchian_breakout
+    grid:
+      lookback:
+      - 48
+  filters:
+  - - block: vol_cap
+      grid:
+        window:
+        - 48
+        max_pct:
+        - 0.67
+study:
+  n_null: 1000
+  seed: 0
+  min_events: 300
+  stratify: hour_vol
+costs:
+  primary: coinone_conservative
+  grade: upbit_conservative
+correction:
+  method: bh
+  alpha: 0.1
+budget: 1
+family: vol_breakout
+hypothesis:
+  text: On the fixed Coinone universe [BTC-KRW, XRP-KRW, ETH-KRW] (pooled, per-asset matched
+    null) at 4h decisions, donchian_breakout(48) entries taken only while the 48-bar realised
+    volatility is at or below its trailing 7-day 67th percentile (experimental vol_cap(48,
+    0.67)) are followed by 8-48 h returns above the matched null, net of per-asset coinone_conservative
+    cost.
+  rationale: 'Autonomous program R4 track F-2, derived from fact-000031 (camp-000034). Mechanism:
+    volatility-managed momentum (M3 multi-day) - high-vol breakouts carry risk without proportional
+    return. Counterparty: counter-trend sellers/liquidated shorts at multi-day highs plus
+    forced/panic sellers in high-vol regimes. Kills: < 300 pooled events, filter removing
+    the best breakouts, regime concentration, per-asset spreads. Alternative version of the
+    existing candidate in the same correlation cluster, not a second mechanism. Evidence (Dev
+    only; lockbox none, Val none): F-1 report r4_vol_overlay_20261113 (log_exploration camp-000039)
+    passed its pre-set rule only narrowly; effect very small (mean weight 0.987, Calmar +0.06,
+    same max DD) and a different construction, so weak support. Filter values (48, 0.67) pre-declared
+    in the R4 plan. [derived-from drv-000024 ← fact-000031; family vol_breakout]'
+  success_criteria: 'Per config: BH q=0.10 over the family''s screen configs, pooled n_events
+    >= 300, coinone_conservative net mean > 0 at the best primary horizon. Otherwise track
+    F stops.'
+universe:
+- BTC-KRW
+- XRP-KRW
+- ETH-KRW
