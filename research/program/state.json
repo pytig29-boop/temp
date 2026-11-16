@@ -6,6 +6,10 @@
   "cycle": "R4-closed",
   "queue": [
     {
+      "task": "EVERY resume: re-arm keep-alive (Bash run_in_background, timeout 7200000: `while true; do date -u +%FT%TZ >> runtime/keepalive.log; sleep 60; done`) — container is suspended when idle; keep-alive keeps collector/paper real-time (P4 uptime). Re-arm when it times out (2h) or after a container restart.",
+      "added": "2026-11-16T22:33:51+00:00"
+    },
+    {
       "task": "paper 7-14d r1b_..._0dce65e919 (started 2026-11-12)",
       "added": "2026-11-12T02:03:10+00:00"
     },
@@ -123,7 +127,7 @@
   ],
   "background": [],
   "notes": [],
-  "updated": "2026-11-13T08:51:39+00:00",
+  "updated": "2026-11-16T22:33:51+00:00",
   "maintenance": {
     "open": false,
     "reason": "",
