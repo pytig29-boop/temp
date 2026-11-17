@@ -52,3 +52,4 @@
 {"ts": "2026-11-16T22:33:27+00:00", "kind": "resume", "ops": {"data_present": true, "collector_running": true, "collector_heartbeat_age_s": 4, "collector_watchdog": true, "paper_running": true}}
 {"ts": "2026-11-16T22:33:51+00:00", "kind": "ops", "note": "keepalive works: continuous collection 21:08-22:31 UTC; container restart 22:32 killed it; re-armed"}
 {"ts": "2026-11-16T22:34:08+00:00", "kind": "paper_clock_restart", "candidate": "r1b_vol_breakout_donch_4h_u3_half_0dce65e919_v1", "at": "2026-11-16T22:33:00Z", "reason": "container suspended before; 0 paper trades so far (results-blind)"}
+{"ts": "2026-11-17T00:07:03+00:00", "kind": "resume", "ops": {"data_present": true, "collector_running": true, "collector_heartbeat_age_s": 0, "collector_watchdog": true, "paper_running": true}}
