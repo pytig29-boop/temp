@@ -32,6 +32,10 @@
     {
       "task": "lockbox human-approval path ready (final_human, request filed); user has no local PC now. If user later pushes research/lockbox_approvals/<cid>.yaml -> run `python -m btc_quant.research.final_human run --candidate r1b_vol_breakout_donch_4h_u3_half_0dce65e919_v1 --round 1`. Otherwise use autonomous path after paper PASS (2026-11-19).",
       "added": "2026-11-12T08:42:01+00:00"
+    },
+    {
+      "task": "each resume (now every 2h at :07): TaskStop old keep-alive if running, then start new one (timeout 2h) so windows chain without gaps",
+      "added": "2026-11-17T09:07:51+00:00"
     }
   ],
   "done": [
@@ -127,7 +131,7 @@
   ],
   "background": [],
   "notes": [],
-  "updated": "2026-11-16T22:34:08+00:00",
+  "updated": "2026-11-17T09:07:51+00:00",
   "maintenance": {
     "open": false,
     "reason": "",
