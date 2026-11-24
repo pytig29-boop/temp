@@ -73,8 +73,8 @@ def main(argv=None) -> int:
     band = PV.expectation_band(dev[col] * scale, g["n_days"])
     reports = [build_report(s["dir"], start=CLOCK_START) for s in sl]
     paper_cum = float(np.mean([s["state"]["equity"] / s["state"]["initial_equity"] - 1 for s in sl]))
-    cost_limits = {s["sym"]: (get_sleeve_cost("coinone_conservative", s["sym"], ROOT).side_cost() * 1e4,
-                              get_sleeve_cost("coinone_stress", s["sym"], ROOT).side_cost() * 1e4) for s in sl}
+    cost_limits = {s["sym"]: (get_sleeve_cost("coinone_conservative", s["sym"], ROOT).side_cost * 1e4,
+                              get_sleeve_cost("coinone_stress", s["sym"], ROOT).side_cost * 1e4) for s in sl}
     res = PV.judge(reports, n_days=g["n_days"], uptime=uptime, human_halts=info["human_halts"], band=band,
                    paper_cum=paper_cum, cost_limits=cost_limits,
                    fills_by_asset={s["sym"]: s["fills"] for s in sl}, extended=a.extended,

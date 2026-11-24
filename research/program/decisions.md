@@ -39,3 +39,12 @@
 - `research/program/scripts/paper_verdict_run.py` 추가: paper_verdict.judge 입력(build_report 슬리브별, 실시간 결정 봉 비율=P4 가동, risk.jsonl HUMAN 정지 수, fills.jsonl 실시간 book_cost_bps, 예상 범위=캠페인 Dev 일간 수익×position_scale 부트스트랩 — Val 미사용)을 모아 판정, 결과를 `research/program/paper_verdict_<날짜>.json` 에 저장.
 - `--check` 로 입력 구조만 확인(손익 미출력): n_days 6, 결정 봉 35, 실시간 100%, HUMAN 정지 0, 체결 0.
 - 판정 시각: 2026-11-24 00:07Z 점검(시계 11-17 시작, 완료 UTC 일 7). managed_hold 활동 기준(결정 봉 ≥ 42)이 경계값이므로, 그 시점 봉이 41개라서 EXTEND 가 나오면 다음 4시간 봉 확정 뒤(04:07Z 점검) 한 번 재실행한다 — 결과(손익)를 보기 전에 정한 규칙이며 손익과 무관한 봉 계수 경계 처리.
+
+## 2026-11-24 00:25Z — 페이퍼 판정 1차 실행: EXTEND (봉 41 < 42) → 04:07Z 재실행
+- 입력: 완료 UTC 일 7, 4시간 결정 봉 최소 41(슬리브 BTC/ETH/XRP), 실시간 100%, 사람-해제 정지 0, 체결 0.
+- 판정기 결과: EXTEND, 사유 "activity below minimum after 7 days" — 사전 기록(11-23 00:15Z)대로 봉 수 경계 때문이므로
+  다음 4시간 봉 확정 뒤 04:07Z 점검에서 한 번 재실행한다(14일 연장으로 넘어가지 않음).
+- 실행 중 하네스 버그 2건 수정 (판정 도구 쪽, 페이퍼 운용·전략 로직과 무관 → 시계 재시작 불필요):
+  1. `data/coinone.fetch_candles`: end 가 미래(build_report 가 end + max_hold 만큼 앞을 요청)면 코인원이 빈 페이지를 줘
+     build_report 가 빈 데이터로 실패 → 커서를 현재 시각으로 상한(start 유지).
+  2. `paper_verdict_run.py`: `CostModel.side_cost` 는 속성 — 호출하던 오류 수정.

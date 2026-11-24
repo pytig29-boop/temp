@@ -66,7 +66,9 @@ def fetch_candles(market: str, unit: int, start, end, max_rps: float = 15.0,
     s = session or requests.Session()
     quote, target = _pair(market)
     t0, stop = _utc(start), _utc(end)
-    cursor = int(stop.timestamp() * 1000) - 1
+    # 미래 timestamp 를 주면 코인원이 빈 페이지를 돌려준다 → 커서는 현재 시각을 넘지 않게 (start 는 유지)
+    now_ms = int(pd.Timestamp.now(tz="UTC").timestamp() * 1000)
+    cursor = min(int(stop.timestamp() * 1000), now_ms) - 1
     frames, n = [], 0
     while cursor >= t0.timestamp() * 1000:
         page = parse_chart(_get(s, f"/public/v2/chart/{quote}/{target}",

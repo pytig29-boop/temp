@@ -1,0 +1,33 @@
+{
+  "as_of": "2026-11-24T00:12:38.598133+00:00",
+  "inputs": {
+    "n_days": 7,
+    "sleeves": [
+      "BTC-KRW",
+      "ETH-KRW",
+      "XRP-KRW"
+    ],
+    "n_4h_bars_min": 41,
+    "live_uptime": 1.0,
+    "human_halts": 0,
+    "n_fills": 0
+  },
+  "band": {
+    "q0.01": -0.01930911103803645,
+    "q0.025": -0.014806211027941663,
+    "q0.975": 0.03746113662926642,
+    "q0.995": 0.07756797196013858
+  },
+  "result": {
+    "n_days": 7,
+    "activity": {
+      "fills": 0,
+      "round_trips": 0,
+      "enough": false
+    },
+    "verdict": "EXTEND",
+    "reasons": [
+      "activity below minimum after 7 days"
+    ]
+  }
+}
