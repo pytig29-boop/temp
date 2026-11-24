@@ -149,3 +149,4 @@
 {"ts": "2026-11-24T04:11:43+00:00", "kind": "phase", "frm": "final", "to": "report", "reason": "final round 1: 0 candidates passed; no round 2 before 2026-12-01 deadline"}
 {"ts": "2026-11-24T06:08:21+00:00", "kind": "resume", "ops": {"data_present": true, "collector_running": true, "collector_heartbeat_age_s": 4, "collector_watchdog": true, "paper_running": true}}
 {"ts": "2026-11-24T06:08:22+00:00", "kind": "resume", "ops": {"data_present": true, "collector_running": true, "collector_heartbeat_age_s": 5, "collector_watchdog": true, "paper_running": true}}
+{"ts": "2026-11-24T08:09:37+00:00", "kind": "resume", "ops": {"data_present": true, "collector_running": true, "collector_heartbeat_age_s": 5, "collector_watchdog": true, "paper_running": true}}
