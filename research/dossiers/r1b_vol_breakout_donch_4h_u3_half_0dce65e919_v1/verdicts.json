@@ -3,7 +3,8 @@
  "skeptic": "SURVIVES",
  "notes": {
   "skeptic": "WEAK, medium confidence. Major: power target re-derived 1.40->1.57 after the strict check failed; BTC sleeve repeats camp-000010 BTC 4h screen; XRP+ETH-only Sharpe 1.06 < required 1.49; family came back to 4h knowing 1h Val fails. Reproduction gap 554 vs 560 explained (skeptic script skipped prepare_m1); '+dirty' Val stamp: Val opening carries rs-001, ruleset files clean.",
-  "judge": "All 7 rows: preregistration order; rs-001 lock committed 01:39:46 before Val open 01:59:53 (val-000005 ruleset rs-001); floor history 1; reference-engine Dev rerun 554 trades, Sharpe 1.4973 exact; DSR 0.98962 recomputed (N=51, L=0); official block; Dev-side F2 scale 1.0, F5 Dev Sharpe 1.497 > B&H 1.148, Calmar 1.409 > 0.938."
+  "judge": "All 7 rows: preregistration order; rs-001 lock committed 01:39:46 before Val open 01:59:53 (val-000005 ruleset rs-001); floor history 1; reference-engine Dev rerun 554 trades, Sharpe 1.4973 exact; DSR 0.98962 recomputed (N=51, L=0); official block; Dev-side F2 scale 1.0, F5 Dev Sharpe 1.497 > B&H 1.148, Calmar 1.409 > 0.938.",
+  "paper": "research/program/paper_verdict_20261124.json (04:07Z): 7 complete UTC days from 11-17, 42 4h decision bars/sleeve, live 100%, human halts 0, 0 trades in paper and in same-period reference replay (P2 one_sided 0), P3 paper_cum 0 within Dev band [-1.48%, 3.75%]. Run 1 at 00:25Z was EXTEND on 41<42 bars per pre-registered rule."
  },
  "history": [
   {
@@ -20,7 +21,13 @@
    "ts": "2026-11-12T02:15:46+00:00",
    "kind": "judge",
    "value": "PASS"
+  },
+  {
+   "ts": "2026-11-24T04:10:02+00:00",
+   "kind": "paper",
+   "value": "PASS"
   }
  ],
- "judge": "PASS"
+ "judge": "PASS",
+ "paper": "PASS"
 }
