@@ -1,7 +1,7 @@
 {
   "version": 1,
   "plan": "docs/prompts/autonomous_research_plan.md",
-  "phase": "final",
+  "phase": "report",
   "plan_phase": "4",
   "cycle": "R4-closed",
   "queue": [
@@ -10,20 +10,8 @@
       "added": "2026-11-16T22:33:51+00:00"
     },
     {
-      "task": "paper 7-14d r1b_..._0dce65e919 (started 2026-11-12) — CLOCK RESTARTED 2026-11-16T22:33Z after keepalive fix: day 7 = 2026-11-23, day 14 = 2026-11-30 (deadline 12-01). Uptime/P4 measured from restart.",
-      "added": "2026-11-12T02:03:10+00:00"
-    },
-    {
       "task": "each resume: scripts/persist_runtime.sh then commit research/paper_runs (paper evidence must survive container loss)",
       "added": "2026-11-12T02:16:10+00:00"
-    },
-    {
-      "task": "2026-11-19: paper verdict day 7 for r1b_..._0dce65e919 (paper_verdict.judge with build_report per sleeve; EXTEND to 14d if activity < min) — CLOCK RESTARTED 2026-11-16T22:33Z after keepalive fix: day 7 = 2026-11-23, day 14 = 2026-11-30 (deadline 12-01). Uptime/P4 measured from restart.",
-      "added": "2026-11-12T02:16:10+00:00"
-    },
-    {
-      "task": "after paper PASS (day 7 = 2026-11-19, or EXTEND to 14d = 2026-11-26): phase final -> final_verdict.run(1) -> lockbox auto-authorize (<=5) -> phase report -> final report §10 -> user approval of bundle — ONLY AFTER R4 closes (docs/prompts/opus_r4_plan.md §8; deadline 2026-12-01)",
-      "added": "2026-11-12T03:25:02+00:00"
     },
     {
       "task": "report to user: guard hook floor/autonomy rule change still needs user approval (AUTONOMY.md deviation)",
@@ -36,6 +24,10 @@
     {
       "task": "each resume (now every 2h at :07): TaskStop old keep-alive if running, then start new one (timeout 2h) so windows chain without gaps",
       "added": "2026-11-17T09:07:51+00:00"
+    },
+    {
+      "task": "program closed (phase report, 2026-11-24): final round 1 = 0 final candidates; report research/reports/final/final_report_20261124.md. Keep collector/paper/keep-alive running and persisting until the user decides; no research, criteria changes or openings allowed in phase report.",
+      "added": "2026-11-24T04:13:00+00:00"
     }
   ],
   "done": [
@@ -127,11 +119,26 @@
       "added": "2026-11-13T08:42:09+00:00",
       "done": "2026-11-13T08:51:39+00:00",
       "note": "research/reports/cycleR4_20261113.md"
+    },
+    {
+      "task": "after paper PASS (day 7 = 2026-11-19, or EXTEND to 14d = 2026-11-26): phase final -> final_verdict.run(1) -> lockbox auto-authorize (<=5) -> phase report -> final report §10 -> user approval of bundle — ONLY AFTER R4 closes (docs/prompts/opus_r4_plan.md §8; deadline 2026-12-01)",
+      "added": "2026-11-12T03:25:02+00:00",
+      "done": "2026-11-24T04:12:56+00:00"
+    },
+    {
+      "task": "2026-11-19: paper verdict day 7 for r1b_..._0dce65e919 (paper_verdict.judge with build_report per sleeve; EXTEND to 14d if activity < min) — CLOCK RESTARTED 2026-11-16T22:33Z after keepalive fix: day 7 = 2026-11-23, day 14 = 2026-11-30 (deadline 12-01). Uptime/P4 measured from restart.",
+      "added": "2026-11-12T02:16:10+00:00",
+      "done": "2026-11-24T04:12:57+00:00"
+    },
+    {
+      "task": "paper 7-14d r1b_..._0dce65e919 (started 2026-11-12) — CLOCK RESTARTED 2026-11-16T22:33Z after keepalive fix: day 7 = 2026-11-23, day 14 = 2026-11-30 (deadline 12-01). Uptime/P4 measured from restart.",
+      "added": "2026-11-12T02:03:10+00:00",
+      "done": "2026-11-24T04:12:59+00:00"
     }
   ],
   "background": [],
   "notes": [],
-  "updated": "2026-11-24T04:10:03+00:00",
+  "updated": "2026-11-24T04:13:00+00:00",
   "maintenance": {
     "open": false,
     "reason": "",

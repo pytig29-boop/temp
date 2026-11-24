@@ -1,4 +1,4 @@
-phase: final
+phase: report
 ruleset_lock_required: true
 floor_guard: false
 program_start: '2026-11-12T01:56:19+00:00'

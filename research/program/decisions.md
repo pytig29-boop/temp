@@ -48,3 +48,10 @@
   1. `data/coinone.fetch_candles`: end 가 미래(build_report 가 end + max_hold 만큼 앞을 요청)면 코인원이 빈 페이지를 줘
      build_report 가 빈 데이터로 실패 → 커서를 현재 시각으로 상한(start 유지).
   2. `paper_verdict_run.py`: `CostModel.side_cost` 는 속성 — 호출하던 오류 수정.
+
+## 2026-11-24 04:35Z — 결선 1차: 최종 통과 0 → 2차 결선 안 함, 보고 단계로
+- 04:07Z 페이퍼 판정 PASS(봉 42, 실시간 100%, 정지 0, 페이퍼·재현 모두 거래 0) → dossier paper=PASS 기록 → `program phase final`.
+- `final_verdict run --round 1` (규칙 잠금 rs-003): 후보 1개(r1b_vol_breakout_donch_4h_u3_half_0dce65e919_v1) → final=false. 잠금 개봉 1회 사용(예산 5).
+- 2차 결선은 §5.3-5 에 따라 새 연구 주기 ≥ 1주 + 새 후보의 T1·7일 페이퍼가 필요해 마감(12-01) 안에 불가능하고,
+  R4 에서 새 T1 후보가 없었으므로 열지 않는다(§12 스스로 정하는 규칙: 마감 우선, 기준 낮추지 않음).
+- 다음: `program phase report` → 부록 생성 → 최종 보고(§10) 결론 "권할 전략 없음".

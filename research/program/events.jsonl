@@ -146,3 +146,4 @@
 {"ts": "2026-11-24T04:07:43+00:00", "kind": "resume", "ops": {"data_present": true, "collector_running": true, "collector_heartbeat_age_s": 4, "collector_watchdog": true, "paper_running": true}}
 {"ts": "2026-11-24T04:10:02+00:00", "kind": "verdict", "candidate": "r1b_vol_breakout_donch_4h_u3_half_0dce65e919_v1", "verdict_kind": "paper", "value": "PASS"}
 {"ts": "2026-11-24T04:10:03+00:00", "kind": "phase", "frm": "research", "to": "final", "reason": "R4 closed with no new T1; sole candidate r1b_..._0dce65e919_v1 passed skeptic/judge/paper; plan §5.3 final round"}
+{"ts": "2026-11-24T04:11:43+00:00", "kind": "phase", "frm": "final", "to": "report", "reason": "final round 1: 0 candidates passed; no round 2 before 2026-12-01 deadline"}

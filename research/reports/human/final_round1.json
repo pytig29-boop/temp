@@ -1,0 +1,53 @@
+{
+  "round": 1,
+  "ruleset": "rs-003",
+  "L": 0,
+  "final_rules": {
+    "alpha_base": 0.05,
+    "lockbox_budget": 5,
+    "oos_alpha": 0.1,
+    "max_mdd": 0.2,
+    "max_mc_mdd95": 0.2,
+    "worst_month_min": -0.08,
+    "min_position_scale": 0.25,
+    "require_beat_bh": true
+  },
+  "candidates": [
+    {
+      "candidate_id": "r1b_vol_breakout_donch_4h_u3_half_0dce65e919_v1",
+      "cluster": 1,
+      "flags": {
+        "F1a": true,
+        "p3": 0.013493178336939415,
+        "F1b": false,
+        "F1c": false,
+        "scale": 1.0,
+        "F2": true,
+        "F5": true,
+        "final_f1_f3": false,
+        "final": false
+      },
+      "record": {
+        "logic_hash": "0dce65e919fc1171",
+        "val_sharpe": 0.9059807803221432,
+        "val_p": 0.263368315842079,
+        "dev_max_dd": 0.09162304582070169,
+        "val_mdd": 0.017880068142372196,
+        "dev_worst_month": -0.03464023715165088,
+        "val_worst_month": -0.015569794166791606,
+        "lb_sharpe": 1.733348285775432,
+        "lb_p": 0.18690654672663667,
+        "oos_p": 0.15092453773113443,
+        "lb_mdd": 0.01606404408125095,
+        "lb_worst_month": -0.01238904217811898,
+        "full_mc_mdd95": 0.11476115712564067,
+        "full_sharpe": 1.463045050268992,
+        "full_calmar": 1.2909550720065919,
+        "full_bh_sharpe": 0.8256601672356694,
+        "full_bh_calmar": 0.5103077814156234
+      },
+      "profile": "default",
+      "dev_conservative_sharpe": 0.28554964093134927
+    }
+  ]
+}
