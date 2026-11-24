@@ -1,5 +1,5 @@
 {
-  "as_of": "2026-11-24T00:12:38.598133+00:00",
+  "as_of": "2026-11-24T04:07:46.455777+00:00",
   "inputs": {
     "n_days": 7,
     "sleeves": [
@@ -7,7 +7,7 @@
       "ETH-KRW",
       "XRP-KRW"
     ],
-    "n_4h_bars_min": 41,
+    "n_4h_bars_min": 42,
     "live_uptime": 1.0,
     "human_halts": 0,
     "n_fills": 0
@@ -23,11 +23,29 @@
     "activity": {
       "fills": 0,
       "round_trips": 0,
-      "enough": false
+      "enough": true
     },
-    "verdict": "EXTEND",
-    "reasons": [
-      "activity below minimum after 7 days"
-    ]
+    "P1": {},
+    "P2": {
+      "entry_match": 0.0,
+      "exit_match": 1.0,
+      "one_sided": 0
+    },
+    "P3": {
+      "paper_vs_replay": 0.0,
+      "tol": 0.003,
+      "paper_cum": 0.0,
+      "band": [
+        -0.014806211027941663,
+        0.03746113662926642
+      ],
+      "above_band_check": false
+    },
+    "P4": {
+      "uptime": 1.0,
+      "human_halts": 0
+    },
+    "verdict": "PASS",
+    "reasons": []
   }
 }
