@@ -16,7 +16,7 @@
  "equity": 100000.0,
  "qty": 0.0,
  "position_scale": 1.0,
- "last_ts": "2026-11-25T08:07:00+00:00",
+ "last_ts": "2026-11-25T10:07:00+00:00",
  "start": "2026-11-12T02:02:00+00:00",
  "position": null,
  "cooldown_until": null,
@@ -33,5 +33,5 @@
  "n_decisions": 80,
  "timeframe": "4h",
  "lookback_bars": 50,
- "saved_at": 1795594082.3789158
+ "saved_at": 1795601282.3709388
 }
